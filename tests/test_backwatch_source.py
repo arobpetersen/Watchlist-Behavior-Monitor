@@ -58,6 +58,17 @@ def test_normalize_maps_symbol_column_and_missing_optional_fields(tmp_path: Path
     assert df[['rating', 'setup', 'focus', 'key_level']].fillna('').eq('').all().all()
 
 
+def test_normalize_maps_tc2000_symbols_header(tmp_path: Path):
+    source = tmp_path / '2026-04-30_backwatch.xlsx'
+    pd.DataFrame({'Symbols from TC2000': [' atom ', 'usar', 'LWLG']}).to_excel(source, index=False)
+
+    df = normalize_backwatch_file(source)
+
+    assert df.columns.tolist() == ['ticker', 'rating', 'setup', 'focus', 'key_level']
+    assert df['ticker'].tolist() == ['ATOM', 'USAR', 'LWLG']
+    assert df[['rating', 'setup', 'focus', 'key_level']].fillna('').eq('').all().all()
+
+
 def test_normalize_uses_first_column_when_symbol_like(tmp_path: Path):
     source = tmp_path / '2026-04-30_backwatch.csv'
     source.write_text('Name,setup\nNVDA,breakout\nTSLA,base\n')

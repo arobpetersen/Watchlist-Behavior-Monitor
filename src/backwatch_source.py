@@ -10,7 +10,15 @@ import pandas as pd
 
 SUPPORTED_EXTENSIONS = {'.csv', '.xlsx', '.xls'}
 CANONICAL_COLUMNS = ['ticker', 'rating', 'setup', 'focus', 'key_level']
-TICKER_COLUMNS = {'ticker', 'symbol'}
+TICKER_COLUMNS = {
+    'ticker',
+    'symbol',
+    'symbols',
+    'symbols from tc2000',
+    'symbol from tc2000',
+    'tc2000 symbol',
+    'tc2000 symbols',
+}
 
 
 @dataclass(frozen=True)

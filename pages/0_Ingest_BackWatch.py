@@ -13,6 +13,7 @@ from src.backwatch_source import (
 )
 from src.config import get_settings
 from src.database import get_connection
+from src.run_daily import SUMMARY_KEYS, run_daily_pipeline
 from src.watchlist_ingestion import ingest_watchlists
 
 
@@ -54,10 +55,19 @@ else:
             preview = None
             st.error(f'Could not parse selected file: {exc}')
 
-        if preview is not None and st.button('Ingest Selected Back-Watch File'):
+        def ingest_selected_file():
             output_path, normalized = save_canonical_watchlist(selected.path, final_date, settings.watchlists_dir)
             con = get_connection(str(settings.db_path))
             result = ingest_watchlists(con, settings.watchlists_dir)
+            return output_path, normalized, result
+
+        if preview is not None and preview.empty:
+            st.warning('No valid tickers detected. Ingestion and metrics run are disabled for this file.')
+
+        can_ingest = preview is not None and not preview.empty
+
+        if can_ingest and st.button('Ingest Selected Back-Watch File'):
+            output_path, normalized, result = ingest_selected_file()
             st.success(f'Saved canonical file: {output_path.name}')
             st.write(f'Normalized rows: {len(normalized)}')
             st.write(f"Candidates inserted: {result['candidates_inserted']}")
@@ -65,4 +75,25 @@ else:
                 st.warning('Some files reported ingestion warnings.')
                 st.write(result['failures'])
 
-        st.info('Run Daily Pipeline: `python -m src.run_daily`')
+        if can_ingest and st.button('Ingest Selected File & Run Metrics'):
+            with st.spinner('Ingesting Back-Watch file...'):
+                output_path, normalized, ingest_result = ingest_selected_file()
+            st.success(f'Saved canonical file: {output_path.name}')
+            st.write(f'Normalized rows: {len(normalized)}')
+            st.write(f"Candidates inserted from ingest step: {ingest_result['candidates_inserted']}")
+            if ingest_result['failures']:
+                st.warning('Some files reported ingestion warnings.')
+                st.write(ingest_result['failures'])
+            if not settings.massive_api_key:
+                st.warning('API key missing')
+            else:
+                with st.spinner('Running metrics...'):
+                    summary = run_daily_pipeline()
+                st.success('Metrics run complete.')
+                st.dataframe(
+                    [{'metric': key, 'value': len(summary[key]) if key == 'failures' else summary[key]} for key in SUMMARY_KEYS],
+                    use_container_width=True,
+                )
+                if summary['failures']:
+                    st.warning('Failures')
+                    st.write(summary['failures'])

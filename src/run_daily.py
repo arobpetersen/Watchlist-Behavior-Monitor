@@ -12,10 +12,22 @@ from src.massive_client import MassiveClient
 from src.watchlist_ingestion import ingest_watchlists
 
 
-def main():
+SUMMARY_KEYS = [
+    'files_scanned',
+    'candidates_inserted',
+    'bars_fetched',
+    'daily_bars_fetched',
+    'daily_bars_skipped_existing',
+    'features_calculated',
+    'forward_stats_calculated',
+    'labels_assigned',
+    'failures',
+]
+
+
+def run_daily_pipeline() -> dict:
     s = get_settings()
     con = get_connection(str(s.db_path))
-    print(f'DB path: {s.db_path.resolve()}')
     ingest = ingest_watchlists(con, s.watchlists_dir)
     cands = con.execute('select candidate_id,watchlist_date,ticker from watchlist_candidates where watchlist_date is not null').df()
     bars, features, labels, failures = 0, 0, 0, list(ingest['failures'])
@@ -88,18 +100,38 @@ def main():
     for d in cands['watchlist_date'].dropna().astype(str).unique().tolist():
         labels += assign_labels_for_date(con, d)
 
+    return {
+        'db_path': str(s.db_path.resolve()),
+        'files_scanned': ingest['files_scanned'],
+        'candidates_inserted': ingest['candidates_inserted'],
+        'bars_fetched': bars,
+        'daily_bars_fetched': daily_bars_fetched,
+        'daily_bars_skipped_existing': daily_bars_skipped_existing,
+        'features_calculated': features,
+        'forward_stats_calculated': forward_stats_calculated,
+        'labels_assigned': labels,
+        'failures': failures,
+    }
+
+
+def print_summary(summary: dict) -> None:
+    print(f"DB path: {summary['db_path']}")
     print('Run Summary')
-    print(f"- files scanned: {ingest['files_scanned']}")
-    print(f"- candidates inserted: {ingest['candidates_inserted']}")
-    print(f'- bars fetched: {bars}')
-    print(f'- daily_bars_fetched: {daily_bars_fetched}')
-    print(f'- daily_bars_skipped_existing: {daily_bars_skipped_existing}')
-    print(f'- features calculated: {features}')
-    print(f'- forward_stats_calculated: {forward_stats_calculated}')
-    print(f'- labels assigned: {labels}')
-    print(f'- failures: {len(failures)}')
-    for f in failures:
+    print(f"- files scanned: {summary['files_scanned']}")
+    print(f"- candidates inserted: {summary['candidates_inserted']}")
+    print(f"- bars fetched: {summary['bars_fetched']}")
+    print(f"- daily_bars_fetched: {summary['daily_bars_fetched']}")
+    print(f"- daily_bars_skipped_existing: {summary['daily_bars_skipped_existing']}")
+    print(f"- features calculated: {summary['features_calculated']}")
+    print(f"- forward_stats_calculated: {summary['forward_stats_calculated']}")
+    print(f"- labels assigned: {summary['labels_assigned']}")
+    print(f"- failures: {len(summary['failures'])}")
+    for f in summary['failures']:
         print(f'  * {f}')
+
+
+def main():
+    print_summary(run_daily_pipeline())
 
 
 if __name__ == '__main__':

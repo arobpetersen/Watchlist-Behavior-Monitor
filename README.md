@@ -28,6 +28,17 @@ YYYY-MM-DD_backwatch.xlsx
 
 Accepted date patterns include `YYYY-MM-DD`, `YYYY_MM_DD`, `YYYYMMDD`, `MM-DD-YYYY`, and `M-D-YY`. If no date is found, the app asks for a manual setup date instead of assuming today.
 
+TC2000 one-column exports with the header `Symbols from TC2000` are supported.
+
+Daily workflow:
+1. Export the TC2000 Back-Watch file into the configured folder.
+2. Use filename format `YYYY-MM-DD_backwatch.xlsx`.
+3. Open Streamlit.
+4. Go to Ingest Back-Watch File.
+5. Select the file.
+6. Click Ingest Selected File & Run Metrics.
+7. Review Daily Snapshot and Rolling Behavior.
+
 ## Commands
 - Run pipeline: `python -m src.run_daily`
 - Inspect DB counts: `python -m src.db_inspect`
