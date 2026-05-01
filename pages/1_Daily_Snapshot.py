@@ -5,12 +5,16 @@ from src.dashboard_queries import dates, group_summaries, snapshot_metrics, snap
 from src.database import get_connection
 
 
+def _missing(value):
+    return value is None or value != value
+
+
 def _fmt_pct(value):
-    return 'N/A' if value is None else f'{value * 100:.0f}%'
+    return '—' if _missing(value) else f'{value * 100:.0f}%'
 
 
 def _fmt_num(value):
-    return 'N/A' if value is None else f'{value:.2f}'
+    return '—' if _missing(value) else f'{value:.2f}'
 
 
 con = get_connection(str(get_settings().db_path))
@@ -25,23 +29,23 @@ else:
         [
             ('Setup Candidates', f"{int(m.get('setup_candidate_count') or 0)}"),
             ('Median Rating', _fmt_num(m.get('median_rating'))),
-            ('% Closed Above VWAP', _fmt_pct(m.get('pct_closed_above_vwap'))),
-            ('% Closed Near HOD', _fmt_pct(m.get('pct_closed_near_hod'))),
+            ('Closed Above VWAP %', _fmt_pct(m.get('pct_closed_above_vwap'))),
+            ('Closed Near HOD %', _fmt_pct(m.get('pct_closed_near_hod'))),
         ],
         [
-            ('% Broke 1m ORH', _fmt_pct(m.get('pct_broke_1m_orh'))),
-            ('% 1m ORH Fakeout', _fmt_pct(m.get('pct_1m_orh_fakeout'))),
-            ('% Broke 5m ORH', _fmt_pct(m.get('pct_broke_5m_orh'))),
-            ('% 5m ORH Fakeout', _fmt_pct(m.get('pct_5m_orh_fakeout'))),
+            ('Broke 1m ORH %', _fmt_pct(m.get('pct_broke_1m_orh'))),
+            ('1m ORH Fakeout %', _fmt_pct(m.get('pct_1m_orh_fakeout'))),
+            ('Broke 5m ORH %', _fmt_pct(m.get('pct_broke_5m_orh'))),
+            ('5m ORH Fakeout %', _fmt_pct(m.get('pct_5m_orh_fakeout'))),
         ],
         [
-            ('Median Close Location', _fmt_num(m.get('median_close_location'))),
-            ('Median Range / ATR20', _fmt_num(m.get('median_range_vs_atr20'))),
-            ('Median Relative Volume', _fmt_num(m.get('median_relative_volume'))),
-            ('% Broke Setup-Day High Within 3D', _fmt_pct(m.get('pct_broke_setup_day_high_within_3d'))),
+            ('Median Close Loc.', _fmt_num(m.get('median_close_location'))),
+            ('Median Range / ATR', _fmt_num(m.get('median_range_vs_atr20'))),
+            ('Median RVOL', _fmt_num(m.get('median_relative_volume'))),
+            ('High Broke 3D %', _fmt_pct(m.get('pct_broke_setup_day_high_within_3d'))),
         ],
         [
-            ('% Broke Setup-Day Low Within 3D', _fmt_pct(m.get('pct_broke_setup_day_low_within_3d'))),
+            ('Low Broke 3D %', _fmt_pct(m.get('pct_broke_setup_day_low_within_3d'))),
         ],
     ]
     for metric_row in metric_rows:

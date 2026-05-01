@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.dashboard_queries import _or_result, _rating_bucket, _vwap_result
+from src.dashboard_queries import _clean_display_value, _close_bucket, _or_result, _rating_bucket, _vwap_result
 
 
 @pytest.mark.parametrize(
@@ -42,3 +42,25 @@ def test_vwap_result_formatting(value, expected):
 )
 def test_rating_bucket_formatting(value, expected):
     assert _rating_bucket(value) == expected
+
+
+@pytest.mark.parametrize(
+    ('value', 'expected'),
+    [
+        (0.90, 'Top 20%'),
+        (0.70, 'Upper Half'),
+        (0.50, 'Middle'),
+        (0.30, 'Lower Half'),
+        (0.10, 'Bottom 20%'),
+        (None, ''),
+    ],
+)
+def test_close_bucket_formatting(value, expected):
+    assert _close_bucket(value) == expected
+
+
+def test_clean_display_value_hides_missing_values():
+    assert _clean_display_value(None) == ''
+    assert _clean_display_value(float('nan')) == ''
+    assert _clean_display_value('nan') == ''
+    assert _clean_display_value('setup') == 'setup'
