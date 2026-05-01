@@ -1,0 +1,4 @@
+ticker,rating,setup,focus,key_level
+AAPL,5,OR Break,1m ORH Break,190
+MSFT,4,VWAP,,
+NVDA,,Momentum,VWAP Reclaim,
