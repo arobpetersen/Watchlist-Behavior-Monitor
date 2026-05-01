@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import json
 
-from src.rolling_setup_monitor import current_status, derive_trigger_reference
+import pandas as pd
+
+from src.rolling_setup_monitor import (
+    display_status,
+    display_trigger,
+    current_status,
+    derive_trigger_reference,
+    sort_monitor_rows,
+)
 
 
 def _or(**kwargs):
@@ -74,3 +82,26 @@ def test_current_status_still_working():
 
 def test_current_status_pulled_back_but_holding():
     assert current_status(False, False, 9.8, 12.0, 10.0, 'Clean 1m ORH') == 'Pulled Back but Holding'
+
+
+def test_display_prefixes():
+    assert display_trigger('Clean 1m ORH').startswith('[Clean]')
+    assert display_trigger('Clean 5m ORH').startswith('[Clean]')
+    assert display_trigger('Alternate Means Required').startswith('[Alt]')
+    assert display_trigger('No Clean OR Trigger').startswith('[None]')
+    assert display_status('Trending Higher').startswith('[Up]')
+    assert display_status('Failed Setup-Day Low').startswith('[Fail]')
+
+
+def test_sort_monitor_rows_status_then_current_setup_return():
+    df = pd.DataFrame([
+        {'Ticker': 'FAIL', 'Status': 'Failed Setup-Day Low', 'Current % from Setup Close': 0.50},
+        {'Ticker': 'PULL', 'Status': 'Pulled Back but Holding', 'Current % from Setup Close': 0.30},
+        {'Ticker': 'TREND2', 'Status': 'Trending Higher', 'Current % from Setup Close': 0.10},
+        {'Ticker': 'TREND1', 'Status': 'Trending Higher', 'Current % from Setup Close': 0.20},
+        {'Ticker': 'WORK', 'Status': 'Still Working', 'Current % from Setup Close': 0.40},
+    ])
+
+    out = sort_monitor_rows(df)
+
+    assert out['Ticker'].tolist() == ['TREND1', 'TREND2', 'WORK', 'PULL', 'FAIL']

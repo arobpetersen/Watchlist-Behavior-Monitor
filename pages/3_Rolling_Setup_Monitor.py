@@ -14,8 +14,10 @@ sections = rolling_setup_monitor(con, setup_dates=5)
 if not sections:
     st.info('No setup candidates yet.')
 else:
-    for section in sections:
-        st.subheader(f"Setup Date: {section['setup_date']}")
-        summary = pd.DataFrame([section['summary']])
-        st.dataframe(summary, width='stretch', hide_index=True)
-        st.dataframe(section['table'], width='stretch', hide_index=True)
+    expand_all = st.checkbox('Show all setup dates expanded', value=False)
+    for index, section in enumerate(sections):
+        expanded = expand_all or index == 0
+        with st.expander(f"Setup Date: {section['setup_date']}", expanded=expanded):
+            summary = pd.DataFrame([section['summary']])
+            st.dataframe(summary, width='stretch', hide_index=True)
+            st.dataframe(section['table'], width='stretch', hide_index=True)

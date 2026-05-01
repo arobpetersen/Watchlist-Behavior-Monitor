@@ -5,7 +5,55 @@ from typing import Any
 
 import pandas as pd
 
-from src.dashboard_queries import _clean_display_df, _close_bucket, _format_num, _or_result
+from src.dashboard_queries import _clean_display_df, _close_bucket, _or_result
+
+
+TRIGGER_PREFIXES = {
+    'Clean 1m ORH': '[Clean] Clean 1m ORH',
+    'Clean 5m ORH': '[Clean] Clean 5m ORH',
+    'Alternate Means Required': '[Alt] Alternate Means Required',
+    'No Clean OR Trigger': '[None] No Clean OR Trigger',
+}
+
+STATUS_PREFIXES = {
+    'Trending Higher': '[Up] Trending Higher',
+    'Still Working': '[Work] Still Working',
+    'Pulled Back but Holding': '[Pullback] Pulled Back but Holding',
+    'Failed Setup-Day Low': '[Fail] Failed Setup-Day Low',
+    'No Clean OR Trigger': '[None] No Clean OR Trigger',
+    'Unresolved': '[Open] Unresolved',
+}
+
+STATUS_PRIORITY = {
+    'Trending Higher': 0,
+    'Still Working': 1,
+    'Pulled Back but Holding': 2,
+    'Unresolved': 3,
+    'No Clean OR Trigger': 4,
+    'Failed Setup-Day Low': 5,
+}
+
+MONITOR_COLUMNS = [
+    'Ticker',
+    'OR Trigger',
+    'Current Status',
+    'Current vs Ref',
+    'Current vs Setup Close',
+    'Max Gain',
+    'Setup Low Broke',
+    'Setup High Broke',
+    'Close Bucket',
+    '1m OR',
+    '5m OR',
+    'RVOL',
+    'Range / ATR',
+    'Ref Price',
+    'Reference',
+    'Latest Close',
+    'Rating',
+    'Setup',
+    'Focus',
+]
 
 
 def _loads(value: Any) -> dict:
@@ -88,6 +136,24 @@ def current_status(
     return 'Unresolved'
 
 
+def display_trigger(value: str) -> str:
+    return TRIGGER_PREFIXES.get(value, value)
+
+
+def display_status(value: str) -> str:
+    return STATUS_PREFIXES.get(value, value)
+
+
+def sort_monitor_rows(df: pd.DataFrame) -> pd.DataFrame:
+    table = df.copy()
+    table['_status_priority'] = table['Status'].map(STATUS_PRIORITY).fillna(99)
+    table['_current_setup_sort'] = table['Current % from Setup Close'].fillna(float('-inf'))
+    return table.sort_values(
+        ['_status_priority', '_current_setup_sort', 'Ticker'],
+        ascending=[True, False, True],
+    ).drop(columns=['_status_priority', '_current_setup_sort'])
+
+
 def _follow_through(row: dict, daily_bars: pd.DataFrame) -> dict:
     setup_date = pd.to_datetime(row['watchlist_date']).date()
     ticker_bars = daily_bars[daily_bars['ticker'] == row['ticker']].copy()
@@ -156,11 +222,23 @@ def _fmt_price(value) -> str:
 
 
 def _format_monitor_table(df: pd.DataFrame) -> pd.DataFrame:
-    table = df.copy()
-    for column in ['Ref. Price', 'Latest Close', 'RVOL', 'Range / ATR']:
+    table = sort_monitor_rows(df)
+    table['OR Trigger'] = table['Trigger Type'].apply(display_trigger)
+    table['Current Status'] = table['Status'].apply(display_status)
+    table = table.rename(columns={
+        'Current % from Ref.': 'Current vs Ref',
+        'Current % from Setup Close': 'Current vs Setup Close',
+        'Max Gain from Setup Close': 'Max Gain',
+        'Setup Low Broken': 'Setup Low Broke',
+        'Setup High Broken': 'Setup High Broke',
+        'Ref. Price': 'Ref Price',
+        'Ref. Basis': 'Reference',
+    })
+    table = table[MONITOR_COLUMNS]
+    for column in ['Ref Price', 'Latest Close', 'RVOL', 'Range / ATR']:
         if column in table.columns:
             table[column] = table[column].apply(_fmt_price)
-    for column in ['Current % from Ref.', 'Current % from Setup Close', 'Max Gain from Setup Close']:
+    for column in ['Current vs Ref', 'Current vs Setup Close', 'Max Gain']:
         if column in table.columns:
             table[column] = table[column].apply(_fmt_pct)
     return _clean_display_df(table)
