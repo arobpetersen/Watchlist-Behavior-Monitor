@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
+from src.daily_context import calculate_daily_context
+
 
 def session_filter(df: pd.DataFrame) -> pd.DataFrame:
     t = df['timestamp_et'].dt.time
@@ -50,6 +52,8 @@ def compute_features(con, candidate: dict) -> bool:
         return False
     df['vwap'] = calc_vwap(df)
     high, low, close = float(df['high'].max()), float(df['low'].min()), float(df.iloc[-1]['close'])
+    daily_df = con.execute('select * from daily_bars where ticker=? order by trading_date', [candidate['ticker']]).df()
+    daily_context = calculate_daily_context(daily_df, candidate['ticker'], str(candidate['watchlist_date']))
     rec = {
         'candidate_id':candidate['candidate_id'],'watchlist_date':str(candidate['watchlist_date']),'ticker':candidate['ticker'],
         'open_price':float(df.iloc[0]['open']),'high_price':high,'low_price':low,'close_price':close,
@@ -59,6 +63,7 @@ def compute_features(con, candidate: dict) -> bool:
         'lost_vwap':False,'reclaimed_vwap':False,'vwap_reclaim_then_new_hod':False,
         'or_1m':json.dumps(opening_range(df,1)),'or_5m':json.dumps(opening_range(df,5)),'or_15m':json.dumps(opening_range(df,15)),'calculated_at':datetime.utcnow()
     }
+    rec.update(daily_context)
     cols=list(rec.keys())
     con.execute('delete from entry_day_features where candidate_id=?',[candidate['candidate_id']])
     con.execute(f"insert into entry_day_features ({','.join(cols)}) values ({','.join(['?']*len(cols))})", list(rec.values()))

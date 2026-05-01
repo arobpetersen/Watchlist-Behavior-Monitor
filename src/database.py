@@ -35,6 +35,18 @@ create table if not exists intraday_bars_1m (
   source text,
   fetched_at timestamp
 );
+create table if not exists daily_bars (
+  ticker text,
+  trading_date date,
+  open double,
+  high double,
+  low double,
+  close double,
+  volume bigint,
+  vwap double,
+  source text,
+  fetched_at timestamp
+);
 create table if not exists entry_day_features (
   candidate_id bigint,
   watchlist_date date,
@@ -55,6 +67,20 @@ create table if not exists entry_day_features (
   lost_vwap boolean,
   reclaimed_vwap boolean,
   vwap_reclaim_then_new_hod boolean,
+  prior_close double,
+  gap_pct double,
+  atr20 double,
+  day_range_pct double,
+  range_vs_atr20 double,
+  avg_volume_20d double,
+  relative_volume_20d double,
+  broke_entry_day_high_D1 boolean,
+  broke_entry_day_low_D1 boolean,
+  closed_higher_D1 boolean,
+  broke_entry_day_high_within_3d boolean,
+  broke_entry_day_low_within_3d boolean,
+  max_gain_3d_pct double,
+  max_drawdown_3d_pct double,
   or_1m json,
   or_5m json,
   or_15m json,
@@ -74,4 +100,21 @@ create table if not exists behavior_labels (
 def get_connection(db_path: str):
     con = duckdb.connect(db_path)
     con.execute(SCHEMA_SQL)
+    for column, column_type in [
+        ('prior_close', 'double'),
+        ('gap_pct', 'double'),
+        ('atr20', 'double'),
+        ('day_range_pct', 'double'),
+        ('range_vs_atr20', 'double'),
+        ('avg_volume_20d', 'double'),
+        ('relative_volume_20d', 'double'),
+        ('broke_entry_day_high_D1', 'boolean'),
+        ('broke_entry_day_low_D1', 'boolean'),
+        ('closed_higher_D1', 'boolean'),
+        ('broke_entry_day_high_within_3d', 'boolean'),
+        ('broke_entry_day_low_within_3d', 'boolean'),
+        ('max_gain_3d_pct', 'double'),
+        ('max_drawdown_3d_pct', 'double'),
+    ]:
+        con.execute(f'alter table entry_day_features add column if not exists {column} {column_type}')
     return con
