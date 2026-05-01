@@ -1,0 +1,20 @@
+import pandas as pd
+import streamlit as st
+
+from src.config import get_settings
+from src.database import get_connection
+from src.rolling_setup_monitor import rolling_setup_monitor
+
+
+con = get_connection(str(get_settings().db_path))
+st.title('Rolling Setup Monitor')
+
+sections = rolling_setup_monitor(con, setup_dates=5)
+if not sections:
+    st.info('No setup candidates yet.')
+else:
+    for section in sections:
+        st.subheader(f"Setup Date: {section['setup_date']}")
+        summary = pd.DataFrame([section['summary']])
+        st.dataframe(summary, use_container_width=True, hide_index=True)
+        st.dataframe(section['table'], use_container_width=True, hide_index=True)

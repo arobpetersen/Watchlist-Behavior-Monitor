@@ -44,6 +44,15 @@ Daily workflow:
 4. Click Process All New Back-Watch Files.
 5. Review Daily Snapshot, Rolling Behavior, and Ticker Detail.
 
+## Rolling Setup Monitor
+The Rolling Setup Monitor page shows ticker-level monitoring for the last 5 setup dates. It uses a simple objective trigger reference ladder:
+
+```text
+Clean 1m ORH -> Clean 5m ORH -> Alternate Means Required using 15m ORH reference -> No Clean OR Trigger
+```
+
+It tracks current follow-through from the trigger reference when one exists, and from the setup-day close for all names. This page is for setup behavior monitoring only; it is not a trade journal or backtest.
+
 ## Commands
 - Run pipeline: `python -m src.run_daily`
 - Inspect DB counts: `python -m src.db_inspect`
