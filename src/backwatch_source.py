@@ -29,6 +29,17 @@ class SourceFile:
     size: int
 
 
+@dataclass(frozen=True)
+class SourceFileStatus:
+    source_file: str
+    path: Path
+    inferred_setup_date: str | None
+    ticker_count: int | None
+    status: str
+    message: str
+    canonical_file: str | None = None
+
+
 def resolve_source_dir(path: Path, project_root: Path | None = None) -> Path:
     if path.is_absolute():
         return path
@@ -125,3 +136,72 @@ def save_canonical_watchlist(source_path: Path, setup_date: str, watchlists_dir:
     output_path = watchlists_dir / canonical_filename(setup_date, source_path.stem)
     normalized.to_csv(output_path, index=False)
     return output_path, normalized
+
+
+def _canonical_path(source_path: Path, setup_date: str, watchlists_dir: Path) -> Path:
+    return watchlists_dir / canonical_filename(setup_date, source_path.stem)
+
+
+def _already_loaded(con, setup_date: str, canonical_name: str, tickers: list[str]) -> bool:
+    audited = con.execute(
+        'select count(*) from watchlist_files where source_file=?',
+        [canonical_name],
+    ).fetchone()[0]
+    if audited:
+        return True
+    if not tickers:
+        return False
+    count = con.execute(
+        f"""
+        select count(distinct ticker)
+        from watchlist_candidates
+        where watchlist_date=? and ticker in ({','.join(['?'] * len(tickers))})
+        """,
+        [setup_date, *tickers],
+    ).fetchone()[0]
+    return int(count) == len(set(tickers))
+
+
+def scan_source_files(source_dir: Path, watchlists_dir: Path, con=None) -> list[SourceFileStatus]:
+    statuses = []
+    for source in list_source_files(source_dir):
+        setup_date = infer_setup_date(source.name)
+        if not setup_date:
+            statuses.append(SourceFileStatus(source.name, source.path, None, None, 'Missing Date', 'No setup date found in filename.'))
+            continue
+        try:
+            normalized = normalize_backwatch_file(source.path)
+        except Exception as exc:
+            statuses.append(SourceFileStatus(source.name, source.path, setup_date, None, 'Error', str(exc)))
+            continue
+        ticker_count = len(normalized)
+        canonical = _canonical_path(source.path, setup_date, watchlists_dir)
+        if ticker_count == 0:
+            statuses.append(SourceFileStatus(source.name, source.path, setup_date, 0, 'No Valid Tickers', 'No symbol-like tickers detected.', canonical.name))
+            continue
+        tickers = normalized['ticker'].astype(str).tolist()
+        if canonical.exists() or (con is not None and _already_loaded(con, setup_date, canonical.name, tickers)):
+            statuses.append(SourceFileStatus(source.name, source.path, setup_date, ticker_count, 'Already Processed', 'Canonical file or candidate rows already exist.', canonical.name))
+            continue
+        statuses.append(SourceFileStatus(source.name, source.path, setup_date, ticker_count, 'New', 'Ready to process.', canonical.name))
+    return sorted(
+        statuses,
+        key=lambda r: (r.inferred_setup_date or '9999-99-99', r.source_file),
+    )
+
+
+def process_new_source_files(source_dir: Path, watchlists_dir: Path, con) -> tuple[list[SourceFileStatus], list[Path]]:
+    scanned = scan_source_files(source_dir, watchlists_dir, con)
+    saved_paths = []
+    updated = []
+    for row in scanned:
+        if row.status != 'New' or row.inferred_setup_date is None:
+            updated.append(row)
+            continue
+        try:
+            output_path, normalized = save_canonical_watchlist(row.path, row.inferred_setup_date, watchlists_dir)
+            saved_paths.append(output_path)
+            updated.append(SourceFileStatus(row.source_file, row.path, row.inferred_setup_date, len(normalized), 'Processed', f'Saved {output_path.name}.', output_path.name))
+        except Exception as exc:
+            updated.append(SourceFileStatus(row.source_file, row.path, row.inferred_setup_date, row.ticker_count, 'Error', str(exc), row.canonical_file))
+    return updated, saved_paths

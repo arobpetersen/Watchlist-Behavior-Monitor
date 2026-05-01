@@ -10,9 +10,12 @@ from src.backwatch_source import (
     infer_setup_date,
     list_source_files,
     normalize_backwatch_file,
+    process_new_source_files,
     resolve_source_dir,
     save_canonical_watchlist,
+    scan_source_files,
 )
+from src.database import get_connection
 
 
 @pytest.mark.parametrize(
@@ -99,3 +102,45 @@ def test_save_canonical_watchlist(tmp_path: Path):
     assert output_path.name == canonical_filename('2026-04-30', 'TC2000_2026-04-30')
     assert output_path.read_text().startswith('ticker,rating,setup,focus,key_level')
     assert df['ticker'].tolist() == ['AAPL']
+
+
+def test_scan_source_files_mixed_statuses(tmp_path: Path):
+    source_dir = tmp_path / 'tc2000'
+    watchlists_dir = tmp_path / 'watchlists'
+    source_dir.mkdir()
+    watchlists_dir.mkdir()
+    (source_dir / '2026-04-30_backwatch.csv').write_text('Symbols from TC2000\nAAPL\nMSFT\n')
+    (source_dir / '2026-05-01_backwatch.csv').write_text('ticker\nNVDA\n')
+    (watchlists_dir / canonical_filename('2026-05-01', '2026-05-01_backwatch')).write_text('ticker,rating,setup,focus,key_level\nNVDA,,,,\n')
+    (source_dir / 'backwatch_without_date.csv').write_text('ticker\nTSLA\n')
+    (source_dir / '2026-05-02_backwatch.csv').write_text('ticker\nnot a symbol?\n')
+    con = get_connection(':memory:')
+
+    rows = scan_source_files(source_dir, watchlists_dir, con)
+    by_file = {r.source_file: r for r in rows}
+
+    assert by_file['2026-04-30_backwatch.csv'].status == 'New'
+    assert by_file['2026-04-30_backwatch.csv'].ticker_count == 2
+    assert by_file['2026-05-01_backwatch.csv'].status == 'Already Processed'
+    assert by_file['backwatch_without_date.csv'].status == 'Missing Date'
+    assert by_file['2026-05-02_backwatch.csv'].status == 'No Valid Tickers'
+
+
+def test_process_new_source_files_saves_only_new_files(tmp_path: Path):
+    source_dir = tmp_path / 'tc2000'
+    watchlists_dir = tmp_path / 'watchlists'
+    source_dir.mkdir()
+    watchlists_dir.mkdir()
+    (source_dir / '2026-04-30_backwatch.csv').write_text('Symbols from TC2000\nAAPL\nMSFT\n')
+    (source_dir / '2026-05-01_backwatch.csv').write_text('ticker\nNVDA\n')
+    (watchlists_dir / canonical_filename('2026-05-01', '2026-05-01_backwatch')).write_text('ticker,rating,setup,focus,key_level\nNVDA,,,,\n')
+    con = get_connection(':memory:')
+
+    rows, saved = process_new_source_files(source_dir, watchlists_dir, con)
+
+    assert [p.name for p in saved] == [canonical_filename('2026-04-30', '2026-04-30_backwatch')]
+    assert (watchlists_dir / canonical_filename('2026-04-30', '2026-04-30_backwatch')).exists()
+    assert {r.source_file: r.status for r in rows} == {
+        '2026-04-30_backwatch.csv': 'Processed',
+        '2026-05-01_backwatch.csv': 'Already Processed',
+    }

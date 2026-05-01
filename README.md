@@ -38,12 +38,11 @@ Accepted date patterns include `YYYY-MM-DD`, `YYYY_MM_DD`, `YYYYMMDD`, `MM-DD-YY
 TC2000 one-column exports with the header `Symbols from TC2000` are supported.
 
 Daily workflow:
-1. Export the TC2000 Back-Watch file into the configured folder.
-2. Use filename format `YYYY-MM-DD_backwatch.xlsx`.
+1. Export TC2000 Back-Watch files into `BACKWATCH_SOURCE_DIR`.
+2. Name files like `YYYY-MM-DD_backwatch.xlsx`.
 3. Open Streamlit.
-4. Select the file on the main app page.
-5. Click Ingest Selected File & Run Metrics.
-6. Review Daily Snapshot and Rolling Behavior.
+4. Click Process All New Back-Watch Files.
+5. Review Daily Snapshot, Rolling Behavior, and Ticker Detail.
 
 ## Commands
 - Run pipeline: `python -m src.run_daily`

@@ -1,103 +1,133 @@
 from __future__ import annotations
 
-from datetime import date
-
+import pandas as pd
 import streamlit as st
 
 from src.backwatch_source import (
-    infer_setup_date,
     list_source_files,
     normalize_backwatch_file,
+    process_new_source_files,
     resolve_source_dir,
-    save_canonical_watchlist,
+    scan_source_files,
 )
 from src.config import get_settings
 from src.database import get_connection
-from src.run_daily import SUMMARY_KEYS, run_daily_pipeline
+from src.run_daily import run_daily_pipeline
 from src.watchlist_ingestion import ingest_watchlists
+
+
+def _status_table(rows):
+    return pd.DataFrame([
+        {
+            'File': r.source_file,
+            'Setup Date': r.inferred_setup_date or '',
+            'Tickers': '' if r.ticker_count is None else r.ticker_count,
+            'Status': r.status,
+            'Message': r.message,
+        }
+        for r in rows
+    ])
+
+
+def _summary_table(summary: dict):
+    labels = [
+        ('Source files scanned', 'source_files_scanned'),
+        ('New files processed', 'new_files_processed'),
+        ('Already processed files skipped', 'already_processed_files_skipped'),
+        ('Files missing date', 'files_missing_date'),
+        ('Files with no valid tickers', 'files_no_valid_tickers'),
+        ('Candidates inserted', 'candidates_inserted'),
+        ('Bars fetched', 'bars_fetched'),
+        ('Daily bars fetched', 'daily_bars_fetched'),
+        ('Features calculated', 'features_calculated'),
+        ('Forward stats calculated', 'forward_stats_calculated'),
+        ('Labels assigned', 'labels_assigned'),
+        ('Failures', 'failures_count'),
+    ]
+    return pd.DataFrame([{'Metric': label, 'Value': summary.get(key, 0)} for label, key in labels])
 
 
 st.set_page_config(page_title='Back-Watch Setup Behavior Monitor', layout='wide')
 
 settings = get_settings()
 source_dir = resolve_source_dir(settings.backwatch_source_dir, settings.project_root)
+con = get_connection(str(settings.db_path))
 
 st.title('Back-Watch Setup Behavior Monitor')
-st.write('Use this page to ingest a daily Back-Watch CSV/XLSX file, save a canonical copy into `data/watchlists`, and optionally run the metrics pipeline.')
-st.write('Recommended filename: `YYYY-MM-DD_backwatch.xlsx`.')
+
+st.subheader('Back-Watch Source Folder')
 st.write(f'Configured Back-Watch source folder: `{source_dir}`')
 st.write(f'Canonical internal folder: `{settings.watchlists_dir}`')
 
 if not source_dir.exists():
     st.warning('Configured Back-Watch source folder does not exist.')
+    scanned = []
 else:
-    files = list_source_files(source_dir)
-    if not files:
-        st.info('No CSV/XLSX/XLS files found in the configured source folder.')
+    scanned = scan_source_files(source_dir, settings.watchlists_dir, con)
+
+st.subheader('Daily Workflow')
+if st.button('Process All New Back-Watch Files', type='primary'):
+    if not source_dir.exists():
+        st.warning('Configured Back-Watch source folder does not exist.')
     else:
-        labels = [f'{f.name} | {f.modified_at:%Y-%m-%d %H:%M} | {f.size:,} bytes' for f in files]
-        selected_label = st.selectbox('Source File', labels)
-        selected = files[labels.index(selected_label)]
-        setup_date = infer_setup_date(selected.name)
+        with st.spinner('Processing Back-Watch source files...'):
+            processed_rows, saved_paths = process_new_source_files(source_dir, settings.watchlists_dir, con)
+            ingest_result = ingest_watchlists(con, settings.watchlists_dir)
+            con.close()
 
-        st.write(f'Selected path: `{selected.path}`')
-        st.write(f'Modified: {selected.modified_at:%Y-%m-%d %H:%M:%S}')
-        st.write(f'Size: {selected.size:,} bytes')
-
-        if setup_date:
-            st.success(f'Setup date inferred from filename: {setup_date}')
-            final_date = setup_date
+        pipeline_summary = {}
+        metrics_message = ''
+        if not settings.massive_api_key:
+            metrics_message = 'API key missing — files were ingested but metrics were not updated.'
+            st.warning(metrics_message)
         else:
-            st.warning('Could not infer setup date from filename. Choose the setup date manually.')
-            final_date = st.date_input('Setup Date', value=date.today()).isoformat()
+            with st.spinner('Running metrics pipeline...'):
+                pipeline_summary = run_daily_pipeline()
+            st.success('Back-Watch processing complete.')
 
-        try:
-            preview = normalize_backwatch_file(selected.path)
-            st.write(f'Tickers detected: {len(preview)}')
-            st.dataframe(preview, use_container_width=True)
-        except Exception as exc:
-            preview = None
-            st.error(f'Could not parse selected file: {exc}')
+        failures = [
+            r.message for r in processed_rows if r.status == 'Error'
+        ] + ingest_result['failures'] + pipeline_summary.get('failures', [])
 
-        def ingest_selected_file():
-            output_path, normalized = save_canonical_watchlist(selected.path, final_date, settings.watchlists_dir)
-            con = get_connection(str(settings.db_path))
-            result = ingest_watchlists(con, settings.watchlists_dir)
-            return output_path, normalized, result
+        summary = {
+            'source_files_scanned': len(processed_rows),
+            'new_files_processed': sum(1 for r in processed_rows if r.status == 'Processed'),
+            'already_processed_files_skipped': sum(1 for r in processed_rows if r.status == 'Already Processed'),
+            'files_missing_date': sum(1 for r in processed_rows if r.status == 'Missing Date'),
+            'files_no_valid_tickers': sum(1 for r in processed_rows if r.status == 'No Valid Tickers'),
+            'candidates_inserted': ingest_result['candidates_inserted'],
+            'bars_fetched': pipeline_summary.get('bars_fetched', 0),
+            'daily_bars_fetched': pipeline_summary.get('daily_bars_fetched', 0),
+            'features_calculated': pipeline_summary.get('features_calculated', 0),
+            'forward_stats_calculated': pipeline_summary.get('forward_stats_calculated', 0),
+            'labels_assigned': pipeline_summary.get('labels_assigned', 0),
+            'failures_count': len(failures),
+        }
 
-        if preview is not None and preview.empty:
-            st.warning('No valid tickers detected. Ingestion and metrics run are disabled for this file.')
+        st.dataframe(_summary_table(summary), use_container_width=True, hide_index=True)
+        st.dataframe(_status_table(processed_rows), use_container_width=True, hide_index=True)
+        if saved_paths:
+            st.write(f'Canonical files saved: {len(saved_paths)}')
+        if failures:
+            st.warning('Failures')
+            st.write(failures)
+        if metrics_message:
+            st.info(metrics_message)
 
-        can_ingest = preview is not None and not preview.empty
-
-        if can_ingest and st.button('Ingest Selected Back-Watch File'):
-            output_path, normalized, result = ingest_selected_file()
-            st.success(f'Saved canonical file: {output_path.name}')
-            st.write(f'Normalized rows: {len(normalized)}')
-            st.write(f"Candidates inserted: {result['candidates_inserted']}")
-            if result['failures']:
-                st.warning('Some files reported ingestion warnings.')
-                st.write(result['failures'])
-
-        if can_ingest and st.button('Ingest Selected File & Run Metrics'):
-            with st.spinner('Ingesting Back-Watch file...'):
-                output_path, normalized, ingest_result = ingest_selected_file()
-            st.success(f'Saved canonical file: {output_path.name}')
-            st.write(f'Normalized rows: {len(normalized)}')
-            st.write(f"Candidates inserted from ingest step: {ingest_result['candidates_inserted']}")
-            if ingest_result['failures']:
-                st.warning('Some files reported ingestion warnings.')
-                st.write(ingest_result['failures'])
-            if not settings.massive_api_key:
-                st.warning('API key missing')
-            else:
-                with st.spinner('Running metrics...'):
-                    summary = run_daily_pipeline()
-                st.success('Metrics run complete.')
-                st.dataframe(
-                    [{'metric': key, 'value': len(summary[key]) if key == 'failures' else summary[key]} for key in SUMMARY_KEYS],
-                    use_container_width=True,
-                )
-                if summary['failures']:
-                    st.warning('Failures')
-                    st.write(summary['failures'])
+st.subheader('Source Files')
+if source_dir.exists():
+    if scanned:
+        st.dataframe(_status_table(scanned), use_container_width=True, hide_index=True)
+        files = list_source_files(source_dir)
+        labels = [f.name for f in files]
+        with st.expander('Preview Source File'):
+            selected_name = st.selectbox('Source File', labels)
+            selected = files[labels.index(selected_name)]
+            try:
+                preview = normalize_backwatch_file(selected.path)
+                st.write(f'Tickers detected: {len(preview)}')
+                st.dataframe(preview, use_container_width=True)
+            except Exception as exc:
+                st.warning(f'Could not preview selected file: {exc}')
+    else:
+        st.info('No CSV/XLSX/XLS files found in the configured source folder.')
