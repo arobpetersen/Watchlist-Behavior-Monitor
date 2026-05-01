@@ -4,6 +4,8 @@ from src.config import get_settings
 from src.dashboard_queries import dates, group_summaries, snapshot_metrics, snapshot_table
 from src.database import get_connection
 
+st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
+
 
 def _missing(value):
     return value is None or value != value
@@ -54,9 +56,9 @@ else:
             col.metric(label, value)
 
     st.subheader('Setup Candidates')
-    st.dataframe(snapshot_table(con, d), use_container_width=True)
+    st.dataframe(snapshot_table(con, d), use_container_width=True, hide_index=True)
     st.subheader('Group Summaries')
     tabs = st.tabs(['Rating Bucket', 'Setup', 'Focus'])
-    tabs[0].dataframe(group_summaries(con, d, 'rating_bucket'), use_container_width=True)
-    tabs[1].dataframe(group_summaries(con, d, 'setup'), use_container_width=True)
-    tabs[2].dataframe(group_summaries(con, d, 'focus'), use_container_width=True)
+    tabs[0].dataframe(group_summaries(con, d, 'rating_bucket'), use_container_width=True, hide_index=True)
+    tabs[1].dataframe(group_summaries(con, d, 'setup'), use_container_width=True, hide_index=True)
+    tabs[2].dataframe(group_summaries(con, d, 'focus'), use_container_width=True, hide_index=True)

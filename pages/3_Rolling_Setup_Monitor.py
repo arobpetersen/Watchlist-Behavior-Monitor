@@ -5,6 +5,7 @@ from src.config import get_settings
 from src.database import get_connection
 from src.rolling_setup_monitor import rolling_setup_monitor
 
+st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 con = get_connection(str(get_settings().db_path))
 st.title('Rolling Setup Monitor')

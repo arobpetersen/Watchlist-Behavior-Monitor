@@ -47,7 +47,7 @@ def _summary_table(summary: dict):
     return pd.DataFrame([{'Metric': label, 'Value': summary.get(key, 0)} for label, key in labels])
 
 
-st.set_page_config(page_title='Back-Watch Setup Behavior Monitor', layout='wide')
+st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 settings = get_settings()
 source_dir = resolve_source_dir(settings.backwatch_source_dir, settings.project_root)
@@ -126,7 +126,7 @@ if source_dir.exists():
             try:
                 preview = normalize_backwatch_file(selected.path)
                 st.write(f'Tickers detected: {len(preview)}')
-                st.dataframe(preview, use_container_width=True)
+                st.dataframe(preview, use_container_width=True, hide_index=True)
             except Exception as exc:
                 st.warning(f'Could not preview selected file: {exc}')
     else:
