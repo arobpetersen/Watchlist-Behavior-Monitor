@@ -19,7 +19,14 @@ Optional: `rating, setup, focus, key_level`.
 Each file represents setup candidates for that setup date. The dashboard summarizes objective behavior such as VWAP, opening range outcomes, close location, ATR/RVOL context, and short D+1 to D+3 follow-through.
 
 ## Back-Watch Source Folder
-Set `BACKWATCH_SOURCE_DIR` to your local TC2000/export folder. The app's Ingest Back-Watch page reads CSV/XLSX/XLS files from that folder, infers the setup date from the filename, previews normalized tickers, and saves a canonical CSV into `data/watchlists/`.
+Set `BACKWATCH_SOURCE_DIR` to your local TC2000/export folder. The main app page reads CSV/XLSX/XLS files from that folder, infers the setup date from the filename, previews normalized tickers, and saves a canonical CSV into `data/watchlists/`.
+
+Recommended source folder:
+```env
+BACKWATCH_SOURCE_DIR=C:/Users/arobp/OneDrive/Documents/Trade/Watchlist-Behavior-Monitor-main/tc2000
+```
+
+If this repo is inside a nested `Watchlist-Behavior-Monitor` folder, the TC2000 export folder may still live one level above the app folder. When `BACKWATCH_SOURCE_DIR` is not set, the app checks `tc2000` under the app folder and then `../tc2000`.
 
 Recommended filename:
 ```text
@@ -34,10 +41,9 @@ Daily workflow:
 1. Export the TC2000 Back-Watch file into the configured folder.
 2. Use filename format `YYYY-MM-DD_backwatch.xlsx`.
 3. Open Streamlit.
-4. Go to Ingest Back-Watch File.
-5. Select the file.
-6. Click Ingest Selected File & Run Metrics.
-7. Review Daily Snapshot and Rolling Behavior.
+4. Select the file on the main app page.
+5. Click Ingest Selected File & Run Metrics.
+6. Review Daily Snapshot and Rolling Behavior.
 
 ## Commands
 - Run pipeline: `python -m src.run_daily`

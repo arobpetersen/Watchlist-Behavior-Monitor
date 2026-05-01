@@ -32,7 +32,12 @@ class SourceFile:
 def resolve_source_dir(path: Path, project_root: Path | None = None) -> Path:
     if path.is_absolute():
         return path
-    return (project_root or Path.cwd()) / path
+    root = project_root or Path.cwd()
+    local = root / path
+    sibling = root.parent / path
+    if str(path).replace('\\', '/') == 'tc2000' and not local.exists() and sibling.exists():
+        return sibling
+    return local
 
 
 def list_source_files(source_dir: Path) -> list[SourceFile]:

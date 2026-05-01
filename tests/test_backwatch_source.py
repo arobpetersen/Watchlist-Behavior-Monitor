@@ -10,6 +10,7 @@ from src.backwatch_source import (
     infer_setup_date,
     list_source_files,
     normalize_backwatch_file,
+    resolve_source_dir,
     save_canonical_watchlist,
 )
 
@@ -45,6 +46,15 @@ def test_list_source_files_filters_supported_files(tmp_path: Path):
         '2026-05-01_backwatch.xlsx',
         '2026-05-02_backwatch.xls',
     }
+
+
+def test_resolve_source_dir_falls_back_to_parent_tc2000(tmp_path: Path):
+    app_root = tmp_path / 'Watchlist-Behavior-Monitor'
+    app_root.mkdir()
+    parent_source = tmp_path / 'tc2000'
+    parent_source.mkdir()
+
+    assert resolve_source_dir(Path('tc2000'), app_root) == parent_source
 
 
 def test_normalize_maps_symbol_column_and_missing_optional_fields(tmp_path: Path):
