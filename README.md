@@ -19,3 +19,4 @@ Optional: `rating, setup, focus, key_level`.
 ## Commands
 - Run pipeline: `python -m src.run_daily`
 - Inspect DB counts: `python -m src.db_inspect`
+- Run tests on Windows temp permission issues: `pytest -q --basetemp=.pytest_tmp`

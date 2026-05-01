@@ -11,6 +11,7 @@ from src.watchlist_ingestion import ingest_watchlists
 def main():
     s = get_settings()
     con = get_connection(str(s.db_path))
+    print(f'DB path: {s.db_path.resolve()}')
     ingest = ingest_watchlists(con, s.watchlists_dir)
     cands = con.execute('select candidate_id,watchlist_date,ticker from watchlist_candidates where watchlist_date is not null').df()
     bars, features, labels, failures = 0, 0, 0, list(ingest['failures'])
@@ -22,7 +23,7 @@ def main():
                 exists = con.execute('select count(*) from intraday_bars_1m where ticker=? and trading_date=?', [c['ticker'], str(c['watchlist_date'])]).fetchone()[0]
                 if exists:
                     continue
-                df = client.fetch_intraday_1m(c['ticker'], str(c['watchlist_date']))
+                df = client.fetch_intraday_1m(c['ticker'], c['watchlist_date'])
                 if df.empty:
                     continue
                 con.register('bars', df)
@@ -31,7 +32,7 @@ def main():
             except Exception as e:
                 failures.append(str(e))
     else:
-        failures.append('MASSIVE_API_KEY missing')
+        failures.append('API key missing')
 
     for _, c in cands.iterrows():
         features += int(compute_features(con, c.to_dict()))

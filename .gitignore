@@ -6,4 +6,6 @@ data/db/
 data/exports/
 .DS_Store
 .pytest_cache/
+.pytest_tmp/
+.pytest_tmp*/
 .streamlit/

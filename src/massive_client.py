@@ -1,9 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+from urllib.parse import urljoin
 
 import pandas as pd
 import requests
+
+
+def _format_aggregate_date(value: str | date | datetime) -> str:
+    parsed = pd.to_datetime(value).date()
+    formatted = parsed.isoformat()
+    if ' ' in formatted:
+        raise ValueError('Aggregate date must be formatted as YYYY-MM-DD')
+    return formatted
 
 
 class MassiveClient:
@@ -11,11 +20,17 @@ class MassiveClient:
         self.api_key = api_key
         self.base_url = base_url.rstrip('/')
 
-    def fetch_intraday_1m(self, ticker: str, date_str: str) -> pd.DataFrame:
+    def fetch_intraday_1m(self, ticker: str, trading_date: str | date | datetime) -> pd.DataFrame:
         if not self.api_key:
-            raise RuntimeError('MASSIVE_API_KEY missing')
-        r = requests.get(f"{self.base_url}/v2/aggs/ticker/{ticker}/range/1/minute/{date_str}/{date_str}", params={'adjusted':'true', 'sort':'asc', 'limit':50000, 'apiKey':self.api_key}, timeout=30)
-        r.raise_for_status()
+            raise RuntimeError('API key missing')
+        date_str = _format_aggregate_date(trading_date)
+        url = urljoin(self.base_url + '/', f"v2/aggs/ticker/{ticker}/range/1/minute/{date_str}/{date_str}")
+        r = requests.get(url, params={'adjusted':'true', 'sort':'asc', 'limit':50000, 'apiKey':self.api_key}, timeout=30)
+        try:
+            r.raise_for_status()
+        except requests.HTTPError:
+            reason = r.reason or 'HTTP error'
+            raise RuntimeError(f"Massive fetch failed for {ticker} on {date_str}: {r.status_code} {reason}") from None
         rows = r.json().get('results', [])
         df = pd.DataFrame(rows)
         if df.empty:
