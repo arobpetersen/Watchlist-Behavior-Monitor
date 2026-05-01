@@ -5,10 +5,13 @@ import json
 import pandas as pd
 
 from src.rolling_setup_monitor import (
+    compact_table,
+    detail_table,
     display_status,
     display_trigger,
     current_status,
     derive_trigger_reference,
+    monitor_section,
     sort_monitor_rows,
 )
 
@@ -85,12 +88,12 @@ def test_current_status_pulled_back_but_holding():
 
 
 def test_display_prefixes():
-    assert display_trigger('Clean 1m ORH').startswith('[Clean]')
-    assert display_trigger('Clean 5m ORH').startswith('[Clean]')
-    assert display_trigger('Alternate Means Required').startswith('[Alt]')
-    assert display_trigger('No Clean OR Trigger').startswith('[None]')
-    assert display_status('Trending Higher').startswith('[Up]')
-    assert display_status('Failed Setup-Day Low').startswith('[Fail]')
+    assert display_trigger('Clean 1m ORH') == 'Clean 1m'
+    assert display_trigger('Clean 5m ORH') == 'Clean 5m'
+    assert display_trigger('Alternate Means Required') == 'Alt Required'
+    assert display_trigger('No Clean OR Trigger') == 'No Trigger'
+    assert display_status('Trending Higher') == 'Trending'
+    assert display_status('Failed Setup-Day Low') == 'Failed Low'
 
 
 def test_sort_monitor_rows_status_then_current_setup_return():
@@ -105,3 +108,52 @@ def test_sort_monitor_rows_status_then_current_setup_return():
     out = sort_monitor_rows(df)
 
     assert out['Ticker'].tolist() == ['TREND1', 'TREND2', 'WORK', 'PULL', 'FAIL']
+
+
+def test_monitor_section_grouping():
+    assert monitor_section('Trending Higher') == 'Working / Trending'
+    assert monitor_section('Still Working') == 'Working / Trending'
+    assert monitor_section('Pulled Back but Holding') == 'Working / Trending'
+    assert monitor_section('Failed Setup-Day Low') == 'Failed Setup-Day Low'
+    assert monitor_section('Unresolved') == 'No Trigger / Unresolved'
+    assert monitor_section('No Clean OR Trigger') == 'No Trigger / Unresolved'
+
+
+def test_compact_and_detail_tables_split_columns():
+    df = pd.DataFrame([
+        {
+            'Section': 'Working / Trending',
+            'Ticker': 'AAPL',
+            'OR Trigger': 'Clean 1m',
+            'Current Status': 'Trending',
+            'Current vs Ref': '1.0%',
+            'Current vs Setup': '2.0%',
+            'Max Gain': '3.0%',
+            'Setup Low Broke': False,
+            'Close Bucket': 'Top 20%',
+            'RVOL': '2.00',
+            'Range / ATR': '1.50',
+            'Ref Price': '100.00',
+            'Reference': '1m ORH',
+            'Latest Close': '102.00',
+            'Setup High Broke': True,
+            '1m OR': 'Held',
+            '5m OR': 'Held',
+            'Rating': '',
+            'Setup': '',
+            'Focus': '',
+        }
+    ])
+
+    compact = compact_table(df, 'Working / Trending')
+    detail = detail_table(df)
+
+    assert compact.columns.tolist() == [
+        'Ticker', 'OR Trigger', 'Current Status', 'Current vs Ref', 'Current vs Setup',
+        'Max Gain', 'Setup Low Broke', 'Close Bucket', 'RVOL', 'Range / ATR',
+    ]
+    assert 'Ref Price' not in compact.columns
+    assert detail.columns.tolist() == [
+        'Ticker', 'Ref Price', 'Reference', 'Latest Close', 'Setup High Broke',
+        '1m OR', '5m OR', 'Rating', 'Setup', 'Focus',
+    ]

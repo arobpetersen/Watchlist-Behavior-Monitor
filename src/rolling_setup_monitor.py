@@ -9,19 +9,19 @@ from src.dashboard_queries import _clean_display_df, _close_bucket, _or_result
 
 
 TRIGGER_PREFIXES = {
-    'Clean 1m ORH': '[Clean] Clean 1m ORH',
-    'Clean 5m ORH': '[Clean] Clean 5m ORH',
-    'Alternate Means Required': '[Alt] Alternate Means Required',
-    'No Clean OR Trigger': '[None] No Clean OR Trigger',
+    'Clean 1m ORH': 'Clean 1m',
+    'Clean 5m ORH': 'Clean 5m',
+    'Alternate Means Required': 'Alt Required',
+    'No Clean OR Trigger': 'No Trigger',
 }
 
 STATUS_PREFIXES = {
-    'Trending Higher': '[Up] Trending Higher',
-    'Still Working': '[Work] Still Working',
-    'Pulled Back but Holding': '[Pullback] Pulled Back but Holding',
-    'Failed Setup-Day Low': '[Fail] Failed Setup-Day Low',
-    'No Clean OR Trigger': '[None] No Clean OR Trigger',
-    'Unresolved': '[Open] Unresolved',
+    'Trending Higher': 'Trending',
+    'Still Working': 'Working',
+    'Pulled Back but Holding': 'Pullback',
+    'Failed Setup-Day Low': 'Failed Low',
+    'No Clean OR Trigger': 'No Trigger',
+    'Unresolved': 'Unresolved',
 }
 
 STATUS_PRIORITY = {
@@ -38,22 +38,28 @@ MONITOR_COLUMNS = [
     'OR Trigger',
     'Current Status',
     'Current vs Ref',
-    'Current vs Setup Close',
+    'Current vs Setup',
     'Max Gain',
     'Setup Low Broke',
-    'Setup High Broke',
     'Close Bucket',
-    '1m OR',
-    '5m OR',
     'RVOL',
     'Range / ATR',
+]
+
+DETAIL_COLUMNS = [
+    'Ticker',
     'Ref Price',
     'Reference',
     'Latest Close',
+    'Setup High Broke',
+    '1m OR',
+    '5m OR',
     'Rating',
     'Setup',
     'Focus',
 ]
+
+SECTION_ORDER = ['Working / Trending', 'No Trigger / Unresolved', 'Failed Setup-Day Low']
 
 
 def _loads(value: Any) -> dict:
@@ -144,6 +150,14 @@ def display_status(value: str) -> str:
     return STATUS_PREFIXES.get(value, value)
 
 
+def monitor_section(status: str) -> str:
+    if status == 'Failed Setup-Day Low':
+        return 'Failed Setup-Day Low'
+    if status in {'Trending Higher', 'Still Working', 'Pulled Back but Holding'}:
+        return 'Working / Trending'
+    return 'No Trigger / Unresolved'
+
+
 def sort_monitor_rows(df: pd.DataFrame) -> pd.DataFrame:
     table = df.copy()
     table['_status_priority'] = table['Status'].map(STATUS_PRIORITY).fillna(99)
@@ -225,23 +239,37 @@ def _format_monitor_table(df: pd.DataFrame) -> pd.DataFrame:
     table = sort_monitor_rows(df)
     table['OR Trigger'] = table['Trigger Type'].apply(display_trigger)
     table['Current Status'] = table['Status'].apply(display_status)
+    table['Section'] = table['Status'].apply(monitor_section)
     table = table.rename(columns={
         'Current % from Ref.': 'Current vs Ref',
-        'Current % from Setup Close': 'Current vs Setup Close',
+        'Current % from Setup Close': 'Current vs Setup',
         'Max Gain from Setup Close': 'Max Gain',
         'Setup Low Broken': 'Setup Low Broke',
         'Setup High Broken': 'Setup High Broke',
         'Ref. Price': 'Ref Price',
         'Ref. Basis': 'Reference',
     })
-    table = table[MONITOR_COLUMNS]
+    table = table[['Section', *MONITOR_COLUMNS, *[c for c in DETAIL_COLUMNS if c != 'Ticker']]]
     for column in ['Ref Price', 'Latest Close', 'RVOL', 'Range / ATR']:
         if column in table.columns:
             table[column] = table[column].apply(_fmt_price)
-    for column in ['Current vs Ref', 'Current vs Setup Close', 'Max Gain']:
+    for column in ['Current vs Ref', 'Current vs Setup', 'Max Gain']:
         if column in table.columns:
             table[column] = table[column].apply(_fmt_pct)
     return _clean_display_df(table)
+
+
+def compact_table(table: pd.DataFrame, section: str) -> pd.DataFrame:
+    rows = table[table['Section'] == section].copy()
+    if rows.empty:
+        return pd.DataFrame(columns=MONITOR_COLUMNS)
+    return rows[MONITOR_COLUMNS]
+
+
+def detail_table(table: pd.DataFrame) -> pd.DataFrame:
+    if table.empty:
+        return pd.DataFrame(columns=DETAIL_COLUMNS)
+    return table[DETAIL_COLUMNS]
 
 
 def _summary_for_date(df: pd.DataFrame, setup_date) -> dict:
