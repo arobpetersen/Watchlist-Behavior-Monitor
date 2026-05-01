@@ -56,9 +56,9 @@ else:
             col.metric(label, value)
 
     st.subheader('Setup Candidates')
-    st.dataframe(snapshot_table(con, d), use_container_width=True, hide_index=True)
+    st.dataframe(snapshot_table(con, d), width='stretch', hide_index=True)
     st.subheader('Group Summaries')
     tabs = st.tabs(['Rating Bucket', 'Setup', 'Focus'])
-    tabs[0].dataframe(group_summaries(con, d, 'rating_bucket'), use_container_width=True, hide_index=True)
-    tabs[1].dataframe(group_summaries(con, d, 'setup'), use_container_width=True, hide_index=True)
-    tabs[2].dataframe(group_summaries(con, d, 'focus'), use_container_width=True, hide_index=True)
+    tabs[0].dataframe(group_summaries(con, d, 'rating_bucket'), width='stretch', hide_index=True)
+    tabs[1].dataframe(group_summaries(con, d, 'setup'), width='stretch', hide_index=True)
+    tabs[2].dataframe(group_summaries(con, d, 'focus'), width='stretch', hide_index=True)

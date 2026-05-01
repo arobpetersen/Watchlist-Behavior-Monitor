@@ -13,4 +13,4 @@ if not tickers:
     st.info('No data yet')
 else:
     t = st.selectbox('Ticker', tickers)
-    st.dataframe(ticker_detail_table(con, t), use_container_width=True, hide_index=True)
+    st.dataframe(ticker_detail_table(con, t), width='stretch', hide_index=True)

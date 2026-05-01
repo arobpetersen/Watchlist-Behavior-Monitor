@@ -104,8 +104,8 @@ if st.button('Process All New Back-Watch Files', type='primary'):
             'failures_count': len(failures),
         }
 
-        st.dataframe(_summary_table(summary), use_container_width=True, hide_index=True)
-        st.dataframe(_status_table(processed_rows), use_container_width=True, hide_index=True)
+        st.dataframe(_summary_table(summary), width='stretch', hide_index=True)
+        st.dataframe(_status_table(processed_rows), width='stretch', hide_index=True)
         if saved_paths:
             st.write(f'Canonical files saved: {len(saved_paths)}')
         if failures:
@@ -117,7 +117,7 @@ if st.button('Process All New Back-Watch Files', type='primary'):
 st.subheader('Source Files')
 if source_dir.exists():
     if scanned:
-        st.dataframe(_status_table(scanned), use_container_width=True, hide_index=True)
+        st.dataframe(_status_table(scanned), width='stretch', hide_index=True)
         files = list_source_files(source_dir)
         labels = [f.name for f in files]
         with st.expander('Preview Source File'):
@@ -126,7 +126,7 @@ if source_dir.exists():
             try:
                 preview = normalize_backwatch_file(selected.path)
                 st.write(f'Tickers detected: {len(preview)}')
-                st.dataframe(preview, use_container_width=True, hide_index=True)
+                st.dataframe(preview, width='stretch', hide_index=True)
             except Exception as exc:
                 st.warning(f'Could not preview selected file: {exc}')
     else:

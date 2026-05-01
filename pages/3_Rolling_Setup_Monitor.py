@@ -17,5 +17,5 @@ else:
     for section in sections:
         st.subheader(f"Setup Date: {section['setup_date']}")
         summary = pd.DataFrame([section['summary']])
-        st.dataframe(summary, use_container_width=True, hide_index=True)
-        st.dataframe(section['table'], use_container_width=True, hide_index=True)
+        st.dataframe(summary, width='stretch', hide_index=True)
+        st.dataframe(section['table'], width='stretch', hide_index=True)

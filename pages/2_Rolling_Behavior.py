@@ -8,4 +8,4 @@ st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 con = get_connection(str(get_settings().db_path))
 st.title('Rolling Setup Behavior')
-st.dataframe(rolling_window_summary(con), use_container_width=True, hide_index=True)
+st.dataframe(rolling_window_summary(con), width='stretch', hide_index=True)
