@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
+from src.backwatch_source import infer_setup_date
+
 
 def infer_date(name: str) -> str | None:
-    m = re.search(r'(\d{4}-\d{2}-\d{2})', name)
-    return m.group(1) if m else None
+    return infer_setup_date(name)
 
 
 def ingest_watchlists(con, watchlists_dir: Path) -> dict:

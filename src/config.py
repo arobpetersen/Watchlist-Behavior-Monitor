@@ -20,6 +20,7 @@ class Settings:
     watchlists_dir: Path = project_root / 'data' / 'watchlists'
     massive_api_key: str | None = os.getenv('MASSIVE_API_KEY')
     massive_base_url: str = os.getenv('MASSIVE_BASE_URL', 'https://api.polygon.io')
+    backwatch_source_dir: Path = Path(os.getenv('BACKWATCH_SOURCE_DIR', 'tc2000'))
 
 
 def get_settings() -> Settings:
