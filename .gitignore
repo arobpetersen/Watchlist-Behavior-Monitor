@@ -4,6 +4,7 @@ __pycache__/
 .env
 data/db/
 data/exports/
+data/watchlists/*_backwatch_*.csv
 .DS_Store
 .pytest_cache/
 .pytest_tmp/
