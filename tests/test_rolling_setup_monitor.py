@@ -6,6 +6,7 @@ import duckdb
 import pandas as pd
 
 from src.rolling_setup_monitor import (
+    _format_section_table,
     apply_setup_rating_updates,
     day_summary,
     derive_trigger_reference,
@@ -212,6 +213,42 @@ def test_main_and_detail_table_columns_and_blank_handling():
         '1m OR Result', '5m OR Result',
     ]
     assert main_table(df).loc[0, 'Rating'] == ''
+
+
+def test_format_section_table_formats_nan_day_values_as_blank():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'AAPL',
+        'status': 'Active',
+        'trigger_type': '1m ORH',
+        'one_min_result': 'success',
+        'five_min_result': '',
+        'current_pct': 0.01,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': float('nan'),
+        'fail_day': float('nan'),
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.5,
+        'reference_low': 9.8,
+        'reference_basis': '1m OR',
+        'trigger_break_time': None,
+        'latest_close': 10.6,
+        'close_price': 10.0,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.06,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'close_location': None,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Retest Day'] == ''
+    assert table.loc[0, 'Fail Day'] == ''
 
 
 def test_day_summary_metrics():

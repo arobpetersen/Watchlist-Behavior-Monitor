@@ -124,7 +124,9 @@ def _fmt_ts(value) -> str:
 
 
 def _fmt_day(value: int | None) -> str:
-    return '' if value is None else f'Day {int(value)}'
+    if value is None or pd.isna(value):
+        return ''
+    return f'Day {int(value)}'
 
 
 def _has_close_location(value: Any, threshold: float) -> bool:
