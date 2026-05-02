@@ -33,6 +33,7 @@ MAIN_COLUMNS = [
     'Trigger',
     '1m ORH',
     '5m ORH',
+    'Notes',
     'Current %',
     'Max %',
     'D3 High %',
@@ -56,6 +57,8 @@ DETAIL_COLUMNS = [
     'Max Gain from Setup Close',
     'RVOL',
     'Range / ATR',
+    '1m OR Width / ATR',
+    '5m OR Width / ATR',
     'Close Bucket',
     '1m OR Result',
     '5m OR Result',
@@ -118,6 +121,10 @@ def _fmt_price(value) -> str:
     return '' if value is None or pd.isna(value) else f'{float(value):.2f}'
 
 
+def _fmt_ratio(value) -> str:
+    return '' if value is None or pd.isna(value) else f'{float(value):.2f}'
+
+
 def _fmt_ts(value) -> str:
     ts = _ts(value)
     return '' if ts is None else ts.strftime('%Y-%m-%d %H:%M')
@@ -134,12 +141,24 @@ def _has_close_location(value: Any, threshold: float) -> bool:
     return num is not None and num >= threshold
 
 
+def _same_bar_break(data: dict) -> bool:
+    if data.get('same_bar_orh_orl_break'):
+        return True
+    orh_time = _ts(data.get('orh_break_time'))
+    orl_time = _ts(data.get('orl_break_time'))
+    return orh_time is not None and orl_time is not None and orh_time == orl_time
+
+
+def _clean_orh(data: dict) -> bool:
+    return bool(data.get('broke_orh') and not data.get('orh_then_orl') and not _same_bar_break(data))
+
+
 def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location) -> dict:
     one = _loads(or_1m)
     five = _loads(or_5m)
     fifteen = _loads(or_15m)
 
-    if one.get('broke_orh') and not one.get('orh_then_orl'):
+    if _clean_orh(one):
         return {
             'trigger_type': '1m ORH',
             'trigger_level': _num(one.get('orh')),
@@ -148,7 +167,7 @@ def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location
             'trigger_break_time': _ts(one.get('orh_break_time')),
         }
 
-    if five.get('broke_orh') and not five.get('orh_then_orl'):
+    if _clean_orh(five):
         return {
             'trigger_type': '5m ORH',
             'trigger_level': _num(five.get('orh')),
@@ -181,6 +200,30 @@ def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location
     }
 
 
+def _or_width_vs_atr(or_data: dict, atr20) -> float | None:
+    atr = _num(atr20)
+    orh = _num(or_data.get('orh'))
+    orl = _num(or_data.get('orl'))
+    if atr in (None, 0) or orh is None or orl is None:
+        return None
+    return (orh - orl) / atr
+
+
+def opening_range_width_notes(or_1m: str, or_5m: str, atr20) -> dict:
+    one_ratio = _or_width_vs_atr(_loads(or_1m), atr20)
+    five_ratio = _or_width_vs_atr(_loads(or_5m), atr20)
+    notes = []
+    if one_ratio is not None and one_ratio >= 0.75:
+        notes.append('Wide 1m OR')
+    if five_ratio is not None and five_ratio >= 0.75:
+        notes.append('Wide 5m OR')
+    return {
+        'one_min_or_width_vs_atr20': one_ratio,
+        'five_min_or_width_vs_atr20': five_ratio,
+        'notes': '; '.join(notes),
+    }
+
+
 def opening_range_result(or_json: str, minutes: int, trigger_type: str) -> str:
     data = _loads(or_json)
     if trigger_type == 'Alt Required' and minutes in {1, 5}:
@@ -188,7 +231,7 @@ def opening_range_result(or_json: str, minutes: int, trigger_type: str) -> str:
     clean_type = f'{minutes}m ORH'
     if trigger_type == clean_type:
         return 'success'
-    if data.get('broke_orh') and data.get('orh_then_orl'):
+    if data.get('broke_orh') and (data.get('orh_then_orl') or _same_bar_break(data)):
         return 'failed'
     return ''
 
@@ -387,6 +430,7 @@ def apply_setup_rating_updates(con, original: pd.DataFrame, edited: pd.DataFrame
 
 
 def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
+    blank_series = pd.Series([None] * len(raw), index=raw.index)
     display = pd.DataFrame({
         'candidate_id': raw['candidate_id'],
         'Ticker': raw['ticker'].astype(str),
@@ -394,6 +438,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Trigger': raw['trigger_type'],
         '1m ORH': raw['one_min_result'],
         '5m ORH': raw['five_min_result'],
+        'Notes': raw.get('notes', blank_series).apply(_blank),
         'Current %': raw['current_pct'].apply(_fmt_pct),
         'Max %': raw['max_pct'].apply(_fmt_pct),
         'D3 High %': raw['d3_high_pct'].apply(_fmt_pct),
@@ -413,6 +458,8 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Max Gain from Setup Close': raw['max_gain_from_setup_close'].apply(_fmt_pct),
         'RVOL': raw['relative_volume_20d'].apply(_fmt_price),
         'Range / ATR': raw['range_vs_atr20'].apply(_fmt_price),
+        '1m OR Width / ATR': raw.get('one_min_or_width_vs_atr20', blank_series).apply(_fmt_ratio),
+        '5m OR Width / ATR': raw.get('five_min_or_width_vs_atr20', blank_series).apply(_fmt_ratio),
         'Close Bucket': raw['close_location'].apply(_close_bucket),
         '1m OR Result': raw['one_min_result'],
         '5m OR Result': raw['five_min_result'],
@@ -438,7 +485,7 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
         f"""
         select c.candidate_id,c.watchlist_date,c.ticker,c.rating,c.setup,c.focus,
                f.high_price,f.low_price,f.close_price,f.close_location,
-               f.or_1m,f.or_5m,f.or_15m,f.relative_volume_20d,f.range_vs_atr20
+               f.or_1m,f.or_5m,f.or_15m,f.atr20,f.relative_volume_20d,f.range_vs_atr20
         from watchlist_candidates c
         left join entry_day_features f using(candidate_id,watchlist_date,ticker)
         where c.watchlist_date in ({placeholders})
@@ -474,6 +521,7 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
             record.get('close_location'),
         )
         record.update(trigger)
+        record.update(opening_range_width_notes(record.get('or_1m'), record.get('or_5m'), record.get('atr20')))
         record.update(_follow_through(record, daily_bars, intraday_bars))
         record['one_min_result'] = opening_range_result(record.get('or_1m'), 1, record['trigger_type'])
         record['five_min_result'] = opening_range_result(record.get('or_5m'), 5, record['trigger_type'])

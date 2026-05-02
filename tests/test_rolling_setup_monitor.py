@@ -14,6 +14,7 @@ from src.rolling_setup_monitor import (
     fail_day,
     main_table,
     opening_range_result,
+    opening_range_width_notes,
     rating_dropdown_options,
     retest_day,
     setup_dropdown_options,
@@ -81,6 +82,31 @@ def test_clean_5m_fallback_trigger_level_and_reference_low():
     assert out['trigger_level'] == 11.0
     assert out['reference_low'] == 9.6
     assert out['reference_basis'] == '5m OR'
+
+
+def test_same_bar_orh_and_orl_break_is_not_clean():
+    out = derive_trigger_reference(
+        _or(
+            broke_orh=True,
+            broke_orl=True,
+            orh_then_orl=False,
+            same_bar_orh_orl_break=True,
+            orh=10.5,
+            orl=9.8,
+            orh_break_time='2026-05-01 09:31',
+            orl_break_time='2026-05-01 09:31',
+        ),
+        _or(broke_orh=False, broke_orl=False, orh=11.0, orl=9.6),
+        _or(orh=12.0, orl=9.2),
+        0.5,
+    )
+
+    assert out['trigger_type'] == 'No Trigger'
+    assert opening_range_result(
+        _or(broke_orh=True, broke_orl=True, orh_then_orl=False, same_bar_orh_orl_break=True),
+        1,
+        out['trigger_type'],
+    ) == 'failed'
 
 
 def test_alt_required_uses_15m_references():
@@ -168,6 +194,38 @@ def test_opening_range_display_results():
     assert opening_range_result(_or(broke_orh=True, broke_orl=True), 5, 'Alt Required') == 'failed'
 
 
+def test_wide_one_min_or_note_when_width_vs_atr_is_at_least_threshold():
+    out = opening_range_width_notes(
+        _or(orh=10.75, orl=10.00),
+        _or(orh=11.00, orl=10.50),
+        1.0,
+    )
+
+    assert out['one_min_or_width_vs_atr20'] == 0.75
+    assert out['five_min_or_width_vs_atr20'] == 0.5
+    assert out['notes'] == 'Wide 1m OR'
+
+
+def test_wide_five_min_or_note_when_width_vs_atr_is_at_least_threshold():
+    out = opening_range_width_notes(
+        _or(orh=10.50, orl=10.00),
+        _or(orh=11.25, orl=10.50),
+        1.0,
+    )
+
+    assert out['notes'] == 'Wide 5m OR'
+
+
+def test_no_wide_or_note_when_atr_missing_or_zero():
+    missing = opening_range_width_notes(_or(orh=10.75, orl=10.00), _or(orh=11.25, orl=10.50), None)
+    zero = opening_range_width_notes(_or(orh=10.75, orl=10.00), _or(orh=11.25, orl=10.50), 0)
+
+    assert missing['notes'] == ''
+    assert missing['one_min_or_width_vs_atr20'] is None
+    assert zero['notes'] == ''
+    assert zero['five_min_or_width_vs_atr20'] is None
+
+
 def test_main_and_detail_table_columns_and_blank_handling():
     df = pd.DataFrame([{
         'candidate_id': 1,
@@ -176,6 +234,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'Trigger': '1m ORH',
         '1m ORH': 'success',
         '5m ORH': '',
+        'Notes': 'Wide 1m OR',
         'Current %': '1.0%',
         'Max %': '3.0%',
         'D3 High %': '',
@@ -195,6 +254,8 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'Max Gain from Setup Close': '8.0%',
         'RVOL': '',
         'Range / ATR': '',
+        '1m OR Width / ATR': '0.75',
+        '5m OR Width / ATR': '',
         'Close Bucket': '',
         '1m OR Result': 'success',
         '5m OR Result': '',
@@ -203,13 +264,14 @@ def test_main_and_detail_table_columns_and_blank_handling():
     }])
 
     assert main_table(df).columns.tolist() == [
-        'Ticker', 'Status', 'Trigger', '1m ORH', '5m ORH', 'Current %', 'Max %',
+        'Ticker', 'Status', 'Trigger', '1m ORH', '5m ORH', 'Notes', 'Current %', 'Max %',
         'D3 High %', 'Retest Day', 'Fail Day', 'Setup', 'Rating',
     ]
     assert detail_table(df).columns.tolist() == [
         'Ticker', 'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
         'Latest Close', 'Setup Close', 'Setup High', 'Setup Low', 'Current vs Setup Close',
-        'Max Gain from Setup Close', 'RVOL', 'Range / ATR', 'Close Bucket',
+        'Max Gain from Setup Close', 'RVOL', 'Range / ATR', '1m OR Width / ATR',
+        '5m OR Width / ATR', 'Close Bucket',
         '1m OR Result', '5m OR Result',
     ]
     assert main_table(df).loc[0, 'Rating'] == ''
@@ -223,6 +285,7 @@ def test_format_section_table_formats_nan_day_values_as_blank():
         'trigger_type': '1m ORH',
         'one_min_result': 'success',
         'five_min_result': '',
+        'notes': '',
         'current_pct': 0.01,
         'max_pct': 0.03,
         'd3_high_pct': None,
@@ -242,6 +305,8 @@ def test_format_section_table_formats_nan_day_values_as_blank():
         'max_gain_from_setup_close': 0.08,
         'relative_volume_20d': None,
         'range_vs_atr20': None,
+        'one_min_or_width_vs_atr20': None,
+        'five_min_or_width_vs_atr20': None,
         'close_location': None,
     }])
 

@@ -30,8 +30,9 @@ def opening_range(df: pd.DataFrame, minutes: int) -> dict:
     dn = post[post['low'] < orl]
     ut = None if up.empty else up.iloc[0]['timestamp_et']
     dt = None if dn.empty else dn.iloc[0]['timestamp_et']
+    same_bar_break = ut is not None and dt is not None and ut == dt
     first = 'up' if ut is not None and (dt is None or ut < dt) else 'down' if dt is not None and (ut is None or dt < ut) else 'none'
-    rec = {'orh':orh,'orl':orl,'orh_break_time':str(ut) if ut is not None else None,'orl_break_time':str(dt) if dt is not None else None,'broke_orh':ut is not None,'broke_orl':dt is not None,'first_break_direction':first,'orh_then_orl':ut is not None and dt is not None and ut < dt,'orl_then_orh':ut is not None and dt is not None and dt < ut,'closed_above_orh':float(df.iloc[-1]['close'])>orh,'closed_below_orl':float(df.iloc[-1]['close'])<orl}
+    rec = {'orh':orh,'orl':orl,'orh_break_time':str(ut) if ut is not None else None,'orl_break_time':str(dt) if dt is not None else None,'broke_orh':ut is not None,'broke_orl':dt is not None,'first_break_direction':first,'orh_then_orl':ut is not None and dt is not None and ut < dt,'orl_then_orh':ut is not None and dt is not None and dt < ut,'same_bar_orh_orl_break':same_bar_break,'closed_above_orh':float(df.iloc[-1]['close'])>orh,'closed_below_orl':float(df.iloc[-1]['close'])<orl}
     if ut is not None:
         aft = post[post['timestamp_et'] >= ut]
         rec['max_gain_after_orh_break_pct'] = float((aft['high'].max()-orh)/orh)

@@ -53,6 +53,7 @@ else:
             editable,
             key=f"monitor_editor_{section['setup_date']}",
             width='stretch',
+            height='auto',
             hide_index=True,
             column_order=MAIN_COLUMNS,
             disabled=[c for c in editable.columns if c not in {'Setup', 'Rating'}],
@@ -79,4 +80,4 @@ else:
                 st.info('No Setup/Rating changes to save.')
 
         with st.expander('Show full detail table', expanded=False):
-            st.dataframe(detail_table(table), width='stretch', hide_index=True)
+            st.dataframe(detail_table(table), width='stretch', height='auto', hide_index=True)
