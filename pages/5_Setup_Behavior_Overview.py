@@ -10,7 +10,7 @@ st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 con = get_connection(str(get_settings().db_path))
 
 st.title('Setup Behavior Overview')
-st.caption('Rolling summary of Back-Watch setup behavior across recent time windows.')
+st.caption('Rolling summary of Back-Watch setup behavior across recent setup-date windows.')
 st.caption('D3 High only includes setups with completed D3 data.')
 
 with st.expander('Definitions / Logic', expanded=False):
@@ -39,8 +39,21 @@ else:
     labels = [window.label for window in overview['windows']]
     selected_window = st.selectbox('Selected Window', labels, index=0)
 
+    st.subheader('Selected Window Snapshot')
+    st.markdown(f"**{overview['snapshots'][selected_window]}**")
+
     st.subheader('Selected Window Breakdown')
     st.markdown(metric_cards_html(overview['breakdowns'][selected_window]), unsafe_allow_html=True)
+
+    st.subheader('Selected Window Mix')
+    mix_cols = st.columns(3)
+    for column, (title, table) in zip(mix_cols, overview['mixes'][selected_window].items()):
+        with column:
+            st.markdown(f'**{title}**')
+            st.dataframe(table, width='stretch', hide_index=True)
+
+    st.subheader('Trigger Quality')
+    st.dataframe(overview['trigger_quality'][selected_window], width='stretch', hide_index=True)
 
     st.subheader('Selected Window Read')
     st.write(overview['reads'][selected_window])

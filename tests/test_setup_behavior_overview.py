@@ -13,11 +13,14 @@ from src.setup_behavior_overview import (
     comparison_rows,
     detail_rows,
     factual_read,
+    mix_tables,
     monitor_history,
     overview_windows,
     selected_window_metrics,
+    selected_window_snapshot,
     setup_behavior_overview,
     summarize_window,
+    trigger_quality_table,
 )
 
 
@@ -121,22 +124,33 @@ def _history() -> pd.DataFrame:
     ])
 
 
-def test_overview_windows_use_latest_setup_date_as_end():
-    windows = overview_windows('2026-05-08')
+def test_overview_windows_use_actual_setup_dates_not_calendar_days():
+    windows = overview_windows(['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30', '2026-05-01'])
 
-    assert [(w.label, w.start_date.date().isoformat(), w.end_date.date().isoformat()) for w in windows] == [
-        ('Last 1 Week', '2026-05-01', '2026-05-08'),
-        ('Last 2 Weeks', '2026-04-24', '2026-05-08'),
-        ('Last 1 Month', '2026-04-08', '2026-05-08'),
+    assert [(w.label, [d.date().isoformat() for d in w.setup_dates]) for w in windows] == [
+        ('Last 5 Setup Dates', ['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30', '2026-05-01']),
+        ('Last 10 Setup Dates', ['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30', '2026-05-01']),
+        ('Last 20 Setup Dates', ['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30', '2026-05-01']),
     ]
 
 
+def test_overview_windows_keep_only_latest_n_setup_dates():
+    dates = pd.date_range('2026-04-01', periods=25, freq='B')
+    windows = overview_windows(dates)
+
+    assert len(windows[0].setup_dates) == 5
+    assert len(windows[1].setup_dates) == 10
+    assert len(windows[2].setup_dates) == 20
+    assert windows[0].setup_dates[0] == pd.Timestamp('2026-04-29')
+    assert windows[0].setup_dates[-1] == pd.Timestamp('2026-05-05')
+
+
 def test_summarize_window_counts_percentages_and_medians():
-    window = overview_windows('2026-05-08')[1]
+    window = overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1]
     out = summarize_window(_history(), window)
 
-    assert out['Window'] == 'Last 2 Weeks'
-    assert out['Dates'] == '2026-04-24 to 2026-05-08'
+    assert out['Window'] == 'Last 10 Setup Dates'
+    assert out['Dates'] == '2026-04-28 → 2026-05-08'
     assert out['Setup Dates'] == 3
     assert out['Setups'] == 4
     assert out['Day Success'] == '3 (75%)'
@@ -161,11 +175,11 @@ def test_summarize_window_counts_percentages_and_medians():
 
 
 def test_comparison_rows_exclude_secondary_diagnostics():
-    full = pd.DataFrame([summarize_window(_history(), window) for window in overview_windows('2026-05-08')], columns=FULL_SUMMARY_COLUMNS)
+    full = pd.DataFrame([summarize_window(_history(), window) for window in overview_windows(['2026-04-10', '2026-04-28', '2026-05-02', '2026-05-08'])], columns=FULL_SUMMARY_COLUMNS)
     comparison = comparison_rows(full)
 
     assert comparison.columns.tolist() == COMPARISON_COLUMNS
-    assert comparison['Window'].tolist() == ['Last 1 Week', 'Last 2 Weeks', 'Last 1 Month']
+    assert comparison['Window'].tolist() == ['Last 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
     assert 'Failed 1m' not in comparison.columns
     assert 'Failed 5m' not in comparison.columns
     assert 'Failed OR Trigger' not in comparison.columns
@@ -174,7 +188,7 @@ def test_comparison_rows_exclude_secondary_diagnostics():
 
 
 def test_summarize_window_empty_and_unavailable_values_format_cleanly():
-    window = overview_windows('2026-05-08')[0]
+    window = overview_windows(['2026-05-08'])[0]
     empty = summarize_window(pd.DataFrame(columns=_history().columns), window)
 
     assert empty['Setups'] == 0
@@ -189,7 +203,7 @@ def test_summarize_window_empty_and_unavailable_values_format_cleanly():
 
 
 def test_detail_rows_match_expected_columns_and_window_filter():
-    window = overview_windows('2026-05-08')[0]
+    window = overview_windows(['2026-05-02', '2026-05-08'])[0]
     detail = detail_rows(_history(), window)
 
     assert detail.columns.tolist() == DETAIL_COLUMNS
@@ -200,7 +214,7 @@ def test_detail_rows_match_expected_columns_and_window_filter():
 
 
 def test_detail_rows_sort_by_date_status_priority_and_current():
-    window = overview_windows('2026-05-08')[0]
+    window = overview_windows(['2026-05-02', '2026-05-08'])[0]
     detail = detail_rows(_history(), window)
 
     assert detail[['Ticker', 'Current Status', 'Current']].values.tolist() == [
@@ -211,7 +225,7 @@ def test_detail_rows_sort_by_date_status_priority_and_current():
 
 
 def test_selected_window_metrics_group_diagnostics_separately():
-    summary = summarize_window(_history(), overview_windows('2026-05-08')[1])
+    summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
     groups = selected_window_metrics(summary)
 
     assert [group['title'] for group in groups] == [
@@ -241,7 +255,7 @@ def test_pdh_trigger_mix_aggregation_stays_out_of_top_comparison():
     history.loc[1, 'PDH'] = 'failed'
     history.loc[1, '1m ORH'] = '-'
     history.loc[1, '5m ORH'] = '-'
-    summary = summarize_window(history, overview_windows('2026-05-08')[0])
+    summary = summarize_window(history, overview_windows(['2026-05-02', '2026-05-08'])[0])
     groups = selected_window_metrics(summary)
     trigger_mix = dict(groups[2]['metrics'])
     comparison = comparison_rows(pd.DataFrame([summary], columns=FULL_SUMMARY_COLUMNS))
@@ -254,7 +268,7 @@ def test_pdh_trigger_mix_aggregation_stays_out_of_top_comparison():
     assert summary['Failed 5m'] == '0 (0%)'
     assert trigger_mix['PDH'] == '1 (33%)'
     assert trigger_mix['Failed PDH Trigger'] == '1 (33%)'
-    assert 'PDH' not in comparison.columns
+    assert 'PDH' in comparison.columns
     assert 'Failed PDH Trigger' not in comparison.columns
 
 
@@ -264,7 +278,7 @@ def test_overview_5m_counts_exclude_selected_1m_rows_with_5m_display_hidden():
     history.loc[0, '1m ORH'] = 'success'
     history.loc[0, '5m ORH'] = '-'
 
-    summary = summarize_window(history.iloc[[0]], overview_windows('2026-05-08')[0])
+    summary = summarize_window(history.iloc[[0]], overview_windows(['2026-05-08'])[0])
 
     assert summary['Clean 1m'] == '1 (100%)'
     assert summary['Clean 5m'] == '0 (0%)'
@@ -272,10 +286,10 @@ def test_overview_5m_counts_exclude_selected_1m_rows_with_5m_display_hidden():
 
 
 def test_factual_read_is_objective_and_contains_key_metrics():
-    summary = summarize_window(_history(), overview_windows('2026-05-08')[1])
+    summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
     text = factual_read(summary)
 
-    assert 'Last 2 Weeks includes 4 setups across 3 setup dates.' in text
+    assert 'Last 10 Setup Dates includes 4 setups across 3 setup dates.' in text
     assert '3 (75%) succeeded on trigger day' in text
     assert '1 (25%) remain active' in text
     assert '2 (50%) failed later' in text
@@ -287,6 +301,43 @@ def test_factual_read_is_objective_and_contains_key_metrics():
     assert 'recommended' not in lowered
     assert 'market is good' not in lowered
     assert 'market is bad' not in lowered
+
+
+def test_selected_window_snapshot_contains_key_metrics():
+    summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
+    text = selected_window_snapshot(summary)
+
+    assert '4 setups across 3 setup dates' in text
+    assert '75% Day Success' in text
+    assert '25% Active' in text
+    assert '50% Later Failed' in text
+    assert 'Median Current 1.5%' in text
+    assert 'Median Max 7.0%' in text
+
+
+def test_mix_tables_include_objective_selected_window_mixes():
+    summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
+    mixes = mix_tables(summary)
+
+    assert list(mixes) == ['Outcome Mix', 'Current Mix', 'Trigger Mix']
+    assert mixes['Outcome Mix']['Metric'].tolist() == ['Day Success', 'Day Fail', 'Unresolved']
+    assert 'PDH' in mixes['Trigger Mix']['Metric'].tolist()
+    assert 'Failed OR Trigger' in mixes['Trigger Mix']['Metric'].tolist()
+
+
+def test_trigger_quality_table_groups_by_selected_trigger():
+    quality = trigger_quality_table(_history())
+    by_trigger = quality.set_index('Trigger')
+
+    assert by_trigger.loc['1m ORH', 'Count'] == 1
+    assert by_trigger.loc['1m ORH', 'Day Success %'] == '100%'
+    assert by_trigger.loc['1m ORH', 'Active %'] == '100%'
+    assert by_trigger.loc['1m ORH', 'Later Failed %'] == '0%'
+    assert by_trigger.loc['5m ORH', 'Count'] == 1
+    assert by_trigger.loc['5m ORH', 'Active %'] == '0%'
+    assert by_trigger.loc['5m ORH', 'Later Failed %'] == '100%'
+    assert by_trigger.loc['No Trigger', 'Day Success %'] == '0%'
+    assert by_trigger.loc['PDH', 'Count'] == 0
 
 
 def test_monitor_history_uses_rolling_setup_monitor_derived_rows(monkeypatch):

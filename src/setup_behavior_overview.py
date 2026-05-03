@@ -49,6 +49,7 @@ COMPARISON_COLUMNS = [
     'Later Failed',
     'Clean 1m',
     'Clean 5m',
+    'PDH',
     'Alt Required',
     'Median Current',
     'Median Max',
@@ -81,15 +82,24 @@ CURRENT_STATUS_PRIORITY = {'Active': 0, 'Failed D1': 1, 'Failed D2': 2, 'Failed 
 @dataclass(frozen=True)
 class OverviewWindow:
     label: str
-    start_date: pd.Timestamp
-    end_date: pd.Timestamp
+    setup_dates: tuple[pd.Timestamp, ...]
+
+    @property
+    def start_date(self) -> pd.Timestamp | None:
+        return min(self.setup_dates) if self.setup_dates else None
+
+    @property
+    def end_date(self) -> pd.Timestamp | None:
+        return max(self.setup_dates) if self.setup_dates else None
 
 
 def _date(value: Any) -> pd.Timestamp:
     return pd.Timestamp(pd.to_datetime(value).date())
 
 
-def _fmt_date(value: pd.Timestamp) -> str:
+def _fmt_date(value: pd.Timestamp | None) -> str:
+    if value is None:
+        return '-'
     return value.date().isoformat()
 
 
@@ -109,6 +119,13 @@ def _fmt_pct(value: Any) -> str:
         return '-'
 
 
+def _pct_from_count_text(value: Any) -> str:
+    text = str(value)
+    if '(' not in text or ')' not in text:
+        return '-'
+    return text.split('(', 1)[1].split(')', 1)[0]
+
+
 def _display(value: Any) -> str:
     if value is None:
         return '-'
@@ -121,12 +138,15 @@ def _display(value: Any) -> str:
     return '-' if text == '' or text.lower() == 'nan' else text
 
 
-def overview_windows(latest_setup_date) -> list[OverviewWindow]:
-    end = _date(latest_setup_date)
+def overview_windows(setup_date_values) -> list[OverviewWindow]:
+    if isinstance(setup_date_values, (str, pd.Timestamp)) or not hasattr(setup_date_values, '__iter__'):
+        dates = [_date(setup_date_values)]
+    else:
+        dates = sorted({_date(value) for value in setup_date_values})
     return [
-        OverviewWindow('Last 1 Week', end - pd.Timedelta(days=7), end),
-        OverviewWindow('Last 2 Weeks', end - pd.Timedelta(days=14), end),
-        OverviewWindow('Last 1 Month', end - pd.Timedelta(days=30), end),
+        OverviewWindow('Last 5 Setup Dates', tuple(dates[-5:])),
+        OverviewWindow('Last 10 Setup Dates', tuple(dates[-10:])),
+        OverviewWindow('Last 20 Setup Dates', tuple(dates[-20:])),
     ]
 
 
@@ -172,7 +192,8 @@ def summarize_window(history: pd.DataFrame, window: OverviewWindow) -> dict:
         rows = history.copy()
     else:
         setup_dates_series = pd.to_datetime(history['Setup Date'])
-        rows = history[(setup_dates_series >= window.start_date) & (setup_dates_series <= window.end_date)].copy()
+        included = {date.date() for date in window.setup_dates}
+        rows = history[setup_dates_series.dt.date.isin(included)].copy()
 
     setups = len(rows)
     setup_dates_count = 0 if rows.empty else int(rows['Setup Date'].nunique())
@@ -193,7 +214,7 @@ def summarize_window(history: pd.DataFrame, window: OverviewWindow) -> dict:
 
     return {
         'Window': window.label,
-        'Dates': f'{_fmt_date(window.start_date)} to {_fmt_date(window.end_date)}',
+        'Dates': f'{_fmt_date(window.start_date)} \u2192 {_fmt_date(window.end_date)}',
         'Setup Dates': setup_dates_count,
         'Setups': setups,
         'Day Success': count_fmt(_count(trigger_day, 'Success')),
@@ -224,7 +245,8 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
     if history.empty:
         return pd.DataFrame(columns=DETAIL_COLUMNS)
     setup_dates_series = pd.to_datetime(history['Setup Date'])
-    rows = history[(setup_dates_series >= window.start_date) & (setup_dates_series <= window.end_date)].copy()
+    included = {date.date() for date in window.setup_dates}
+    rows = history[setup_dates_series.dt.date.isin(included)].copy()
     if rows.empty:
         return pd.DataFrame(columns=DETAIL_COLUMNS)
 
@@ -320,6 +342,83 @@ def factual_read(window_summary: dict) -> str:
     )
 
 
+def selected_window_snapshot(window_summary: dict) -> str:
+    setups = window_summary.get('Setups', 0)
+    setup_dates_count = window_summary.get('Setup Dates', 0)
+    day_success_pct = _pct_from_count_text(window_summary.get('Day Success', '-'))
+    active_pct = _pct_from_count_text(window_summary.get('Active', '-'))
+    later_failed_pct = _pct_from_count_text(window_summary.get('Later Failed', '-'))
+    median_current = window_summary.get('Median Current', '-')
+    median_max = window_summary.get('Median Max', '-')
+    return (
+        f'{setups} setups across {setup_dates_count} setup dates | '
+        f'{day_success_pct} Day Success | {active_pct} Active | {later_failed_pct} Later Failed | '
+        f'Median Current {median_current} | Median Max {median_max}'
+    )
+
+
+def _summary_count(summary: dict, key: str) -> int:
+    value = summary.get(key, 0)
+    if isinstance(value, str):
+        try:
+            return int(value.split(' ', 1)[0])
+        except (ValueError, IndexError):
+            return 0
+    return int(value or 0)
+
+
+def mix_tables(window_summary: dict) -> dict[str, pd.DataFrame]:
+    unresolved = _summary_count(window_summary, 'Unresolved')
+    day_fail = _summary_count(window_summary, 'Day Fail')
+    return {
+        'Outcome Mix': pd.DataFrame([
+            {'Metric': 'Day Success', 'Value': window_summary.get('Day Success', '-')},
+            {'Metric': 'Day Fail', 'Value': window_summary.get('Day Fail', '-')},
+            {'Metric': 'Unresolved', 'Value': window_summary.get('Unresolved', '-')},
+        ]),
+        'Current Mix': pd.DataFrame([
+            {'Metric': 'Active', 'Value': window_summary.get('Active', '-')},
+            {'Metric': 'Later Failed', 'Value': window_summary.get('Later Failed', '-')},
+            {'Metric': 'Unresolved / Not Active', 'Value': _fmt_count(unresolved + day_fail, int(window_summary.get('Setups', 0) or 0))},
+        ]),
+        'Trigger Mix': pd.DataFrame([
+            {'Metric': 'PDH', 'Value': window_summary.get('PDH', '-')},
+            {'Metric': '1m ORH', 'Value': window_summary.get('Clean 1m', '-')},
+            {'Metric': '5m ORH', 'Value': window_summary.get('Clean 5m', '-')},
+            {'Metric': 'Alt Required', 'Value': window_summary.get('Alt Required', '-')},
+            {'Metric': 'Failed PDH Trigger', 'Value': window_summary.get('Failed PDH Trigger', '-')},
+            {'Metric': 'Failed OR Trigger', 'Value': window_summary.get('Failed OR Trigger', '-')},
+            {'Metric': 'No Trigger', 'Value': window_summary.get('No Trigger', '-')},
+        ]),
+    }
+
+
+TRIGGER_ORDER = ['PDH', '1m ORH', '5m ORH', 'Alt Required', 'Failed PDH Trigger', 'Failed OR Trigger', 'No Trigger']
+
+
+def trigger_quality_table(rows: pd.DataFrame) -> pd.DataFrame:
+    columns = ['Trigger', 'Count', 'Day Success %', 'Active %', 'Later Failed %', 'Median Current', 'Median Max']
+    if rows.empty or 'Trigger' not in rows:
+        return pd.DataFrame(columns=columns)
+    out = []
+    for trigger in TRIGGER_ORDER:
+        group = rows[rows['Trigger'] == trigger]
+        count = len(group)
+        if count == 0:
+            out.append({'Trigger': trigger, 'Count': 0, 'Day Success %': '-', 'Active %': '-', 'Later Failed %': '-', 'Median Current': '-', 'Median Max': '-'})
+            continue
+        out.append({
+            'Trigger': trigger,
+            'Count': count,
+            'Day Success %': f'{round((group["Trigger Day"].eq("Success").sum() / count) * 100)}%',
+            'Active %': f'{round((group["Current Status"].eq("Active").sum() / count) * 100)}%',
+            'Later Failed %': f'{round((group["Current Status"].isin({"Failed D1", "Failed D2", "Failed D3"}).sum() / count) * 100)}%',
+            'Median Current': _fmt_pct(group['current_pct_raw'].median() if 'current_pct_raw' in group else None),
+            'Median Max': _fmt_pct(group['max_pct_raw'].median() if 'max_pct_raw' in group else None),
+        })
+    return pd.DataFrame(out, columns=columns)
+
+
 def metric_cards_html(groups: list[dict]) -> str:
     cards = []
     for group in groups:
@@ -374,21 +473,31 @@ def setup_behavior_overview(con) -> dict:
             'window_summaries': pd.DataFrame(columns=FULL_SUMMARY_COLUMNS),
             'breakdowns': {},
             'reads': {},
+            'snapshots': {},
+            'mixes': {},
+            'trigger_quality': {},
             'details': {},
             'windows': [],
         }
 
-    windows = overview_windows(max(dates))
+    windows = overview_windows(dates)
     history = monitor_history(con)
     window_summaries = pd.DataFrame([summarize_window(history, window) for window in windows], columns=FULL_SUMMARY_COLUMNS)
     summary = comparison_rows(window_summaries)
     summary_by_window = {row['Window']: row.to_dict() for _, row in window_summaries.iterrows()}
     details = {window.label: detail_rows(history, window) for window in windows}
+    history_by_window = {}
+    for window in windows:
+        included = {date.date() for date in window.setup_dates}
+        history_by_window[window.label] = history[pd.to_datetime(history['Setup Date']).dt.date.isin(included)].copy() if not history.empty else pd.DataFrame()
     return {
         'summary': summary,
         'window_summaries': window_summaries,
         'breakdowns': {label: selected_window_metrics(row) for label, row in summary_by_window.items()},
         'reads': {label: factual_read(row) for label, row in summary_by_window.items()},
+        'snapshots': {label: selected_window_snapshot(row) for label, row in summary_by_window.items()},
+        'mixes': {label: mix_tables(row) for label, row in summary_by_window.items()},
+        'trigger_quality': {label: trigger_quality_table(history_by_window[label]) for label in summary_by_window},
         'details': details,
         'windows': windows,
     }
