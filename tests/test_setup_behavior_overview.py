@@ -14,6 +14,7 @@ from src.setup_behavior_overview import (
     comparison_rows,
     detail_rows,
     factual_read,
+    filter_detail_rows,
     mix_tables,
     monitor_history,
     opening_behavior_table,
@@ -184,11 +185,23 @@ def test_comparison_rows_exclude_secondary_diagnostics():
 
     assert comparison.columns.tolist() == COMPARISON_COLUMNS
     assert comparison['Window'].tolist() == ['Last 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
+    assert comparison.columns.tolist() == [
+        'Window',
+        'Dates',
+        'Setup Dates',
+        'Setups',
+        'Day Success %',
+        'Active %',
+        'Later Failed %',
+        'Median Current',
+        'Median Max',
+    ]
     assert 'Failed 1m' not in comparison.columns
     assert 'Failed 5m' not in comparison.columns
     assert 'Failed OR Trigger' not in comparison.columns
     assert 'Retested' not in comparison.columns
     assert 'Wide 1m OR' not in comparison.columns
+    assert 'Median D3 High' not in comparison.columns
 
 
 def test_summarize_window_empty_and_unavailable_values_format_cleanly():
@@ -272,7 +285,7 @@ def test_pdh_trigger_mix_aggregation_stays_out_of_top_comparison():
     assert summary['Failed 5m'] == '0 (0%)'
     assert trigger_mix['PDH'] == '1 (33%)'
     assert trigger_mix['Failed PDH Trigger'] == '1 (33%)'
-    assert 'PDH' in comparison.columns
+    assert 'PDH' not in comparison.columns
     assert 'Failed PDH Trigger' not in comparison.columns
 
 
@@ -434,7 +447,6 @@ def test_trigger_outcome_comparison_rows_and_denominators():
     assert one_last_10['Success %'] == '50%'
     assert one_last_10['Failed'] == 1
     assert one_last_10['Fail %'] == '50%'
-    assert one_last_10['No Result / Blank'] == 2
 
 
 def test_trigger_outcome_comparison_later_failed_active_and_medians():
@@ -442,9 +454,7 @@ def test_trigger_outcome_comparison_later_failed_active_and_medians():
 
     five_last_10 = comparison[(comparison['Trigger'] == '5m ORH') & (comparison['Window'] == 'Last 10 Setup Dates')].iloc[0]
     assert five_last_10['Triggered'] == 2
-    assert five_last_10['Later Failed'] == 1
     assert five_last_10['Later Failed %'] == '50%'
-    assert five_last_10['Active'] == 1
     assert five_last_10['Active %'] == '50%'
     assert five_last_10['Median Current'] == '1.5%'
     assert five_last_10['Median Max'] == '6.5%'
@@ -463,6 +473,53 @@ def test_trigger_outcome_comparison_zero_trigger_display():
     assert pdh_last_5['Active %'] == '-'
     assert pdh_last_5['Median Current'] == '-'
     assert pdh_last_5['Median Max'] == '-'
+
+
+def test_trigger_event_outcomes_are_separate_from_primary_trigger_grouping():
+    rows = _trigger_comparison_history()['Last 10 Setup Dates'].copy()
+    rows['Trigger'] = ['1m ORH', '5m ORH', 'PDH', 'No Trigger']
+    rows['Trigger Day'] = ['Success', 'Success', 'Success', 'Unresolved']
+    event = trigger_outcome_comparison({'Last 10 Setup Dates': rows})
+    primary = trigger_quality_table(rows)
+
+    assert event[(event['Trigger'] == '1m ORH') & (event['Window'] == 'Last 10 Setup Dates')].iloc[0]['Triggered'] == 2
+    assert primary[primary['Trigger'] == '1m ORH'].iloc[0]['Count'] == 1
+
+
+def test_filter_detail_rows_by_trigger_level_and_result():
+    detail = detail_rows(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[0])
+
+    five_success = filter_detail_rows(detail, trigger_level='5m ORH', trigger_result='success')
+    assert five_success['Ticker'].tolist() == ['AAA', 'BBB']
+
+    pdh_blank = filter_detail_rows(detail, trigger_level='PDH', trigger_result='blank')
+    assert pdh_blank['Ticker'].tolist() == ['AAA', 'EEE', 'BBB', 'CCC']
+
+
+def test_filter_detail_rows_by_current_status_bucket():
+    detail = detail_rows(_history(), overview_windows(['2026-04-10', '2026-04-28', '2026-05-02', '2026-05-08'])[0])
+
+    active = filter_detail_rows(detail, current_status='Active')
+    later_failed = filter_detail_rows(detail, current_status='Later Failed')
+    unresolved = filter_detail_rows(detail, current_status='Unresolved')
+
+    assert active['Ticker'].tolist() == ['AAA']
+    assert later_failed['Ticker'].tolist() == ['EEE', 'BBB']
+    assert unresolved['Ticker'].tolist() == ['DDD']
+
+
+def test_filter_detail_rows_by_opening_path_group():
+    detail = pd.DataFrame([
+        {'Ticker': 'A', 'Current Status': 'Active', 'Trigger Day': 'Success', 'Trigger': '1m ORH', 'PDH': 'Gap', '1m ORH': 'success', '5m ORH': '-'},
+        {'Ticker': 'B', 'Current Status': 'Active', 'Trigger Day': 'Success', 'Trigger': '5m ORH', 'PDH': 'Gap', '1m ORH': 'failed', '5m ORH': 'success'},
+        {'Ticker': 'C', 'Current Status': '—', 'Trigger Day': 'Fail', 'Trigger': 'Failed OR Trigger', 'PDH': '-', '1m ORH': 'failed', '5m ORH': 'failed'},
+    ])
+
+    reclaimed = filter_detail_rows(detail, opening_path_group='1m ORH Failed, Later Reclaimed')
+    failed_all = filter_detail_rows(detail, opening_path_group='Failed All Opening Triggers')
+
+    assert reclaimed['Ticker'].tolist() == ['B']
+    assert failed_all['Ticker'].tolist() == ['C']
 
 
 def _opening_behavior_history() -> pd.DataFrame:

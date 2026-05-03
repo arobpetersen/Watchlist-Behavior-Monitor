@@ -42,18 +42,11 @@ COMPARISON_COLUMNS = [
     'Dates',
     'Setup Dates',
     'Setups',
-    'Day Success',
-    'Day Fail',
-    'Unresolved',
-    'Active',
-    'Later Failed',
-    'Clean 1m',
-    'Clean 5m',
-    'PDH',
-    'Alt Required',
+    'Day Success %',
+    'Active %',
+    'Later Failed %',
     'Median Current',
     'Median Max',
-    'Median D3 High',
 ]
 
 SUMMARY_COLUMNS = COMPARISON_COLUMNS
@@ -77,6 +70,15 @@ DETAIL_COLUMNS = [
 ]
 
 CURRENT_STATUS_PRIORITY = {'Active': 0, 'Failed D1': 1, 'Failed D2': 2, 'Failed D3': 3, '—': 4}
+OPENING_PATH_FILTER_OPTIONS = [
+    'All',
+    'Clean 1m ORH Success',
+    '1m ORH Failed, Later Reclaimed',
+    '1m ORH Failed, Never Recovered',
+    '5m ORH Success After 1m Failure',
+    'PDH Success After Early Noise',
+    'Failed All Opening Triggers',
+]
 
 
 @dataclass(frozen=True)
@@ -276,7 +278,18 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
 def comparison_rows(window_summaries: pd.DataFrame) -> pd.DataFrame:
     if window_summaries.empty:
         return pd.DataFrame(columns=COMPARISON_COLUMNS)
-    return window_summaries[COMPARISON_COLUMNS].copy()
+    out = pd.DataFrame({
+        'Window': window_summaries['Window'],
+        'Dates': window_summaries['Dates'],
+        'Setup Dates': window_summaries['Setup Dates'],
+        'Setups': window_summaries['Setups'],
+        'Day Success %': window_summaries['Day Success'].apply(_pct_from_count_text),
+        'Active %': window_summaries['Active'].apply(_pct_from_count_text),
+        'Later Failed %': window_summaries['Later Failed'].apply(_pct_from_count_text),
+        'Median Current': window_summaries['Median Current'],
+        'Median Max': window_summaries['Median Max'],
+    })
+    return out[COMPARISON_COLUMNS].copy()
 
 
 def selected_window_metrics(window_summary: dict) -> list[dict]:
@@ -417,6 +430,79 @@ def opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
         ('Failed All Opening Triggers', one_failed & five_failed_or_blank & pdh_failed_or_blank & ~successful_trigger),
     ]
     return pd.DataFrame([_opening_path_row(label, rows[mask], total) for label, mask in masks], columns=columns)
+
+
+def _opening_path_mask(rows: pd.DataFrame, path: str) -> pd.Series:
+    one = rows['1m ORH'] if '1m ORH' in rows else pd.Series('', index=rows.index)
+    five = rows['5m ORH'] if '5m ORH' in rows else pd.Series('', index=rows.index)
+    pdh = rows['PDH'] if 'PDH' in rows else pd.Series('', index=rows.index)
+    trigger = rows['Trigger'] if 'Trigger' in rows else pd.Series('', index=rows.index)
+    one_success = one.eq('success')
+    one_failed = one.eq('failed')
+    five_success = five.eq('success')
+    five_failed_or_blank = five.eq('failed') | _is_blank_or_dash(five)
+    pdh_success = pdh.eq('success')
+    pdh_failed_or_blank = pdh.eq('failed') | _is_blank_or_dash(pdh)
+    successful_trigger = trigger.isin({'PDH', '1m ORH', '5m ORH', 'Alt Required'})
+    masks = {
+        'Clean 1m ORH Success': one_success,
+        '1m ORH Failed, Later Reclaimed': one_failed & (five_success | pdh_success),
+        '1m ORH Failed, Never Recovered': one_failed & ~five_success & ~pdh_success,
+        '5m ORH Success After 1m Failure': one_failed & five_success,
+        'PDH Success After Early Noise': pdh_success & (one.eq('failed') | five.eq('failed')),
+        'Failed All Opening Triggers': one_failed & five_failed_or_blank & pdh_failed_or_blank & ~successful_trigger,
+    }
+    return masks.get(path, pd.Series(True, index=rows.index))
+
+
+def filter_detail_rows(
+    rows: pd.DataFrame,
+    trigger_level: str = 'All',
+    trigger_result: str = 'All',
+    current_status: str = 'All',
+    opening_path_group: str = 'All',
+) -> pd.DataFrame:
+    if rows.empty:
+        return rows.copy()
+    out = rows.copy()
+    trigger_columns = ['1m ORH', '5m ORH', 'PDH']
+
+    if trigger_level != 'All' and trigger_level in out:
+        if trigger_result == 'All':
+            out = out[out[trigger_level].isin({'success', 'failed'})]
+        elif trigger_result == 'blank':
+            out = out[_is_blank_or_dash(out[trigger_level])]
+        else:
+            out = out[out[trigger_level] == trigger_result]
+    elif trigger_result != 'All':
+        available = [column for column in trigger_columns if column in out]
+        if trigger_result == 'blank':
+            mask = pd.Series(True, index=out.index)
+            for column in available:
+                mask &= _is_blank_or_dash(out[column])
+            out = out[mask]
+        else:
+            mask = pd.Series(False, index=out.index)
+            for column in available:
+                mask |= out[column].eq(trigger_result)
+            out = out[mask]
+
+    if current_status == 'Active' and 'Current Status' in out:
+        out = out[out['Current Status'] == 'Active']
+    elif current_status == 'Later Failed' and 'Current Status' in out:
+        out = out[_is_later_failed(out['Current Status'])]
+    elif current_status == 'Unresolved':
+        mask = pd.Series(False, index=out.index)
+        if 'Trigger Day' in out:
+            mask |= out['Trigger Day'].eq('Unresolved')
+        if 'Trigger' in out:
+            mask |= out['Trigger'].eq('No Trigger')
+        out = out[mask]
+
+    if opening_path_group != 'All':
+        out = out[_opening_path_mask(out, opening_path_group)]
+
+    return out
 
 
 def _opening_count(opening_behavior: pd.DataFrame | None, path: str) -> int:
@@ -562,14 +648,11 @@ TRIGGER_COMPARISON_COLUMNS = [
     'Setups',
     'Triggered',
     'Trigger Rate',
-    'Success',
-    'Success %',
     'Failed',
     'Fail %',
-    'No Result / Blank',
-    'Later Failed',
+    'Success',
+    'Success %',
     'Later Failed %',
-    'Active',
     'Active %',
     'Median Current',
     'Median Max',
@@ -603,10 +686,7 @@ def trigger_outcome_comparison(history_by_window: dict[str, pd.DataFrame]) -> pd
                 'Success %': _fmt_rate(int(success_mask.sum()), triggered_count),
                 'Failed': int(failed_mask.sum()),
                 'Fail %': _fmt_rate(int(failed_mask.sum()), triggered_count),
-                'No Result / Blank': setups - triggered_count,
-                'Later Failed': later_failed_count,
                 'Later Failed %': _fmt_rate(later_failed_count, triggered_count),
-                'Active': active_count,
                 'Active %': _fmt_rate(active_count, triggered_count),
                 'Median Current': _fmt_pct(triggered['current_pct_raw'].median() if 'current_pct_raw' in triggered and triggered_count else None),
                 'Median Max': _fmt_pct(triggered['max_pct_raw'].median() if 'max_pct_raw' in triggered and triggered_count else None),
