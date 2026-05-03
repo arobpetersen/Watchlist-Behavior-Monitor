@@ -778,6 +778,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         '5m OR Result': raw['five_min_result'],
         'current_pct_raw': raw['current_pct'],
         'max_pct_raw': raw['max_pct'],
+        'd3_high_pct_raw': raw['d3_high_pct'],
     })
     return display
 

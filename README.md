@@ -57,6 +57,11 @@ Clean 1m ORH -> Clean 5m ORH -> Alternate Means Required using 15m ORH reference
 
 It tracks current follow-through from the trigger reference when one exists, and from the setup-day close for all names. This page is for setup behavior monitoring only; it is not a trade journal or backtest.
 
+## Setup Behavior Overview
+The Setup Behavior Overview page summarizes Back-Watch setup behavior across Last 1 Week, Last 2 Weeks, and Last 1 Month windows. It uses the same Rolling Setup Monitor definitions, then shows counts, percentages, and median follow-through metrics for the grouped setup history.
+
+This overview is metrics-only. It is not a backtest or trade journal.
+
 ## Commands
 - Run pipeline: `python -m src.run_daily`
 - Inspect DB counts: `python -m src.db_inspect`
