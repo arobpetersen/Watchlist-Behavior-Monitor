@@ -460,10 +460,6 @@ def main_table(table: pd.DataFrame) -> pd.DataFrame:
     return _clean_display_df(sort_monitor_rows(table)[MAIN_COLUMNS])
 
 
-def dataframe_height(row_count: int, row_height: int = 35, header_height: int = 38, padding: int = 8, min_height: int = 120) -> int:
-    return max(min_height, header_height + int(row_count) * row_height + padding)
-
-
 def detail_table(table: pd.DataFrame) -> pd.DataFrame:
     if table.empty:
         return pd.DataFrame(columns=DETAIL_COLUMNS)

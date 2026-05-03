@@ -4,9 +4,7 @@ from src.config import get_settings
 from src.database import get_connection
 from src.or_trigger_audit import audit_for_candidate, setup_dates, tickers_for_setup_date
 from src.rolling_setup_monitor import (
-    MAIN_COLUMNS,
     apply_setup_rating_updates,
-    dataframe_height,
     detail_table,
     main_table,
     rating_dropdown_options,
@@ -72,39 +70,40 @@ else:
 
         table = section['table']
         display = main_table(table)
-        editable = display.copy()
-        editable.insert(0, 'candidate_id', table['candidate_id'].tolist())
+        st.dataframe(display, width='stretch', hide_index=True)
 
-        edited = st.data_editor(
-            editable,
-            key=f"monitor_editor_{section['setup_date']}",
-            width='stretch',
-            height=dataframe_height(len(editable)),
-            hide_index=True,
-            column_order=MAIN_COLUMNS,
-            disabled=[c for c in editable.columns if c not in {'Setup', 'Rating'}],
-            column_config={
-                'Setup': st.column_config.SelectboxColumn(
-                    'Setup',
-                    options=setup_dropdown_options(table),
-                ),
-                'Rating': st.column_config.SelectboxColumn(
-                    'Rating',
-                    options=rating_dropdown_options(table),
-                ),
-            },
-        )
+        with st.expander('Edit Setup / Rating', expanded=False):
+            editable = display[['Ticker', 'Setup', 'Rating']].copy()
+            editable.insert(0, 'candidate_id', table['candidate_id'].tolist())
 
-        if st.button('Save Setup/Rating', key=f"save_monitor_{section['setup_date']}"):
-            edited_for_save = edited.copy()
-            edited_for_save['candidate_id'] = editable['candidate_id'].tolist()
-            changed = apply_setup_rating_updates(con, editable, edited_for_save)
-            if changed:
-                st.success(f'Saved Setup/Rating for {changed} row(s).')
-                st.rerun()
-            else:
-                st.info('No Setup/Rating changes to save.')
+            edited = st.data_editor(
+                editable,
+                key=f"monitor_metadata_editor_{section['setup_date']}",
+                width='stretch',
+                hide_index=True,
+                column_order=['Ticker', 'Setup', 'Rating'],
+                disabled=['Ticker'],
+                column_config={
+                    'Setup': st.column_config.SelectboxColumn(
+                        'Setup',
+                        options=setup_dropdown_options(table),
+                    ),
+                    'Rating': st.column_config.SelectboxColumn(
+                        'Rating',
+                        options=rating_dropdown_options(table),
+                    ),
+                },
+            )
+
+            if st.button('Save Setup/Rating', key=f"save_monitor_{section['setup_date']}"):
+                edited_for_save = edited.copy()
+                edited_for_save['candidate_id'] = editable['candidate_id'].tolist()
+                changed = apply_setup_rating_updates(con, editable, edited_for_save)
+                if changed:
+                    st.success(f'Saved Setup/Rating for {changed} row(s).')
+                    st.rerun()
+                else:
+                    st.info('No Setup/Rating changes to save.')
 
         with st.expander('Show full detail table', expanded=False):
-            detail = detail_table(table)
-            st.dataframe(detail, width='stretch', height=dataframe_height(len(detail)), hide_index=True)
+            st.dataframe(detail_table(table), width='stretch', hide_index=True)
