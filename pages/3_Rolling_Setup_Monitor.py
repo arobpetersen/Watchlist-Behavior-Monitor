@@ -2,6 +2,7 @@ import streamlit as st
 
 from src.config import get_settings
 from src.database import get_connection
+from src.or_trigger_audit import audit_for_candidate, setup_dates, tickers_for_setup_date
 from src.rolling_setup_monitor import (
     MAIN_COLUMNS,
     apply_setup_rating_updates,
@@ -16,6 +17,30 @@ st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 con = get_connection(str(get_settings().db_path))
 st.title('Rolling Setup Monitor')
+
+with st.expander('Audit OR Trigger', expanded=False):
+    audit_dates = setup_dates(con)
+    if not audit_dates:
+        st.info('No setup candidates available for audit.')
+    else:
+        selected_date = st.selectbox('Audit Setup Date', audit_dates, key='or_audit_setup_date')
+        audit_tickers = tickers_for_setup_date(con, selected_date)
+        if not audit_tickers:
+            st.info('No tickers available for this setup date.')
+        else:
+            selected_ticker = st.selectbox('Audit Ticker', audit_tickers, key='or_audit_ticker')
+            audit = audit_for_candidate(con, selected_date, selected_ticker)
+            st.caption(
+                'Regular session: 09:30 ET to 16:00 ET. '
+                '1m OR: 09:30:00 <= timestamp < 09:31:00; breaks start at 09:31. '
+                '5m OR: 09:30:00 <= timestamp < 09:35:00; breaks start at 09:35. '
+                'Breaks use high > ORH and low < ORL; retests may use low <= trigger level.'
+            )
+            st.dataframe(audit['audit'], width='stretch', height='auto', hide_index=True)
+            st.subheader('First 15 Regular-Session 1m Bars')
+            st.dataframe(audit['first_15_bars'], width='stretch', height='auto', hide_index=True)
+            st.subheader('Strict OR Break Rows')
+            st.dataframe(audit['break_bars'], width='stretch', height='auto', hide_index=True)
 
 sections = rolling_setup_monitor(con, setup_dates=5)
 if not sections:
