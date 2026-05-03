@@ -9,6 +9,7 @@ from src.setup_behavior_overview import (
     DETAIL_COLUMNS,
     SUMMARY_COLUMNS,
     detail_rows,
+    monitor_history,
     overview_windows,
     setup_behavior_overview,
     summarize_window,
@@ -155,6 +156,42 @@ def test_detail_rows_match_expected_columns_and_window_filter():
     assert detail.columns.tolist() == DETAIL_COLUMNS
     assert detail['Ticker'].tolist() == ['AAA', 'BBB']
     assert detail.loc[0, 'D3 High'] == '-'
+
+
+def test_monitor_history_uses_rolling_setup_monitor_derived_rows(monkeypatch):
+    calls = []
+
+    def fake_setup_dates(_con):
+        return [pd.Timestamp('2026-05-01'), pd.Timestamp('2026-05-08')]
+
+    def fake_rolling_setup_monitor(_con, setup_dates):
+        calls.append(setup_dates)
+        return [{
+            'setup_date': '2026-05-08',
+            'table': pd.DataFrame([{
+                'Ticker': 'LAR',
+                'Current Status': 'Failed D1',
+                'Trigger Day': 'Success',
+                'Trigger': '5m ORH',
+                '1m ORH': 'failed',
+                '5m ORH': 'success',
+                'current_pct_raw': 0.01,
+                'max_pct_raw': 0.02,
+                'd3_high_pct_raw': 0.03,
+            }]),
+        }]
+
+    monkeypatch.setattr('src.setup_behavior_overview.setup_dates', fake_setup_dates)
+    monkeypatch.setattr('src.setup_behavior_overview.rolling_setup_monitor', fake_rolling_setup_monitor)
+
+    history = monitor_history(object())
+
+    assert calls == [2]
+    assert history.loc[0, 'Ticker'] == 'LAR'
+    assert history.loc[0, 'Current Status'] == 'Failed D1'
+    assert history.loc[0, 'Trigger Day'] == 'Success'
+    assert history.loc[0, 'Trigger'] == '5m ORH'
+    assert history.loc[0, '5m ORH'] == 'success'
 
 
 def test_setup_behavior_overview_handles_zero_setup_dates():
