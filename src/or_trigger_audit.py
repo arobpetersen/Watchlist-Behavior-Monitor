@@ -20,6 +20,7 @@ from src.rolling_setup_monitor import (
 AUDIT_COLUMNS = [
     'Ticker',
     'Setup Date',
+    'Trigger Mode',
     '1m ORH',
     '1m ORL',
     '1m OR Start',
@@ -27,10 +28,12 @@ AUDIT_COLUMNS = [
     '1m ORH Break Time',
     '1m ORL Break After ORH Time',
     '1m ORH Attempted',
-    '1m OR Result',
+    'Displayed 1m ORH',
+    'Raw 1m ORH Result',
     'Prior Day High',
     'Setup Day Open',
     'Open Over PDH',
+    'Displayed PDH',
     'PDH Result',
     'PDH Trigger Break Time',
     'PDH Trigger Level',
@@ -43,7 +46,8 @@ AUDIT_COLUMNS = [
     '5m ORH Break Time',
     '5m ORL Break After ORH Time',
     '5m ORH Attempted',
-    '5m OR Result',
+    'Displayed 5m ORH',
+    'Raw 5m ORH Result',
     'Alt Required Qualified',
     '15m ORH',
     '15m ORL',
@@ -264,10 +268,17 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
     if trigger.get('trigger_type') in {'Failed OR Trigger', 'Failed PDH Trigger'}:
         failure = trigger.get('framework_fail_day')
     final_status = status_for(trigger.get('trigger_type'), failure)
+    trigger_mode = 'PDH-governed' if pdh.get('open_over_pdh') is False else 'ORH stack active'
+    raw_one_result = opening_range_result(record.get('or_1m'), 1, trigger['trigger_type'], intraday, daily)
+    raw_five_result = opening_range_result(record.get('or_5m'), 5, trigger['trigger_type'], intraday, daily)
+    displayed_one = '-' if trigger.get('pdh_governed') else raw_one_result or '-'
+    displayed_five = '-' if trigger.get('pdh_governed') else raw_five_result or '-'
+    displayed_pdh = pdh.get('pdh_result') or '-'
 
     audit = pd.DataFrame([{
         'Ticker': record['ticker'],
         'Setup Date': setup_day.isoformat(),
+        'Trigger Mode': trigger_mode,
         '1m ORH': _fmt_price(one.get('orh')),
         '1m ORL': _fmt_price(one.get('orl')),
         '1m OR Start': _fmt_ts(_session_timestamp(setup_day, 9, 30)),
@@ -275,11 +286,13 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
         '1m ORH Break Time': _fmt_ts(one.get('orh_break_time')),
         '1m ORL Break After ORH Time': _orl_after_orh_time(one),
         '1m ORH Attempted': 'Yes' if one.get('broke_orh') else '',
-        '1m OR Result': opening_range_result(record.get('or_1m'), 1, trigger['trigger_type'], intraday, daily),
+        'Displayed 1m ORH': displayed_one,
+        'Raw 1m ORH Result': raw_one_result,
         'Prior Day High': _fmt_price(prior_high),
         'Setup Day Open': _fmt_price(pdh.get('setup_day_open')),
         'Open Over PDH': '' if pdh.get('open_over_pdh') is None else 'Yes' if pdh.get('open_over_pdh') else 'No',
-        'PDH Result': pdh.get('pdh_result') or '',
+        'Displayed PDH': displayed_pdh,
+        'PDH Result': pdh.get('pdh_result') or '-',
         'PDH Trigger Break Time': _fmt_ts(pdh.get('trigger_break_time')),
         'PDH Trigger Level': _fmt_price(pdh.get('trigger_level') if pdh.get('broke_pdh') else None),
         'PDH Reference Low': _fmt_price(pdh.get('reference_low')),
@@ -291,7 +304,8 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
         '5m ORH Break Time': _fmt_ts(five.get('orh_break_time')),
         '5m ORL Break After ORH Time': _orl_after_orh_time(five),
         '5m ORH Attempted': 'Yes' if five.get('broke_orh') else '',
-        '5m OR Result': opening_range_result(record.get('or_5m'), 5, trigger['trigger_type'], intraday, daily),
+        'Displayed 5m ORH': displayed_five,
+        'Raw 5m ORH Result': raw_five_result,
         'Alt Required Qualified': 'Yes' if alt_required_qualified(record.get('or_1m'), record.get('or_5m'), record.get('or_15m'), record.get('close_location'), intraday, daily) else '',
         '15m ORH': _fmt_price(fifteen.get('orh')),
         '15m ORL': _fmt_price(fifteen.get('orl')),

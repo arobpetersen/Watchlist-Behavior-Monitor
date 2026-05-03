@@ -131,10 +131,10 @@ def test_clean_1m_orh_trigger_level_and_reference_low():
     assert out['trigger_break_time'] == pd.Timestamp('2026-05-01 09:31')
 
 
-def test_pdh_result_slash_when_open_over_prior_day_high():
+def test_pdh_result_not_applicable_when_open_over_prior_day_high():
     out = pdh_trigger_assessment(9.9, 10.0, _pdh_intraday(), _daily())
 
-    assert out['pdh_result'] == '/'
+    assert out['pdh_result'] == '-'
     assert out['open_over_pdh'] is True
 
 
@@ -166,7 +166,7 @@ def test_pdh_break_fails_day0_selects_failed_pdh_trigger():
         _or(orh=12.0, orl=9.2),
         0.5,
         intraday,
-        _daily(),
+        _daily(lows=[10.1, 10.2, 10.3, 10.4]),
         11.0,
         10.0,
     )
@@ -198,7 +198,115 @@ def test_pdh_break_fails_day1_stays_trigger_day_success_with_failed_d1_status():
     assert current_status_display(trigger_day, failure) == 'Failed D1'
 
 
-def test_pdh_never_breaks_falls_back_to_clean_1m():
+def test_pdh_governed_display_hides_orh_results_but_detail_keeps_raw_diagnostics():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'ATOM',
+        'status': 'Active',
+        'trigger_type': 'PDH',
+        'pdh_result': 'success',
+        'pdh_governed': True,
+        'one_min_result': '-',
+        'five_min_result': '-',
+        'raw_one_min_result': 'failed',
+        'raw_five_min_result': 'success',
+        'notes': '',
+        'current_pct': 0.05,
+        'max_pct': 0.10,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': '',
+        'rating': None,
+        'prior_day_high': 10.0,
+        'setup_day_open': 9.8,
+        'open_over_pdh': False,
+        'pdh_trigger_break_time': pd.Timestamp('2026-05-01 09:32'),
+        'pdh_trigger_level': 10.0,
+        'pdh_reference_low': 9.6,
+        'pdh_reference_basis': 'LOD at PDH Trigger',
+        'trigger_level': 10.0,
+        'reference_low': 9.6,
+        'reference_basis': 'LOD at PDH Trigger',
+        'trigger_break_time': pd.Timestamp('2026-05-01 09:32'),
+        'latest_close': 10.5,
+        'close_price': 10.2,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.03,
+        'max_gain_from_setup_close': 0.06,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': 0.8,
+        'current_pct_raw': 0.05,
+        'max_pct_raw': 0.10,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'PDH'] == 'success'
+    assert table.loc[0, '1m ORH'] == '-'
+    assert table.loc[0, '5m ORH'] == '-'
+    assert table.loc[0, '1m OR Result'] == 'failed'
+    assert table.loc[0, '5m OR Result'] == 'success'
+
+
+def test_gap_over_pdh_display_marks_pdh_not_applicable_and_keeps_orh_results():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'TWLO',
+        'status': 'Active',
+        'trigger_type': '5m ORH',
+        'pdh_result': '-',
+        'pdh_governed': False,
+        'one_min_result': 'failed',
+        'five_min_result': 'success',
+        'raw_one_min_result': 'failed',
+        'raw_five_min_result': 'success',
+        'notes': '',
+        'current_pct': 0.05,
+        'max_pct': 0.10,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': '',
+        'rating': None,
+        'prior_day_high': 10.0,
+        'setup_day_open': 10.2,
+        'open_over_pdh': True,
+        'pdh_trigger_break_time': None,
+        'pdh_trigger_level': None,
+        'pdh_reference_low': None,
+        'pdh_reference_basis': '',
+        'trigger_level': 10.8,
+        'reference_low': 9.6,
+        'reference_basis': 'LOD at 5m Trigger',
+        'trigger_break_time': pd.Timestamp('2026-05-01 09:35'),
+        'latest_close': 10.5,
+        'close_price': 10.2,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.03,
+        'max_gain_from_setup_close': 0.06,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': 0.8,
+        'current_pct_raw': 0.05,
+        'max_pct_raw': 0.10,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'PDH'] == '-'
+    assert table.loc[0, '1m ORH'] == 'failed'
+    assert table.loc[0, '5m ORH'] == 'success'
+
+
+def test_pdh_never_breaks_does_not_fall_back_to_clean_1m():
     intraday = _pdh_intraday(highs=[10.1, 10.6, 10.8, 10.9])
     out = derive_trigger_reference(
         _or(broke_orh=True, broke_orl=False, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:31'),
@@ -211,11 +319,12 @@ def test_pdh_never_breaks_falls_back_to_clean_1m():
         10.0,
     )
 
-    assert out['trigger_type'] == '1m ORH'
-    assert out['pdh_result'] == ''
+    assert out['trigger_type'] == 'No Trigger'
+    assert out['pdh_result'] == '-'
+    assert out['pdh_governed'] is True
 
 
-def test_pdh_never_breaks_falls_back_to_clean_5m():
+def test_pdh_never_breaks_does_not_fall_back_to_clean_5m():
     intraday = _pdh_intraday(highs=[10.1, 10.2, 10.8, 10.9])
     out = derive_trigger_reference(
         _or(broke_orh=False, broke_orl=False, orh=10.5, orl=9.8),
@@ -228,8 +337,9 @@ def test_pdh_never_breaks_falls_back_to_clean_5m():
         10.0,
     )
 
-    assert out['trigger_type'] == '5m ORH'
-    assert out['pdh_result'] == ''
+    assert out['trigger_type'] == 'No Trigger'
+    assert out['pdh_result'] == '-'
+    assert out['pdh_governed'] is True
 
 
 def test_pdh_never_breaks_and_no_fallback_is_no_trigger():
@@ -240,13 +350,49 @@ def test_pdh_never_breaks_and_no_fallback_is_no_trigger():
         _or(orh=12.0, orl=9.2),
         0.5,
         intraday,
-        _daily(),
+        _daily(lows=[10.1, 10.2, 10.3, 10.4]),
         11.0,
         10.0,
     )
 
     assert out['trigger_type'] == 'No Trigger'
-    assert out['pdh_result'] == ''
+    assert out['pdh_result'] == '-'
+
+
+def test_open_over_pdh_uses_orh_stack():
+    intraday = _pdh_intraday()
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=False, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:31'),
+        _or(broke_orh=False, broke_orl=False, orh=11.0, orl=9.6),
+        _or(orh=12.0, orl=9.2),
+        0.5,
+        intraday,
+        _daily(lows=[10.1, 10.2, 10.3, 10.4]),
+        9.9,
+        10.0,
+    )
+
+    assert out['trigger_type'] == '1m ORH'
+    assert out['pdh_result'] == '-'
+    assert out['pdh_governed'] is False
+
+
+def test_missing_pdh_falls_back_to_orh_stack():
+    intraday = _pdh_intraday()
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=False, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:31'),
+        _or(broke_orh=False, broke_orl=False, orh=11.0, orl=9.6),
+        _or(orh=12.0, orl=9.2),
+        0.5,
+        intraday,
+        _daily(lows=[10.1, 10.2, 10.3, 10.4]),
+        None,
+        10.0,
+    )
+
+    assert out['trigger_type'] == '1m ORH'
+    assert out['pdh_result'] == '-'
+    assert out['pdh_governed'] is False
 
 
 def test_1m_orl_break_before_orh_late_orh_is_failed():
@@ -985,6 +1131,8 @@ def test_format_summary_blocks_html_includes_group_titles():
         'Day Success': 2,
         'Day Fail': 0,
         'Unresolved': 1,
+        'PDH': 1,
+        'Failed PDH Trigger': 1,
         'Clean 1m': 1,
         '1m Failed': 1,
         'Clean 5m': 0,
@@ -1000,6 +1148,7 @@ def test_format_summary_blocks_html_includes_group_titles():
     html = format_summary_blocks_html(summary)
 
     assert 'Overall' in html
+    assert 'PDH' in html
     assert '1m OR' in html
     assert '5m OR' in html
     assert 'Alternate / Other' in html
@@ -1009,6 +1158,8 @@ def test_format_summary_blocks_html_includes_group_titles():
     assert 'Day Fail</span><strong>0 (0%)</strong>' in html
     assert 'Active</span><strong>1 (33%)</strong>' in html
     assert 'Later Failed</span><strong>1 (33%)</strong>' in html
+    assert 'PDH Success</span><strong>1 (33%)</strong>' in html
+    assert 'PDH Failed</span><strong>1 (33%)</strong>' in html
     assert 'Clean 5m</span><strong>0 (0%)</strong>' in html
     assert 'Median Current</span><strong>5.0%</strong>' in html
     assert 'Median Current</span><strong>5.0% (' not in html
@@ -1022,6 +1173,8 @@ def test_format_summary_blocks_html_uses_zero_percent_when_no_setups():
         'Day Success': 0,
         'Day Fail': 0,
         'Unresolved': 0,
+        'PDH': 0,
+        'Failed PDH Trigger': 0,
         'Clean 1m': 0,
         '1m Failed': 0,
         'Clean 5m': 0,
@@ -1037,6 +1190,7 @@ def test_format_summary_blocks_html_uses_zero_percent_when_no_setups():
     assert 'Setups</span><strong>0</strong>' in html
     assert 'Day Success</span><strong>0 (0%)</strong>' in html
     assert 'Active</span><strong>0 (0%)</strong>' in html
+    assert 'PDH Success</span><strong>0 (0%)</strong>' in html
     assert 'Failed 1m</span><strong>0 (0%)</strong>' in html
     assert 'No Trigger</span><strong>0 (0%)</strong>' in html
 
@@ -1148,6 +1302,24 @@ def test_day_summary_metrics():
     assert summary['Median Current %'] == '5.0%'
     assert summary['Median Max %'] == '15.0%'
     assert summary['Median D3 High %'] == '20.0%'
+
+
+def test_day_summary_counts_pdh_and_excludes_pdh_rows_from_orh_counts():
+    muted = current_status_display('Fail', 0)
+    df = pd.DataFrame([
+        {'Trigger': 'PDH', '1m ORH': '-', '5m ORH': '-', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retest Day': '', 'current_pct_raw': 0.04, 'max_pct_raw': 0.08, 'd3_high_pct_raw': 0.10},
+        {'Trigger': 'Failed PDH Trigger', '1m ORH': '-', '5m ORH': '-', 'Trigger Day': 'Fail', 'Current Status': muted, 'Retest Day': '', 'current_pct_raw': -0.01, 'max_pct_raw': 0.02, 'd3_high_pct_raw': 0.03},
+        {'Trigger': '1m ORH', '1m ORH': 'success', '5m ORH': 'success', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retest Day': '', 'current_pct_raw': 0.02, 'max_pct_raw': 0.04, 'd3_high_pct_raw': 0.05},
+    ])
+
+    summary = day_summary(df)
+
+    assert summary['PDH'] == 1
+    assert summary['Failed PDH Trigger'] == 1
+    assert summary['Clean 1m'] == 1
+    assert summary['Clean 5m'] == 1
+    assert summary['1m Failed'] == 0
+    assert summary['5m Failed'] == 0
 
 
 def test_sort_monitor_rows_current_status_then_current_pct():

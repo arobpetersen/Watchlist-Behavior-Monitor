@@ -235,8 +235,12 @@ def test_pdh_trigger_mix_aggregation_stays_out_of_top_comparison():
     history = _history().copy()
     history.loc[0, 'Trigger'] = 'PDH'
     history.loc[0, 'PDH'] = 'success'
+    history.loc[0, '1m ORH'] = '-'
+    history.loc[0, '5m ORH'] = '-'
     history.loc[1, 'Trigger'] = 'Failed PDH Trigger'
     history.loc[1, 'PDH'] = 'failed'
+    history.loc[1, '1m ORH'] = '-'
+    history.loc[1, '5m ORH'] = '-'
     summary = summarize_window(history, overview_windows('2026-05-08')[0])
     groups = selected_window_metrics(summary)
     trigger_mix = dict(groups[2]['metrics'])
@@ -244,6 +248,10 @@ def test_pdh_trigger_mix_aggregation_stays_out_of_top_comparison():
 
     assert summary['PDH'] == '1 (33%)'
     assert summary['Failed PDH Trigger'] == '1 (33%)'
+    assert summary['Clean 1m'] == '0 (0%)'
+    assert summary['Failed 1m'] == '1 (33%)'
+    assert summary['Clean 5m'] == '1 (33%)'
+    assert summary['Failed 5m'] == '0 (0%)'
     assert trigger_mix['PDH'] == '1 (33%)'
     assert trigger_mix['Failed PDH Trigger'] == '1 (33%)'
     assert 'PDH' not in comparison.columns

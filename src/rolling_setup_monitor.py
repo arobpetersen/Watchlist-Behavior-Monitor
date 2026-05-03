@@ -302,7 +302,7 @@ def pdh_trigger_assessment(
         setup_open = _num(bars.iloc[0].get('open'))
     if pdh is None or setup_open is None:
         return {
-            'pdh_result': '',
+            'pdh_result': '-',
             'prior_day_high': pdh,
             'setup_day_open': setup_open,
             'open_over_pdh': None,
@@ -316,7 +316,7 @@ def pdh_trigger_assessment(
     open_over_pdh = setup_open > pdh
     if open_over_pdh:
         return {
-            'pdh_result': '/',
+            'pdh_result': '-',
             'prior_day_high': pdh,
             'setup_day_open': setup_open,
             'open_over_pdh': True,
@@ -330,7 +330,7 @@ def pdh_trigger_assessment(
     breaks = bars[bars['high'] > pdh] if not bars.empty else pd.DataFrame()
     if breaks.empty:
         return {
-            'pdh_result': '',
+            'pdh_result': '-',
             'prior_day_high': pdh,
             'setup_day_open': setup_open,
             'open_over_pdh': False,
@@ -374,7 +374,9 @@ def derive_trigger_reference(
     five_assessment = orh_trigger_assessment(or_5m, 5, intraday, daily)
     pdh_assessment = pdh_trigger_assessment(prior_day_high, setup_day_open, intraday, daily)
 
-    if pdh_assessment['open_over_pdh'] is False and pdh_assessment['broke_pdh']:
+    pdh_governed = pdh_assessment['open_over_pdh'] is False
+
+    if pdh_governed and pdh_assessment['broke_pdh']:
         if pdh_assessment['failure_day'] == 0:
             return {
                 'trigger_type': 'Failed PDH Trigger',
@@ -389,6 +391,7 @@ def derive_trigger_reference(
                 'pdh_trigger_level': pdh_assessment['trigger_level'],
                 'pdh_reference_low': pdh_assessment['reference_low'],
                 'pdh_reference_basis': pdh_assessment['reference_basis'],
+                'pdh_governed': True,
             }
         return {
             'trigger_type': 'PDH',
@@ -401,6 +404,24 @@ def derive_trigger_reference(
             'pdh_trigger_level': pdh_assessment['trigger_level'],
             'pdh_reference_low': pdh_assessment['reference_low'],
             'pdh_reference_basis': pdh_assessment['reference_basis'],
+            'pdh_governed': True,
+        }
+
+    if pdh_governed:
+        return {
+            'trigger_type': 'No Trigger',
+            'trigger_level': None,
+            'reference_low': None,
+            'reference_basis': 'PDH not triggered',
+            'trigger_break_time': None,
+            'framework_fail_day': None,
+            'failed_framework': None,
+            'pdh_result': pdh_assessment['pdh_result'],
+            'pdh_trigger_break_time': None,
+            'pdh_trigger_level': None,
+            'pdh_reference_low': None,
+            'pdh_reference_basis': '',
+            'pdh_governed': True,
         }
 
     pdh_details = {
@@ -409,6 +430,7 @@ def derive_trigger_reference(
         'pdh_trigger_level': pdh_assessment['trigger_level'] if pdh_assessment['broke_pdh'] else None,
         'pdh_reference_low': pdh_assessment['reference_low'],
         'pdh_reference_basis': pdh_assessment['reference_basis'],
+        'pdh_governed': False,
     }
 
     if one_assessment['broke_orh'] and not one_assessment['failed']:
@@ -661,7 +683,7 @@ def _badge_class(column: str, value: str) -> str:
         return f'monitor-badge trigger-{normalized}'
     if column in {'PDH', '1m ORH', '5m ORH'} and value in {'success', 'failed'}:
         return f'monitor-badge result-{value}'
-    if column == 'PDH' and value == '/':
+    if value == '-':
         return 'monitor-badge status-muted'
     return ''
 
@@ -774,6 +796,7 @@ def format_summary_blocks_html(summary: dict) -> str:
     setups_count = int(summary.get('Setups', 0) or 0)
     groups = [
         ('Overall', [('Setups', 'Setups', False), ('Day Success', 'Day Success', True), ('Day Fail', 'Day Fail', True), ('Unresolved', 'Unresolved', True), ('Active', 'Active', True), ('Later Failed', 'Later Failed', True)]),
+        ('PDH', [('PDH Success', 'PDH', True), ('PDH Failed', 'Failed PDH Trigger', True)]),
         ('1m OR', [('Clean 1m', 'Clean 1m', True), ('Failed 1m', '1m Failed', True)]),
         ('5m OR', [('Clean 5m', 'Clean 5m', True), ('Failed 5m', '5m Failed', True)]),
         ('Alternate / Other', [('Alt Required', 'Alt Required', True), ('No Trigger', 'No Trigger', True), ('Retested', 'Retested', True)]),
@@ -838,8 +861,8 @@ def day_summary(df: pd.DataFrame) -> dict:
         'Setups': len(df),
         'PDH': int((df['Trigger'] == 'PDH').sum()) if not df.empty else 0,
         'Failed PDH Trigger': int((df['Trigger'] == 'Failed PDH Trigger').sum()) if not df.empty else 0,
-        'Clean 1m': int((df['Trigger'] == '1m ORH').sum()) if not df.empty else 0,
-        'Clean 5m': int((df['Trigger'] == '5m ORH').sum()) if not df.empty else 0,
+        'Clean 1m': int((df['1m ORH'] == 'success').sum()) if not df.empty else 0,
+        'Clean 5m': int((df['5m ORH'] == 'success').sum()) if not df.empty else 0,
         '1m Failed': int((df['1m ORH'] == 'failed').sum()) if not df.empty else 0,
         '5m Failed': int((df['5m ORH'] == 'failed').sum()) if not df.empty else 0,
         'Alt Required': int((df['Trigger'] == 'Alt Required').sum()) if not df.empty else 0,
@@ -903,6 +926,12 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         current_status_display(trigger_day, fail_day_value)
         for trigger_day, fail_day_value in zip(trigger_days, raw['fail_day'])
     ]
+    pdh_governed = raw.get('pdh_governed', blank_series).map(lambda v: bool(v) if not pd.isna(v) else False)
+    raw_one_min_result = raw.get('raw_one_min_result', raw.get('one_min_result', blank_series)).apply(_blank)
+    raw_five_min_result = raw.get('raw_five_min_result', raw.get('five_min_result', blank_series)).apply(_blank)
+    display_one_min_result = raw.get('one_min_result', raw_one_min_result).apply(_blank)
+    display_five_min_result = raw.get('five_min_result', raw_five_min_result).apply(_blank)
+
     display = pd.DataFrame({
         'candidate_id': raw['candidate_id'],
         'Ticker': raw['ticker'].astype(str),
@@ -910,9 +939,9 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Current Status': current_statuses,
         'Trigger Day': trigger_days,
         'Trigger': raw['trigger_type'],
-        'PDH': raw.get('pdh_result', blank_series).apply(_blank),
-        '1m ORH': raw['one_min_result'],
-        '5m ORH': raw['five_min_result'],
+        'PDH': raw.get('pdh_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
+        '1m ORH': display_one_min_result.apply(lambda v: '-' if v == '' else v),
+        '5m ORH': display_five_min_result.apply(lambda v: '-' if v == '' else v),
         'Notes': raw.get('notes', blank_series).apply(_blank),
         'Current %': raw['current_pct'].apply(_fmt_pct),
         'Max %': raw['max_pct'].apply(_fmt_pct),
@@ -924,7 +953,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Prior Day High': raw.get('prior_day_high', blank_series).apply(_fmt_price),
         'Setup Day Open': raw.get('setup_day_open', blank_series).apply(_fmt_price),
         'Open Over PDH': raw.get('open_over_pdh', blank_series).apply(lambda v: '' if v is None or pd.isna(v) else 'Yes' if bool(v) else 'No'),
-        'PDH Result': raw.get('pdh_result', blank_series).apply(_blank),
+        'PDH Result': raw.get('pdh_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
         'PDH Trigger Break Time': raw.get('pdh_trigger_break_time', blank_series).apply(_fmt_ts),
         'PDH Trigger Level': raw.get('pdh_trigger_level', blank_series).apply(_fmt_price),
         'PDH Reference Low': raw.get('pdh_reference_low', blank_series).apply(_fmt_price),
@@ -944,8 +973,8 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         '1m OR Width / ATR14': raw.get('one_min_or_width_vs_atr14', blank_series).apply(_fmt_ratio),
         '5m OR Width / ATR14': raw.get('five_min_or_width_vs_atr14', blank_series).apply(_fmt_ratio),
         'Close Bucket': raw['close_location'].apply(_close_bucket),
-        '1m OR Result': raw['one_min_result'],
-        '5m OR Result': raw['five_min_result'],
+        '1m OR Result': raw_one_min_result,
+        '5m OR Result': raw_five_min_result,
         'current_pct_raw': raw['current_pct'],
         'max_pct_raw': raw['max_pct'],
         'd3_high_pct_raw': raw['d3_high_pct'],
@@ -1021,8 +1050,16 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
         record.update(trigger)
         record.update(opening_range_width_notes(record.get('or_1m'), record.get('or_5m'), record.get('atr20')))
         record.update(_follow_through(record, daily_bars, intraday_bars))
-        record['one_min_result'] = opening_range_result(record.get('or_1m'), 1, record['trigger_type'], ticker_intraday, ticker_daily)
-        record['five_min_result'] = opening_range_result(record.get('or_5m'), 5, record['trigger_type'], ticker_intraday, ticker_daily)
+        raw_one_min_result = opening_range_result(record.get('or_1m'), 1, record['trigger_type'], ticker_intraday, ticker_daily)
+        raw_five_min_result = opening_range_result(record.get('or_5m'), 5, record['trigger_type'], ticker_intraday, ticker_daily)
+        record['raw_one_min_result'] = raw_one_min_result
+        record['raw_five_min_result'] = raw_five_min_result
+        if record.get('pdh_governed'):
+            record['one_min_result'] = '-'
+            record['five_min_result'] = '-'
+        else:
+            record['one_min_result'] = raw_one_min_result or '-'
+            record['five_min_result'] = raw_five_min_result or '-'
         record['status'] = status_for(record['trigger_type'], record['fail_day'])
         rows.append(record)
 

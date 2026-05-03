@@ -18,7 +18,7 @@ with st.expander('Definitions / Logic', expanded=False):
         """
 - **Current Status**: current setup state. Active means a trigger-day success has not failed later; Failed D1/D2/D3 means the selected reference low failed after setup day; dash means day-0 fail or unresolved.
 - **Trigger Day**: setup-day outcome. Success means a selected trigger/reference held through day 0, Fail means it failed on day 0, and Unresolved means no trigger.
-- **PDH**: prior-day high diagnostic. Slash means the setup opened above PDH, success means PDH broke and held day 0, failed means PDH broke and failed day 0, blank means unavailable or no PDH break.
+- **PDH**: prior-day high diagnostic. Dash means PDH is not applicable or did not trigger, success means PDH broke and held day 0, and failed means PDH broke and failed day 0.
 - **1m ORH / 5m ORH**: diagnostic opening-range high results. Success requires a strict high break above ORH and the selected trigger-time reference low holding after trigger.
 - **Alt Required**: alternate framework used only when failed/missing OR triggers repair under the existing 15m/close-location rule.
 - **Failed OR Trigger**: OR trigger framework failed and no alternate qualification repaired it.
