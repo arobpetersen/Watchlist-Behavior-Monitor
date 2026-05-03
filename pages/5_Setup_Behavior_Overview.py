@@ -63,6 +63,9 @@ else:
         'hidden raw diagnostics remain in the detail/audit views.'
     )
 
+    st.subheader('Trigger Outcome Comparison')
+    st.dataframe(overview['trigger_outcome_comparison'], width='stretch', hide_index=True)
+
     st.subheader('Trigger Quality')
     st.dataframe(overview['trigger_quality'][selected_window], width='stretch', hide_index=True)
 

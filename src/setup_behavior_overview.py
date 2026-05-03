@@ -364,6 +364,12 @@ def _pct_of_rows(count: int, denominator: int) -> str:
     return f'{round((count / denominator) * 100)}%'
 
 
+def _fmt_rate(count: int, denominator: int) -> str:
+    if denominator <= 0:
+        return '-'
+    return f'{round((count / denominator) * 100)}%'
+
+
 def _opening_path_row(path: str, rows: pd.DataFrame, total_setups: int) -> dict:
     count = len(rows)
     return {
@@ -434,26 +440,12 @@ def factual_read(window_summary: dict, opening_behavior: pd.DataFrame | None = N
     clean_1m = _opening_count(opening_behavior, 'Clean 1m ORH Success')
     reclaimed = _opening_count(opening_behavior, '1m ORH Failed, Later Reclaimed')
     failed_all = _opening_count(opening_behavior, 'Failed All Opening Triggers')
-    median_max_raw = window_summary.get('Median Max', '-')
-    positive_max = median_max_raw != '-' and not str(median_max_raw).startswith('-')
-
-    if reclaimed > 0 and positive_max:
-        behavior = (
-            f'Opening behavior is choppy but constructive: {reclaimed} setup'
-            f'{"s" if reclaimed != 1 else ""} had an early 1m ORH failure followed by a later 5m ORH/PDH reclaim.'
-        )
-    elif clean_1m > 0 and reclaimed == 0 and failed_all == 0:
-        behavior = (
-            f'Opening behavior is clean early: {clean_1m} setup'
-            f'{"s" if clean_1m != 1 else ""} followed the 1m ORH path.'
-        )
-    elif failed_all > 0 and failed_all >= clean_1m + reclaimed:
-        behavior = (
-            f'Opening behavior is failure-heavy: {failed_all} setup'
-            f'{"s" if failed_all != 1 else ""} failed opening triggers without a later displayed reclaim.'
-        )
-    else:
-        behavior = 'Opening behavior is mixed across clean triggers, later reclaims, and unresolved or failed paths.'
+    behavior = (
+        f'Opening path detail shows {clean_1m} clean 1m ORH setup'
+        f'{"s" if clean_1m != 1 else ""}, {reclaimed} early 1m ORH failure'
+        f'{"s" if reclaimed != 1 else ""} followed by later 5m ORH/PDH reclaim, and {failed_all} setup'
+        f'{"s" if failed_all != 1 else ""} with all displayed opening triggers failed.'
+    )
 
     return (
         f'{window} includes {setups} setups across {setup_dates_count} setup dates. '
@@ -563,6 +555,63 @@ def mix_tables(window_summary: dict) -> dict[str, pd.DataFrame]:
 
 
 TRIGGER_ORDER = ['PDH', '1m ORH', '5m ORH', 'Alt Required', 'Failed PDH Trigger', 'Failed OR Trigger', 'No Trigger']
+TRIGGER_COMPARISON_ORDER = ['1m ORH', '5m ORH', 'PDH']
+TRIGGER_COMPARISON_COLUMNS = [
+    'Trigger',
+    'Window',
+    'Setups',
+    'Triggered',
+    'Trigger Rate',
+    'Success',
+    'Success %',
+    'Failed',
+    'Fail %',
+    'No Result / Blank',
+    'Later Failed',
+    'Later Failed %',
+    'Active',
+    'Active %',
+    'Median Current',
+    'Median Max',
+]
+
+
+def trigger_outcome_comparison(history_by_window: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    out = []
+    for trigger_name in TRIGGER_COMPARISON_ORDER:
+        column = trigger_name
+        for window_label, rows in history_by_window.items():
+            setups = len(rows)
+            if rows.empty or column not in rows:
+                values = pd.Series('', index=rows.index)
+            else:
+                values = rows[column].fillna('').astype(str).str.strip()
+            success_mask = values.eq('success')
+            failed_mask = values.eq('failed')
+            triggered_mask = success_mask | failed_mask
+            triggered = rows[triggered_mask].copy()
+            triggered_count = len(triggered)
+            later_failed_count = int(_is_later_failed(triggered['Current Status']).sum()) if triggered_count and 'Current Status' in triggered else 0
+            active_count = int(triggered['Current Status'].eq('Active').sum()) if triggered_count and 'Current Status' in triggered else 0
+            out.append({
+                'Trigger': trigger_name,
+                'Window': window_label,
+                'Setups': setups,
+                'Triggered': triggered_count,
+                'Trigger Rate': _fmt_rate(triggered_count, setups),
+                'Success': int(success_mask.sum()),
+                'Success %': _fmt_rate(int(success_mask.sum()), triggered_count),
+                'Failed': int(failed_mask.sum()),
+                'Fail %': _fmt_rate(int(failed_mask.sum()), triggered_count),
+                'No Result / Blank': setups - triggered_count,
+                'Later Failed': later_failed_count,
+                'Later Failed %': _fmt_rate(later_failed_count, triggered_count),
+                'Active': active_count,
+                'Active %': _fmt_rate(active_count, triggered_count),
+                'Median Current': _fmt_pct(triggered['current_pct_raw'].median() if 'current_pct_raw' in triggered and triggered_count else None),
+                'Median Max': _fmt_pct(triggered['max_pct_raw'].median() if 'max_pct_raw' in triggered and triggered_count else None),
+            })
+    return pd.DataFrame(out, columns=TRIGGER_COMPARISON_COLUMNS)
 
 
 def trigger_quality_table(rows: pd.DataFrame) -> pd.DataFrame:
@@ -651,6 +700,7 @@ def setup_behavior_overview(con) -> dict:
             'snapshot_cards': {},
             'mixes': {},
             'opening_behavior': {},
+            'trigger_outcome_comparison': pd.DataFrame(columns=TRIGGER_COMPARISON_COLUMNS),
             'trigger_quality': {},
             'details': {},
             'windows': [],
@@ -676,6 +726,7 @@ def setup_behavior_overview(con) -> dict:
         'snapshot_cards': {label: snapshot_cards_html(row) for label, row in summary_by_window.items()},
         'mixes': {label: mix_tables(row) for label, row in summary_by_window.items()},
         'opening_behavior': opening_behavior,
+        'trigger_outcome_comparison': trigger_outcome_comparison(history_by_window),
         'trigger_quality': {label: trigger_quality_table(history_by_window[label]) for label in summary_by_window},
         'details': details,
         'windows': windows,

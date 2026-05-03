@@ -10,6 +10,7 @@ from src.setup_behavior_overview import (
     DETAIL_COLUMNS,
     FULL_SUMMARY_COLUMNS,
     SUMMARY_COLUMNS,
+    TRIGGER_COMPARISON_COLUMNS,
     comparison_rows,
     detail_rows,
     factual_read,
@@ -22,6 +23,7 @@ from src.setup_behavior_overview import (
     snapshot_cards_html,
     setup_behavior_overview,
     summarize_window,
+    trigger_outcome_comparison,
     trigger_quality_table,
 )
 
@@ -297,7 +299,9 @@ def test_factual_read_is_objective_and_contains_key_metrics():
     assert '2 (50%) failed later' in text
     assert 'Median current return is 1.5%' in text
     assert 'median max return is 7.0%' in text
-    assert 'Opening behavior is choppy but constructive' in text
+    assert 'Opening path detail shows 1 clean 1m ORH setup' in text
+    assert '1 early 1m ORH failure followed by later 5m ORH/PDH reclaim' in text
+    assert '1 setup with all displayed opening triggers failed' in text
     lowered = text.lower()
     assert 'trade more aggressively' not in lowered
     assert 'avoid' not in lowered
@@ -358,6 +362,107 @@ def test_trigger_quality_table_groups_by_selected_trigger():
     assert by_trigger.loc['5m ORH', 'Later Failed %'] == '100%'
     assert by_trigger.loc['No Trigger', 'Day Success %'] == '0%'
     assert by_trigger.loc['PDH', 'Count'] == 0
+
+
+def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
+    base = pd.DataFrame([
+        {
+            'Ticker': 'A',
+            'Current Status': 'Active',
+            '1m ORH': 'success',
+            '5m ORH': '-',
+            'PDH': 'Gap',
+            'current_pct_raw': 0.04,
+            'max_pct_raw': 0.10,
+        },
+        {
+            'Ticker': 'B',
+            'Current Status': 'Failed D1',
+            '1m ORH': 'failed',
+            '5m ORH': 'success',
+            'PDH': '-',
+            'current_pct_raw': 0.02,
+            'max_pct_raw': 0.08,
+        },
+        {
+            'Ticker': 'C',
+            'Current Status': 'Active',
+            '1m ORH': '-',
+            '5m ORH': 'failed',
+            'PDH': 'success',
+            'current_pct_raw': 0.01,
+            'max_pct_raw': 0.05,
+        },
+        {
+            'Ticker': 'D',
+            'Current Status': 'â€”',
+            '1m ORH': '',
+            '5m ORH': '',
+            'PDH': '-',
+            'current_pct_raw': None,
+            'max_pct_raw': None,
+        },
+    ])
+    return {
+        'Last 5 Setup Dates': base.iloc[:2].copy(),
+        'Last 10 Setup Dates': base.copy(),
+        'Last 20 Setup Dates': base.iloc[[3]].copy(),
+    }
+
+
+def test_trigger_outcome_comparison_rows_and_denominators():
+    comparison = trigger_outcome_comparison(_trigger_comparison_history())
+
+    assert comparison.columns.tolist() == TRIGGER_COMPARISON_COLUMNS
+    assert comparison[['Trigger', 'Window']].values.tolist() == [
+        ['1m ORH', 'Last 5 Setup Dates'],
+        ['1m ORH', 'Last 10 Setup Dates'],
+        ['1m ORH', 'Last 20 Setup Dates'],
+        ['5m ORH', 'Last 5 Setup Dates'],
+        ['5m ORH', 'Last 10 Setup Dates'],
+        ['5m ORH', 'Last 20 Setup Dates'],
+        ['PDH', 'Last 5 Setup Dates'],
+        ['PDH', 'Last 10 Setup Dates'],
+        ['PDH', 'Last 20 Setup Dates'],
+    ]
+
+    one_last_10 = comparison[(comparison['Trigger'] == '1m ORH') & (comparison['Window'] == 'Last 10 Setup Dates')].iloc[0]
+    assert one_last_10['Setups'] == 4
+    assert one_last_10['Triggered'] == 2
+    assert one_last_10['Trigger Rate'] == '50%'
+    assert one_last_10['Success'] == 1
+    assert one_last_10['Success %'] == '50%'
+    assert one_last_10['Failed'] == 1
+    assert one_last_10['Fail %'] == '50%'
+    assert one_last_10['No Result / Blank'] == 2
+
+
+def test_trigger_outcome_comparison_later_failed_active_and_medians():
+    comparison = trigger_outcome_comparison(_trigger_comparison_history())
+
+    five_last_10 = comparison[(comparison['Trigger'] == '5m ORH') & (comparison['Window'] == 'Last 10 Setup Dates')].iloc[0]
+    assert five_last_10['Triggered'] == 2
+    assert five_last_10['Later Failed'] == 1
+    assert five_last_10['Later Failed %'] == '50%'
+    assert five_last_10['Active'] == 1
+    assert five_last_10['Active %'] == '50%'
+    assert five_last_10['Median Current'] == '1.5%'
+    assert five_last_10['Median Max'] == '6.5%'
+
+
+def test_trigger_outcome_comparison_zero_trigger_display():
+    comparison = trigger_outcome_comparison(_trigger_comparison_history())
+
+    pdh_last_5 = comparison[(comparison['Trigger'] == 'PDH') & (comparison['Window'] == 'Last 5 Setup Dates')].iloc[0]
+    assert pdh_last_5['Setups'] == 2
+    assert pdh_last_5['Triggered'] == 0
+    assert pdh_last_5['Trigger Rate'] == '0%'
+    assert pdh_last_5['Success %'] == '-'
+    assert pdh_last_5['Fail %'] == '-'
+    assert pdh_last_5['Later Failed %'] == '-'
+    assert pdh_last_5['Active %'] == '-'
+    assert pdh_last_5['Median Current'] == '-'
+    assert pdh_last_5['Median Max'] == '-'
 
 
 def _opening_behavior_history() -> pd.DataFrame:
@@ -516,5 +621,7 @@ def test_setup_behavior_overview_handles_zero_setup_dates():
     assert out['reads'] == {}
     assert out['snapshot_cards'] == {}
     assert out['opening_behavior'] == {}
+    assert out['trigger_outcome_comparison'].columns.tolist() == TRIGGER_COMPARISON_COLUMNS
+    assert out['trigger_outcome_comparison'].empty
     assert out['details'] == {}
     assert out['windows'] == []
