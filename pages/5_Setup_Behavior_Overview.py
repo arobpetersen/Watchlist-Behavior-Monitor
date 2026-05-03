@@ -51,8 +51,8 @@ else:
     st.subheader('Trigger Event Outcomes Across Windows')
     st.dataframe(overview['trigger_outcome_comparison'], width='stretch', hide_index=True)
     st.caption(
-        'Trigger event outcomes measure each trigger level independently. A setup may have multiple trigger-level outcomes. '
-        'Percentages for success, failure, active, and later failed are conditional on that trigger occurring.'
+        'Rows are grouped by trigger, then setup-date window. Trigger Rate uses all setups in the window. '
+        'Fail %, Success %, Active %, and Later Failed % use triggered setups only.'
     )
 
     st.subheader('Selected Window Opening Path')
@@ -60,10 +60,6 @@ else:
     st.caption(
         'Path rows describe selected-window setup sequences and may overlap when an early failed trigger later succeeds '
         'at a higher trigger level.'
-    )
-    st.caption(
-        'Path rows use the displayed/applicable PDH, 1m ORH, and 5m ORH results from Rolling Setup Monitor; '
-        'hidden raw diagnostics remain in the detail/audit views.'
     )
 
     st.subheader('Supporting Stats / Primary Trigger Outcome')
