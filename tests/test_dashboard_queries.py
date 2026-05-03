@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import pytest
 
-from src.dashboard_queries import _clean_display_value, _close_bucket, _or_result, _rating_bucket, _vwap_result
+from src.dashboard_queries import (
+    DAILY_TABLE_COLUMNS,
+    GROUP_SUMMARY_COLUMNS,
+    ROLLING_COLUMNS,
+    TICKER_DETAIL_COLUMNS,
+    _clean_display_value,
+    _close_bucket,
+    _or_result,
+    _rating_bucket,
+    _vwap_result,
+)
 
 
 @pytest.mark.parametrize(
@@ -64,3 +74,16 @@ def test_clean_display_value_hides_missing_values():
     assert _clean_display_value(float('nan')) == ''
     assert _clean_display_value('nan') == ''
     assert _clean_display_value('setup') == 'setup'
+
+
+def test_display_labels_use_atr14_not_atr20():
+    labels = [
+        *DAILY_TABLE_COLUMNS.values(),
+        *GROUP_SUMMARY_COLUMNS.values(),
+        *ROLLING_COLUMNS.values(),
+        *TICKER_DETAIL_COLUMNS.values(),
+    ]
+
+    assert 'ATR14' in labels
+    assert 'Range / ATR14' in labels
+    assert not any('ATR20' in label for label in labels)

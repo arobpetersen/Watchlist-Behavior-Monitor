@@ -201,8 +201,8 @@ def test_wide_one_min_or_note_when_width_vs_atr_is_at_least_threshold():
         1.0,
     )
 
-    assert out['one_min_or_width_vs_atr20'] == 0.75
-    assert out['five_min_or_width_vs_atr20'] == 0.5
+    assert out['one_min_or_width_vs_atr14'] == 0.75
+    assert out['five_min_or_width_vs_atr14'] == 0.5
     assert out['notes'] == 'Wide 1m OR'
 
 
@@ -221,9 +221,9 @@ def test_no_wide_or_note_when_atr_missing_or_zero():
     zero = opening_range_width_notes(_or(orh=10.75, orl=10.00), _or(orh=11.25, orl=10.50), 0)
 
     assert missing['notes'] == ''
-    assert missing['one_min_or_width_vs_atr20'] is None
+    assert missing['one_min_or_width_vs_atr14'] is None
     assert zero['notes'] == ''
-    assert zero['five_min_or_width_vs_atr20'] is None
+    assert zero['five_min_or_width_vs_atr14'] is None
 
 
 def test_main_and_detail_table_columns_and_blank_handling():
@@ -253,9 +253,9 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'Current vs Setup Close': '6.0%',
         'Max Gain from Setup Close': '8.0%',
         'RVOL': '',
-        'Range / ATR': '',
-        '1m OR Width / ATR': '0.75',
-        '5m OR Width / ATR': '',
+        'Range / ATR14': '',
+        '1m OR Width / ATR14': '0.75',
+        '5m OR Width / ATR14': '',
         'Close Bucket': '',
         '1m OR Result': 'success',
         '5m OR Result': '',
@@ -270,8 +270,8 @@ def test_main_and_detail_table_columns_and_blank_handling():
     assert detail_table(df).columns.tolist() == [
         'Ticker', 'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
         'Latest Close', 'Setup Close', 'Setup High', 'Setup Low', 'Current vs Setup Close',
-        'Max Gain from Setup Close', 'RVOL', 'Range / ATR', '1m OR Width / ATR',
-        '5m OR Width / ATR', 'Close Bucket',
+        'Max Gain from Setup Close', 'RVOL', 'Range / ATR14', '1m OR Width / ATR14',
+        '5m OR Width / ATR14', 'Close Bucket',
         '1m OR Result', '5m OR Result',
     ]
     assert main_table(df).loc[0, 'Rating'] == ''
@@ -305,8 +305,8 @@ def test_format_section_table_formats_nan_day_values_as_blank():
         'max_gain_from_setup_close': 0.08,
         'relative_volume_20d': None,
         'range_vs_atr20': None,
-        'one_min_or_width_vs_atr20': None,
-        'five_min_or_width_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
         'close_location': None,
     }])
 

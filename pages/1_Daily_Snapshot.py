@@ -42,7 +42,7 @@ else:
         ],
         [
             ('Median Close Loc.', _fmt_num(m.get('median_close_location'))),
-            ('Median Range / ATR', _fmt_num(m.get('median_range_vs_atr20'))),
+            ('Median Range / ATR14', _fmt_num(m.get('median_range_vs_atr20'))),
             ('Median RVOL', _fmt_num(m.get('median_relative_volume'))),
             ('High Broke 3D %', _fmt_pct(m.get('pct_broke_setup_day_high_within_3d'))),
         ],

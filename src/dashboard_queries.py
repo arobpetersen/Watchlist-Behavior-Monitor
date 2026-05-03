@@ -99,7 +99,7 @@ def _format_summary_df(df: pd.DataFrame) -> pd.DataFrame:
     for column in formatted.columns:
         if column.endswith('%'):
             formatted[column] = formatted[column].apply(_format_pct)
-    for column in ['Median Range / ATR', 'Median RVOL']:
+    for column in ['Median Range / ATR14', 'Median RVOL']:
         if column in formatted.columns:
             formatted[column] = formatted[column].apply(_format_num)
     return formatted
@@ -118,7 +118,7 @@ DAILY_TABLE_COLUMNS = {
     'VWAP result': 'VWAP',
     'close_location': 'Close Loc.',
     'close_bucket': 'Close Bucket',
-    'range_vs_atr20': 'Range / ATR',
+    'range_vs_atr20': 'Range / ATR14',
     'relative_volume_20d': 'RVOL',
     'broke_setup_day_high_within_3d': 'High Broke 3D',
     'broke_setup_day_low_within_3d': 'Low Broke 3D',
@@ -131,7 +131,7 @@ GROUP_SUMMARY_COLUMNS = {
     'pct_closed_above_vwap': 'Above VWAP %',
     'pct_closed_near_hod': 'Near HOD %',
     'pct_5m_orh_fakeout': '5m Fakeout %',
-    'median_range_vs_atr20': 'Median Range / ATR',
+    'median_range_vs_atr20': 'Median Range / ATR14',
     'median_relative_volume': 'Median RVOL',
     'pct_broke_setup_day_high_within_3d': 'High Broke 3D %',
     'pct_broke_setup_day_low_within_3d': 'Low Broke 3D %',
@@ -145,7 +145,7 @@ ROLLING_COLUMNS = {
     'pct_closed_near_hod': 'Near HOD %',
     'pct_1m_orh_fakeout': '1m Fakeout %',
     'pct_5m_orh_fakeout': '5m Fakeout %',
-    'median_range_vs_atr20': 'Median Range / ATR',
+    'median_range_vs_atr20': 'Median Range / ATR14',
     'median_relative_volume': 'Median RVOL',
     'pct_broke_setup_day_high_within_3d': 'High Broke 3D %',
     'pct_broke_setup_day_low_within_3d': 'Low Broke 3D %',
@@ -172,9 +172,9 @@ TICKER_DETAIL_COLUMNS = {
     '5m OR result': '5m OR',
     '15m OR result': '15m OR',
     'gap_pct': 'Gap %',
-    'atr20': 'ATR20',
+    'atr20': 'ATR14',
     'day_range_pct': 'Day Range %',
-    'range_vs_atr20': 'Range / ATR',
+    'range_vs_atr20': 'Range / ATR14',
     'avg_volume_20d': 'Avg Volume 20D',
     'relative_volume_20d': 'RVOL',
     'broke_setup_day_high_D1': 'High Broke D+1',

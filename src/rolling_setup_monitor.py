@@ -56,9 +56,9 @@ DETAIL_COLUMNS = [
     'Current vs Setup Close',
     'Max Gain from Setup Close',
     'RVOL',
-    'Range / ATR',
-    '1m OR Width / ATR',
-    '5m OR Width / ATR',
+    'Range / ATR14',
+    '1m OR Width / ATR14',
+    '5m OR Width / ATR14',
     'Close Bucket',
     '1m OR Result',
     '5m OR Result',
@@ -200,8 +200,8 @@ def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location
     }
 
 
-def _or_width_vs_atr(or_data: dict, atr20) -> float | None:
-    atr = _num(atr20)
+def _or_width_vs_atr(or_data: dict, atr14) -> float | None:
+    atr = _num(atr14)
     orh = _num(or_data.get('orh'))
     orl = _num(or_data.get('orl'))
     if atr in (None, 0) or orh is None or orl is None:
@@ -209,17 +209,17 @@ def _or_width_vs_atr(or_data: dict, atr20) -> float | None:
     return (orh - orl) / atr
 
 
-def opening_range_width_notes(or_1m: str, or_5m: str, atr20) -> dict:
-    one_ratio = _or_width_vs_atr(_loads(or_1m), atr20)
-    five_ratio = _or_width_vs_atr(_loads(or_5m), atr20)
+def opening_range_width_notes(or_1m: str, or_5m: str, atr14) -> dict:
+    one_ratio = _or_width_vs_atr(_loads(or_1m), atr14)
+    five_ratio = _or_width_vs_atr(_loads(or_5m), atr14)
     notes = []
     if one_ratio is not None and one_ratio >= 0.75:
         notes.append('Wide 1m OR')
     if five_ratio is not None and five_ratio >= 0.75:
         notes.append('Wide 5m OR')
     return {
-        'one_min_or_width_vs_atr20': one_ratio,
-        'five_min_or_width_vs_atr20': five_ratio,
+        'one_min_or_width_vs_atr14': one_ratio,
+        'five_min_or_width_vs_atr14': five_ratio,
         'notes': '; '.join(notes),
     }
 
@@ -457,9 +457,9 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Current vs Setup Close': raw['current_pct_from_setup_close'].apply(_fmt_pct),
         'Max Gain from Setup Close': raw['max_gain_from_setup_close'].apply(_fmt_pct),
         'RVOL': raw['relative_volume_20d'].apply(_fmt_price),
-        'Range / ATR': raw['range_vs_atr20'].apply(_fmt_price),
-        '1m OR Width / ATR': raw.get('one_min_or_width_vs_atr20', blank_series).apply(_fmt_ratio),
-        '5m OR Width / ATR': raw.get('five_min_or_width_vs_atr20', blank_series).apply(_fmt_ratio),
+        'Range / ATR14': raw['range_vs_atr20'].apply(_fmt_price),
+        '1m OR Width / ATR14': raw.get('one_min_or_width_vs_atr14', blank_series).apply(_fmt_ratio),
+        '5m OR Width / ATR14': raw.get('five_min_or_width_vs_atr14', blank_series).apply(_fmt_ratio),
         'Close Bucket': raw['close_location'].apply(_close_bucket),
         '1m OR Result': raw['one_min_result'],
         '5m OR Result': raw['five_min_result'],

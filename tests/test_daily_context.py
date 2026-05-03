@@ -6,15 +6,17 @@ import pytest
 from src.daily_context import calculate_daily_context
 
 
-def test_daily_context_atr_rvol_gap_and_forward_stats():
+def test_daily_context_atr14_rvol_gap_and_forward_stats():
     rows = []
-    for d in pd.bdate_range('2026-04-02', periods=20):
+    for i, d in enumerate(pd.bdate_range('2026-04-02', periods=20)):
+        high = 105 if i < 6 else 110
+        low = 95 if i < 6 else 90
         rows.append({
             'ticker': 'AAPL',
             'trading_date': d.date().isoformat(),
             'open': 100,
-            'high': 105,
-            'low': 95,
+            'high': high,
+            'low': low,
             'close': 100,
             'volume': 1000,
         })
@@ -29,9 +31,9 @@ def test_daily_context_atr_rvol_gap_and_forward_stats():
 
     assert metrics['prior_close'] == 100
     assert metrics['gap_pct'] == pytest.approx(0.05)
-    assert metrics['atr20'] == pytest.approx(10)
+    assert metrics['atr20'] == pytest.approx(20)
     assert metrics['day_range_pct'] == pytest.approx(15 / 105)
-    assert metrics['range_vs_atr20'] == pytest.approx(1.5)
+    assert metrics['range_vs_atr20'] == pytest.approx(0.75)
     assert metrics['avg_volume_20d'] == pytest.approx(1000)
     assert metrics['relative_volume_20d'] == pytest.approx(2.5)
     assert metrics['broke_entry_day_high_D1'] is True

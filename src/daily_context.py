@@ -41,7 +41,7 @@ def calculate_daily_context(daily_bars: pd.DataFrame, ticker: str, trading_date:
         return empty
     entry_idx = int(entry_rows.index[0])
     entry = df.loc[entry_idx]
-    prior = df.iloc[:entry_idx].tail(20).copy()
+    prior = df.iloc[:entry_idx].tail(14).copy()
     forward = df.iloc[entry_idx + 1:entry_idx + 4].copy()
 
     prior_close = None if prior.empty else float(prior.iloc[-1]['close'])
@@ -52,7 +52,7 @@ def calculate_daily_context(daily_bars: pd.DataFrame, ticker: str, trading_date:
     entry_volume = float(entry['volume'])
     entry_range = entry_high - entry_low
 
-    atr20 = None
+    atr14 = None
     avg_volume_20d = None
     if not prior.empty:
         prior['prev_close'] = prior['close'].shift(1)
@@ -62,7 +62,7 @@ def calculate_daily_context(daily_bars: pd.DataFrame, ticker: str, trading_date:
             (prior['low'] - prior['prev_close']).abs(),
         ], axis=1)
         prior['true_range'] = tr_parts.max(axis=1, skipna=True)
-        atr20 = float(prior['true_range'].mean())
+        atr14 = float(prior['true_range'].mean())
         avg_volume_20d = float(prior['volume'].mean())
 
     d1 = forward.iloc[0] if not forward.empty else None
@@ -72,9 +72,9 @@ def calculate_daily_context(daily_bars: pd.DataFrame, ticker: str, trading_date:
     return {
         'prior_close': prior_close,
         'gap_pct': _safe_div(entry_open - prior_close, prior_close) if prior_close is not None else None,
-        'atr20': atr20,
+        'atr20': atr14,
         'day_range_pct': _safe_div(entry_range, entry_open),
-        'range_vs_atr20': _safe_div(entry_range, atr20),
+        'range_vs_atr20': _safe_div(entry_range, atr14),
         'avg_volume_20d': avg_volume_20d,
         'relative_volume_20d': _safe_div(entry_volume, avg_volume_20d),
         'broke_entry_day_high_D1': None if d1 is None else bool(float(d1['high']) > entry_high),

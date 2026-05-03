@@ -16,7 +16,7 @@ Drop CSV/XLSX files into `data/watchlists/`.
 Required: `ticker`.
 Optional: `rating, setup, focus, key_level`.
 
-Each file represents setup candidates for that setup date. The dashboard summarizes objective behavior such as VWAP, opening range outcomes, close location, ATR/RVOL context, and short D+1 to D+3 follow-through.
+Each file represents setup candidates for that setup date. The dashboard summarizes objective behavior such as VWAP, opening range outcomes, close location, ATR14/RVOL context, and short D+1 to D+3 follow-through.
 
 ## Back-Watch Source Folder
 Set `BACKWATCH_SOURCE_DIR` to your local TC2000/export folder. The main app page reads CSV/XLSX/XLS files from that folder, infers the setup date from the filename, previews normalized tickers, and saves a canonical CSV into `data/watchlists/`.
