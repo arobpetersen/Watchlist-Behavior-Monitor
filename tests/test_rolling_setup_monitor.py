@@ -333,6 +333,111 @@ def test_failed_1m_and_5m_with_15m_break_and_high_close_selects_alt_required_act
     assert status_for(out['trigger_type'], failure) == 'Active'
 
 
+def test_crml_style_failed_1m_5m_then_15m_break_selects_alt_required():
+    intraday = pd.DataFrame({
+        'ticker': ['CRML'] * 8,
+        'trading_date': pd.to_datetime(['2026-04-27'] * 8),
+        'timestamp_et': pd.to_datetime([
+            '2026-04-27 09:30',
+            '2026-04-27 09:31',
+            '2026-04-27 09:33',
+            '2026-04-27 09:37',
+            '2026-04-27 09:50',
+            '2026-04-27 13:31',
+            '2026-04-27 13:32',
+            '2026-04-27 15:59',
+        ]),
+        'high': [12.80, 12.50, 12.90, 13.10, 12.50, 13.20, 13.40, 14.50],
+        'low': [12.20, 12.06, 12.10, 12.20, 11.56, 12.80, 13.00, 14.00],
+        'close': [12.40, 12.20, 12.85, 13.00, 12.00, 13.15, 13.30, 14.45],
+    })
+    daily = _daily(lows=[11.56, 11.83, 11.05, 11.50])
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=12.80, orl=12.20, orh_break_time='2026-04-27 09:33', orl_break_time='2026-04-27 09:31'),
+        _or(broke_orh=True, broke_orl=True, orh_then_orl=True, orh=12.94, orl=12.06, orh_break_time='2026-04-27 09:37', orl_break_time='2026-04-27 09:50'),
+        _or(broke_orh=True, broke_orl=True, orh=13.00, orl=12.06, orh_break_time='2026-04-27 13:31', orl_break_time='2026-04-27 09:50'),
+        0.90,
+        intraday,
+        daily,
+    )
+
+    assert out['trigger_type'] == 'Alt Required'
+    assert out['trigger_level'] == 13.00
+    assert out['reference_low'] == 12.06
+
+
+def test_lar_style_5m_success_can_fail_d1():
+    intraday = pd.DataFrame({
+        'ticker': ['LAR'] * 6,
+        'trading_date': pd.to_datetime(['2026-04-27'] * 6),
+        'timestamp_et': pd.to_datetime([
+            '2026-04-27 09:30',
+            '2026-04-27 09:31',
+            '2026-04-27 09:49',
+            '2026-04-27 10:00',
+            '2026-04-27 10:25',
+            '2026-04-27 15:59',
+        ]),
+        'high': [9.50, 9.55, 9.60, 9.70, 9.80, 9.99],
+        'low': [9.41, 9.45, 9.34, 9.50, 9.60, 9.80],
+        'close': [9.45, 9.50, 9.50, 9.65, 9.78, 9.97],
+    })
+    daily = pd.DataFrame({
+        'ticker': ['LAR'] * 4,
+        'trading_date': pd.to_datetime(['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30']),
+        'high': [9.99, 9.84, 9.83, 10.46],
+        'low': [9.34, 9.21, 9.44, 9.77],
+        'close': [9.97, 9.62, 9.62, 10.17],
+    })
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=True, orh_then_orl=True, orh=9.50, orl=9.41, orh_break_time='2026-04-27 09:31', orl_break_time='2026-04-27 09:49'),
+        _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=9.75, orl=9.41, orh_break_time='2026-04-27 10:25', orl_break_time='2026-04-27 09:49'),
+        _or(broke_orh=True, orh=9.75, orl=9.41, orh_break_time='2026-04-27 10:25'),
+        0.90,
+        intraday,
+        daily,
+    )
+    failure = fail_day(intraday, daily, out['trigger_break_time'], out['reference_low'])
+    table = _format_section_table(pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'LAR',
+        'status': status_for(out['trigger_type'], failure),
+        'trigger_type': out['trigger_type'],
+        'one_min_result': opening_range_result(_or(broke_orh=True, broke_orl=True, orh_then_orl=True, orh=9.50, orl=9.41, orh_break_time='2026-04-27 09:31', orl_break_time='2026-04-27 09:49'), 1, out['trigger_type'], intraday, daily),
+        'five_min_result': opening_range_result(_or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=9.75, orl=9.41, orh_break_time='2026-04-27 10:25', orl_break_time='2026-04-27 09:49'), 5, out['trigger_type'], intraday, daily),
+        'notes': '',
+        'current_pct': 0.01,
+        'max_pct': 0.02,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': failure,
+        'setup': None,
+        'rating': None,
+        'trigger_level': out['trigger_level'],
+        'reference_low': out['reference_low'],
+        'reference_basis': out['reference_basis'],
+        'trigger_break_time': out['trigger_break_time'],
+        'latest_close': 9.62,
+        'close_price': 9.97,
+        'high_price': 9.99,
+        'low_price': 9.34,
+        'current_pct_from_setup_close': None,
+        'max_gain_from_setup_close': None,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': 0.90,
+    }]))
+
+    assert out['trigger_type'] == '5m ORH'
+    assert out['reference_low'] == 9.34
+    assert failure == 1
+    assert table.loc[0, 'Trigger Day'] == 'Success'
+    assert table.loc[0, 'Current Status'] == 'Failed D1'
+    assert table.loc[0, '5m ORH'] == 'success'
+
+
 def test_alt_required_failed_if_15m_reference_low_breaks_after_trigger():
     intraday = _alt_required_intraday(after_15m_low=8.9)
     out = derive_trigger_reference(

@@ -219,8 +219,12 @@ def orh_trigger_assessment(or_json: str, minutes: int, intraday: pd.DataFrame | 
     first_break_failed = bool(minutes == 1 and broke_orh and orl_break_time is not None and trigger_break_time is not None and orl_break_time < trigger_break_time)
     daily_bars = daily if daily is not None else pd.DataFrame()
     trigger_failure_day = fail_day(_regular_session_bars(intraday), daily_bars, trigger_break_time, reference_low) if broke_orh else None
+    pretrigger_orl_flush = bool(minutes == 5 and broke_orh and orl_break_time is not None and trigger_break_time is not None and orl_break_time < trigger_break_time)
+    trigger_day_failed = trigger_failure_day == 0
+    later_failure_after_pretrigger_flush = pretrigger_orl_flush and trigger_failure_day in {1, 2, 3}
     failure_day = 0 if first_break_failed else trigger_failure_day
     failed_after_trigger = trigger_failure_day is not None
+    failed = first_break_failed or trigger_day_failed or (failed_after_trigger and not later_failure_after_pretrigger_flush)
     return {
         'broke_orh': broke_orh,
         'trigger_level': trigger_level,
@@ -229,7 +233,8 @@ def orh_trigger_assessment(or_json: str, minutes: int, intraday: pd.DataFrame | 
         'reference_basis': f'LOD at {minutes}m Trigger' if trigger_low is not None else f'{minutes}m OR',
         'first_break_failed': first_break_failed,
         'failed_after_trigger': failed_after_trigger,
-        'failed': first_break_failed or failed_after_trigger,
+        'trigger_day_failed': trigger_day_failed,
+        'failed': failed,
         'failure_day': failure_day,
     }
 
@@ -251,7 +256,7 @@ def alt_required_qualified(or_1m: str, or_5m: str, or_15m: str, close_location, 
         and orh_framework_failed(or_5m, five_assessment)
         and fifteen.get('broke_orh')
         and _has_close_location(close_location, 0.80)
-        and fifteen_fail is None
+        and fifteen_fail != 0
     )
 
 
