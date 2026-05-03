@@ -13,18 +13,11 @@ from src.feature_engine import session_filter
 SETUP_OPTIONS = [
     '',
     'EP',
-    'Breakout',
-    'Range Breakout',
-    'Pullback',
-    'VWAP Reclaim',
-    'Gap Hold',
     'High Tight Pivot',
     'High Tight Flag',
+    'High Tight Compression',
     'Stage 2 Continuation Breakout',
-    'Momentum',
-    'Theme Leader',
-    'Theme Sympathy',
-    'Other',
+    
 ]
 
 RATING_OPTIONS = ['', '1', '2', '3', '4', '5']
