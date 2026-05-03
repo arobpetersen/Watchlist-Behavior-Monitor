@@ -6,6 +6,7 @@ from src.or_trigger_audit import audit_for_candidate, setup_dates, tickers_for_s
 from src.rolling_setup_monitor import (
     apply_setup_rating_updates,
     detail_table,
+    format_monitor_table_html,
     main_table,
     rating_dropdown_options,
     rolling_setup_monitor,
@@ -70,7 +71,7 @@ else:
 
         table = section['table']
         display = main_table(table)
-        st.dataframe(display, width='stretch', hide_index=True)
+        st.markdown(format_monitor_table_html(display), unsafe_allow_html=True)
 
         with st.expander('Edit Setup / Rating', expanded=False):
             editable = display[['Ticker', 'Setup', 'Rating']].copy()

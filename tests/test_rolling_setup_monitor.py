@@ -12,6 +12,7 @@ from src.rolling_setup_monitor import (
     derive_trigger_reference,
     detail_table,
     fail_day,
+    format_monitor_table_html,
     main_table,
     opening_range_result,
     opening_range_width_notes,
@@ -610,6 +611,25 @@ def test_main_and_detail_table_columns_and_blank_handling():
         '1m OR Result', '5m OR Result',
     ]
     assert main_table(df).loc[0, 'Rating'] == ''
+
+
+def test_format_monitor_table_html_escapes_and_blanks_values():
+    df = pd.DataFrame([{
+        'Ticker': '<ABC>',
+        'Status': 'Active',
+        'Trigger': None,
+        'Current %': float('nan'),
+    }])
+
+    html = format_monitor_table_html(df)
+
+    assert '<th>Ticker</th>' in html
+    assert '<th>Current %</th>' in html
+    assert '&lt;ABC&gt;' in html
+    assert '<td>nan</td>' not in html
+    assert 'height:' not in html
+    assert 'overflow-y: scroll' not in html
+    assert 'overflow-y: auto' not in html
 
 
 def test_format_section_table_formats_nan_day_values_as_blank():

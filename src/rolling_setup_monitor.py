@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from html import escape
 from typing import Any
 
 import pandas as pd
@@ -458,6 +459,54 @@ def main_table(table: pd.DataFrame) -> pd.DataFrame:
     if table.empty:
         return pd.DataFrame(columns=MAIN_COLUMNS)
     return _clean_display_df(sort_monitor_rows(table)[MAIN_COLUMNS])
+
+
+def format_monitor_table_html(df: pd.DataFrame) -> str:
+    display = _clean_display_df(df).fillna('')
+    header = ''.join(f'<th>{escape(str(column))}</th>' for column in display.columns)
+    body_rows = []
+    for _, row in display.iterrows():
+        cells = ''.join(f'<td>{escape("" if pd.isna(value) else str(value))}</td>' for value in row)
+        body_rows.append(f'<tr>{cells}</tr>')
+    body = ''.join(body_rows)
+    return f'''
+<style>
+.monitor-table-wrap {{
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  margin: 0.25rem 0 0.75rem 0;
+}}
+.monitor-table {{
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}}
+.monitor-table th {{
+  text-align: left;
+  padding: 0.42rem 0.5rem;
+  border-bottom: 1px solid rgba(250, 250, 250, 0.22);
+  color: rgba(250, 250, 250, 0.78);
+  font-weight: 600;
+  white-space: nowrap;
+}}
+.monitor-table td {{
+  padding: 0.38rem 0.5rem;
+  border-bottom: 1px solid rgba(250, 250, 250, 0.10);
+  color: rgba(250, 250, 250, 0.92);
+  white-space: nowrap;
+}}
+.monitor-table tbody tr:nth-child(even) {{
+  background: rgba(250, 250, 250, 0.025);
+}}
+</style>
+<div class="monitor-table-wrap">
+  <table class="monitor-table">
+    <thead><tr>{header}</tr></thead>
+    <tbody>{body}</tbody>
+  </table>
+</div>
+'''
 
 
 def detail_table(table: pd.DataFrame) -> pd.DataFrame:
