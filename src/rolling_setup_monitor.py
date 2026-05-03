@@ -84,6 +84,9 @@ DETAIL_COLUMNS = [
     'Close Bucket',
     '1m OR Result',
     '5m OR Result',
+    '5m ORH Break Time',
+    '5m ORH Broke After Range',
+    '1m Follow-Through / ATR14',
 ]
 
 STATUS_PRIORITY = {'Active': 0, 'Failed D1': 1, 'Failed D2': 2, 'Failed D3': 3, '—': 4}
@@ -655,6 +658,39 @@ def opening_range_width_notes(or_1m: str, or_5m: str, atr14) -> dict:
     }
 
 
+def one_min_follow_through_atr(or_1m: str, atr14, intraday: pd.DataFrame | None = None) -> float | None:
+    data = _loads(or_1m)
+    trigger_level = _num(data.get('orh'))
+    trigger_time = _ts(data.get('orh_break_time'))
+    atr = _num(atr14)
+    bars = _regular_session_bars(intraday)
+    if trigger_level is None or trigger_time is None or atr in (None, 0) or bars.empty:
+        return None
+    after_trigger = bars[bars['timestamp_et'] >= trigger_time]
+    if after_trigger.empty:
+        return None
+    max_high = _num(after_trigger['high'].max())
+    if max_high is None:
+        return None
+    return (max_high - trigger_level) / atr
+
+
+def apply_one_min_quality_notes(record: dict, intraday: pd.DataFrame | None = None) -> dict:
+    notes = [note for note in _blank(record.get('notes')).split('; ') if note]
+    follow_through = None
+    if record.get('trigger_type') == '1m ORH':
+        five = _loads(record.get('or_5m'))
+        if not five.get('broke_orh'):
+            notes.append('No 5m Confirm')
+        follow_through = one_min_follow_through_atr(record.get('or_1m'), record.get('atr20'), intraday)
+        if follow_through is not None and follow_through < 0.25:
+            notes.append('Weak 1m Follow-Through')
+    return {
+        'notes': '; '.join(dict.fromkeys(notes)),
+        'one_min_follow_through_atr': follow_through,
+    }
+
+
 def opening_range_result(or_json: str, minutes: int, trigger_type: str, intraday: pd.DataFrame | None = None, daily: pd.DataFrame | None = None) -> str:
     data = _loads(or_json)
     if trigger_type == 'Alt Required' and minutes in {1, 5}:
@@ -1136,6 +1172,9 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Close Bucket': raw['close_location'].apply(_close_bucket),
         '1m OR Result': raw_one_min_result,
         '5m OR Result': raw_five_min_result,
+        '5m ORH Break Time': raw.get('or_5m', blank_series).apply(lambda v: _fmt_ts(_loads(v).get('orh_break_time'))),
+        '5m ORH Broke After Range': raw.get('or_5m', blank_series).apply(lambda v: 'Yes' if _loads(v).get('broke_orh') else ''),
+        '1m Follow-Through / ATR14': raw.get('one_min_follow_through_atr', blank_series).apply(_fmt_ratio),
         'current_pct_raw': raw['current_pct'],
         'max_pct_raw': raw['max_pct'],
         'd3_high_pct_raw': raw['d3_high_pct'],
@@ -1220,7 +1259,8 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
             record['five_min_result'] = 'success' if record.get('pdh_recovery_trigger') == '5m ORH' else '-'
         else:
             record['one_min_result'] = raw_one_min_result or '-'
-            record['five_min_result'] = raw_five_min_result or '-'
+            record['five_min_result'] = '-' if record['trigger_type'] == '1m ORH' else raw_five_min_result or '-'
+        record.update(apply_one_min_quality_notes(record, ticker_intraday))
         record['status'] = status_for(record['trigger_type'], record['fail_day'])
         rows.append(record)
 

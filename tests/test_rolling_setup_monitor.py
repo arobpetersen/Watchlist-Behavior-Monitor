@@ -17,6 +17,8 @@ from src.rolling_setup_monitor import (
     main_table,
     opening_range_result,
     opening_range_width_notes,
+    apply_one_min_quality_notes,
+    one_min_follow_through_atr,
     pdh_trigger_assessment,
     rating_dropdown_options,
     retest_day,
@@ -454,6 +456,118 @@ def test_gap_over_pdh_display_marks_pdh_not_applicable_and_keeps_orh_results():
     assert table.loc[0, 'PDH'] == 'Gap'
     assert table.loc[0, '1m ORH'] == 'failed'
     assert table.loc[0, '5m ORH'] == 'success'
+
+
+def test_selected_1m_orh_displays_5m_not_applicable_but_detail_keeps_raw_5m():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'ONE',
+        'status': 'Active',
+        'trigger_type': '1m ORH',
+        'pdh_result': 'Gap',
+        'pdh_governed': False,
+        'one_min_result': 'success',
+        'five_min_result': '-',
+        'raw_one_min_result': 'success',
+        'raw_five_min_result': 'success',
+        'notes': '',
+        'current_pct': 0.05,
+        'max_pct': 0.10,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': '',
+        'rating': None,
+        'prior_day_high': 9.5,
+        'setup_day_open': 9.8,
+        'open_over_pdh': True,
+        'pdh_trigger_break_time': None,
+        'pdh_trigger_level': None,
+        'pdh_reference_low': None,
+        'pdh_reference_basis': '',
+        'trigger_level': 10.0,
+        'reference_low': 9.6,
+        'reference_basis': 'LOD at 1m Trigger',
+        'trigger_break_time': pd.Timestamp('2026-05-01 09:31'),
+        'latest_close': 10.5,
+        'close_price': 10.2,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.03,
+        'max_gain_from_setup_close': 0.06,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': 0.8,
+        'or_5m': _or(broke_orh=True, orh_break_time='2026-05-01 09:35'),
+        'one_min_follow_through_atr': 0.30,
+        'current_pct_raw': 0.05,
+        'max_pct_raw': 0.10,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, '1m ORH'] == 'success'
+    assert table.loc[0, '5m ORH'] == '-'
+    assert table.loc[0, '5m OR Result'] == 'success'
+    assert table.loc[0, '5m ORH Break Time'] == '2026-05-01 09:35'
+    assert table.loc[0, '5m ORH Broke After Range'] == 'Yes'
+
+
+def test_one_min_quality_notes_add_no_5m_confirm_and_weak_follow_through():
+    intraday = pd.DataFrame({
+        'timestamp_et': pd.to_datetime(['2026-05-01 09:30', '2026-05-01 09:31', '2026-05-01 09:32']),
+        'high': [10.0, 10.1, 10.2],
+        'low': [9.8, 9.9, 10.0],
+    })
+    record = {
+        'trigger_type': '1m ORH',
+        'or_1m': _or(orh=10.0, orh_break_time='2026-05-01 09:31'),
+        'or_5m': _or(broke_orh=False),
+        'atr20': 1.0,
+        'notes': 'Wide 1m OR',
+    }
+
+    out = apply_one_min_quality_notes(record, intraday)
+
+    assert out['notes'] == 'Wide 1m OR; No 5m Confirm; Weak 1m Follow-Through'
+    assert out['one_min_follow_through_atr'] < 0.25
+
+
+def test_one_min_quality_notes_skip_weak_when_follow_through_confirmed_or_atr_missing():
+    intraday = pd.DataFrame({
+        'timestamp_et': pd.to_datetime(['2026-05-01 09:31', '2026-05-01 09:32']),
+        'high': [10.1, 10.4],
+        'low': [9.9, 10.0],
+    })
+    base = {
+        'trigger_type': '1m ORH',
+        'or_1m': _or(orh=10.0, orh_break_time='2026-05-01 09:31'),
+        'or_5m': _or(broke_orh=True),
+        'notes': '',
+    }
+
+    strong = apply_one_min_quality_notes({**base, 'atr20': 1.0}, intraday)
+    missing = apply_one_min_quality_notes({**base, 'atr20': None}, intraday)
+    zero = apply_one_min_quality_notes({**base, 'atr20': 0}, intraday)
+
+    assert strong['one_min_follow_through_atr'] >= 0.25
+    assert 'Weak 1m Follow-Through' not in strong['notes']
+    assert missing['one_min_follow_through_atr'] is None
+    assert zero['one_min_follow_through_atr'] is None
+    assert missing['notes'] == ''
+    assert zero['notes'] == ''
+
+
+def test_one_min_follow_through_atr_formula():
+    intraday = pd.DataFrame({
+        'timestamp_et': pd.to_datetime(['2026-05-01 09:31', '2026-05-01 09:32']),
+        'high': [10.1, 10.5],
+        'low': [9.9, 10.0],
+    })
+
+    assert one_min_follow_through_atr(_or(orh=10.0, orh_break_time='2026-05-01 09:31'), 2.0, intraday) == 0.25
 
 
 def test_pdh_never_breaks_does_not_fall_back_to_clean_1m():
@@ -1242,7 +1356,8 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'Fail Day', 'Latest Close', 'Setup Close', 'Setup High', 'Setup Low',
         'Current vs Setup Close', 'Max Gain from Setup Close', 'RVOL', 'Range / ATR14', '1m OR Width / ATR14',
         '5m OR Width / ATR14', 'Close Bucket',
-        '1m OR Result', '5m OR Result',
+        '1m OR Result', '5m OR Result', '5m ORH Break Time',
+        '5m ORH Broke After Range', '1m Follow-Through / ATR14',
     ]
     assert main_table(df).loc[0, 'Rating'] == ''
 

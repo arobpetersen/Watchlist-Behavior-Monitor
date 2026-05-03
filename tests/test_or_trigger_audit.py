@@ -30,6 +30,7 @@ def _con():
           or_5m json,
           or_15m json,
           close_location double,
+          atr20 double,
           open_price double
         )
     """)
@@ -59,7 +60,7 @@ def _con():
     """)
     con.execute("insert into watchlist_candidates values (1, '2026-04-29', 'FCEL')")
     con.execute(
-        "insert into entry_day_features values (?, ?, ?, ?, ?, ?, ?, ?)",
+        "insert into entry_day_features values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             1,
             '2026-04-29',
@@ -68,6 +69,7 @@ def _con():
             _or(orh=1.20, orl=0.95, broke_orh=True, broke_orl=False, orh_break_time='2026-04-29 09:35:00', orl_break_time=None, orh_then_orl=False),
             _or(orh=1.25, orl=0.90),
             0.7,
+            0.50,
             1.2,
         ],
     )

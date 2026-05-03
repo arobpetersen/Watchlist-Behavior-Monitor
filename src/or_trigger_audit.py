@@ -10,6 +10,7 @@ from src.rolling_setup_monitor import (
     alt_required_qualified,
     derive_trigger_reference,
     fail_day,
+    one_min_follow_through_atr,
     opening_range_result,
     pdh_trigger_assessment,
     retest_day,
@@ -56,6 +57,8 @@ AUDIT_COLUMNS = [
     '5m ORH Attempted',
     'Displayed 5m ORH',
     'Raw 5m ORH Result',
+    '5m ORH Broke After Range',
+    '1m Follow-Through / ATR14',
     'Alt Required Qualified',
     '15m ORH',
     '15m ORL',
@@ -136,6 +139,11 @@ def _fmt_day(value: int | None) -> str:
     if value is None or pd.isna(value):
         return ''
     return f'Day {int(value)}'
+
+
+def _fmt_ratio(value: Any) -> str:
+    num = _num(value)
+    return '' if num is None else f'{num:.2f}'
 
 
 def _session_timestamp(setup_date, hour: int, minute: int) -> pd.Timestamp:
@@ -234,7 +242,7 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
     row = con.execute(
         """
         select c.candidate_id,c.watchlist_date,c.ticker,
-               f.or_1m,f.or_5m,f.or_15m,f.close_location
+               f.or_1m,f.or_5m,f.or_15m,f.close_location,f.atr20
                ,f.open_price
         from watchlist_candidates c
         left join entry_day_features f using(candidate_id,watchlist_date,ticker)
@@ -280,7 +288,7 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
     raw_one_result = opening_range_result(record.get('or_1m'), 1, trigger['trigger_type'], intraday, daily)
     raw_five_result = opening_range_result(record.get('or_5m'), 5, trigger['trigger_type'], intraday, daily)
     displayed_one = 'success' if trigger.get('pdh_recovery_trigger') == '1m ORH' else '-' if trigger.get('pdh_governed') else raw_one_result or '-'
-    displayed_five = 'success' if trigger.get('pdh_recovery_trigger') == '5m ORH' else '-' if trigger.get('pdh_governed') else raw_five_result or '-'
+    displayed_five = 'success' if trigger.get('pdh_recovery_trigger') == '5m ORH' else '-' if trigger.get('pdh_governed') or trigger.get('trigger_type') == '1m ORH' else raw_five_result or '-'
     displayed_pdh = pdh.get('pdh_result') or '-'
 
     audit = pd.DataFrame([{
@@ -322,6 +330,8 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
         '5m ORH Attempted': 'Yes' if five.get('broke_orh') else '',
         'Displayed 5m ORH': displayed_five,
         'Raw 5m ORH Result': raw_five_result,
+        '5m ORH Broke After Range': 'Yes' if five.get('broke_orh') else '',
+        '1m Follow-Through / ATR14': _fmt_ratio(one_min_follow_through_atr(record.get('or_1m'), record.get('atr20'), intraday)),
         'Alt Required Qualified': 'Yes' if alt_required_qualified(record.get('or_1m'), record.get('or_5m'), record.get('or_15m'), record.get('close_location'), intraday, daily) else '',
         '15m ORH': _fmt_price(fifteen.get('orh')),
         '15m ORL': _fmt_price(fifteen.get('orl')),

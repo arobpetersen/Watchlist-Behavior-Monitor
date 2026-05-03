@@ -258,6 +258,19 @@ def test_pdh_trigger_mix_aggregation_stays_out_of_top_comparison():
     assert 'Failed PDH Trigger' not in comparison.columns
 
 
+def test_overview_5m_counts_exclude_selected_1m_rows_with_5m_display_hidden():
+    history = _history().copy()
+    history.loc[0, 'Trigger'] = '1m ORH'
+    history.loc[0, '1m ORH'] = 'success'
+    history.loc[0, '5m ORH'] = '-'
+
+    summary = summarize_window(history.iloc[[0]], overview_windows('2026-05-08')[0])
+
+    assert summary['Clean 1m'] == '1 (100%)'
+    assert summary['Clean 5m'] == '0 (0%)'
+    assert summary['Failed 5m'] == '0 (0%)'
+
+
 def test_factual_read_is_objective_and_contains_key_metrics():
     summary = summarize_window(_history(), overview_windows('2026-05-08')[1])
     text = factual_read(summary)
