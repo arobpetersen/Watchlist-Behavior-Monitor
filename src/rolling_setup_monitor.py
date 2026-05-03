@@ -39,8 +39,8 @@ MAIN_COLUMNS = [
 ]
 
 MAIN_COLUMN_LABELS = {
-    '1m ORH': '1m',
-    '5m ORH': '5m',
+    '1m ORH': '1m ORH',
+    '5m ORH': '5m ORH',
     'Current %': 'Current',
     'Max %': 'Max',
     'D3 High %': 'D3 High',
