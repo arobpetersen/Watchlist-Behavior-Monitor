@@ -12,6 +12,7 @@ from src.rolling_setup_monitor import (
     fail_day,
     opening_range_result,
     retest_day,
+    status_for,
 )
 
 
@@ -24,6 +25,7 @@ AUDIT_COLUMNS = [
     '1m OR End',
     '1m ORH Break Time',
     '1m ORL Break After ORH Time',
+    '1m ORH Attempted',
     '1m OR Result',
     '5m ORH',
     '5m ORL',
@@ -31,6 +33,7 @@ AUDIT_COLUMNS = [
     '5m OR End',
     '5m ORH Break Time',
     '5m ORL Break After ORH Time',
+    '5m ORH Attempted',
     '5m OR Result',
     'Alt Required Qualified',
     '15m ORH',
@@ -43,6 +46,9 @@ AUDIT_COLUMNS = [
     'Trigger Break Time',
     'Retest Day',
     'Fail Day',
+    'Final Trigger',
+    'Final Status',
+    'Final Fail Day',
 ]
 
 
@@ -220,10 +226,13 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
     five = _loads(record.get('or_5m'))
     fifteen = _loads(record.get('or_15m'))
     intraday = _regular_intraday(con, record['ticker'], setup_day)
-    trigger = derive_trigger_reference(record.get('or_1m'), record.get('or_5m'), record.get('or_15m'), record.get('close_location'), intraday)
     daily = _daily_for_ticker(con, record['ticker'], setup_day)
+    trigger = derive_trigger_reference(record.get('or_1m'), record.get('or_5m'), record.get('or_15m'), record.get('close_location'), intraday, daily)
     retest = retest_day(intraday, daily, trigger.get('trigger_break_time'), trigger.get('trigger_level'))
     failure = fail_day(intraday, daily, trigger.get('trigger_break_time'), trigger.get('reference_low'))
+    if trigger.get('trigger_type') == 'Failed OR Trigger':
+        failure = trigger.get('framework_fail_day')
+    final_status = status_for(trigger.get('trigger_type'), failure)
 
     audit = pd.DataFrame([{
         'Ticker': record['ticker'],
@@ -234,15 +243,17 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
         '1m OR End': _fmt_ts(_session_timestamp(setup_day, 9, 31)),
         '1m ORH Break Time': _fmt_ts(one.get('orh_break_time')),
         '1m ORL Break After ORH Time': _orl_after_orh_time(one),
-        '1m OR Result': opening_range_result(record.get('or_1m'), 1, trigger['trigger_type'], intraday),
+        '1m ORH Attempted': 'Yes' if one.get('broke_orh') else '',
+        '1m OR Result': opening_range_result(record.get('or_1m'), 1, trigger['trigger_type'], intraday, daily),
         '5m ORH': _fmt_price(five.get('orh')),
         '5m ORL': _fmt_price(five.get('orl')),
         '5m OR Start': _fmt_ts(_session_timestamp(setup_day, 9, 30)),
         '5m OR End': _fmt_ts(_session_timestamp(setup_day, 9, 35)),
         '5m ORH Break Time': _fmt_ts(five.get('orh_break_time')),
         '5m ORL Break After ORH Time': _orl_after_orh_time(five),
-        '5m OR Result': opening_range_result(record.get('or_5m'), 5, trigger['trigger_type'], intraday),
-        'Alt Required Qualified': 'Yes' if alt_required_qualified(record.get('or_1m'), record.get('or_5m'), record.get('or_15m'), record.get('close_location'), intraday) else '',
+        '5m ORH Attempted': 'Yes' if five.get('broke_orh') else '',
+        '5m OR Result': opening_range_result(record.get('or_5m'), 5, trigger['trigger_type'], intraday, daily),
+        'Alt Required Qualified': 'Yes' if alt_required_qualified(record.get('or_1m'), record.get('or_5m'), record.get('or_15m'), record.get('close_location'), intraday, daily) else '',
         '15m ORH': _fmt_price(fifteen.get('orh')),
         '15m ORL': _fmt_price(fifteen.get('orl')),
         '15m ORH Break Time': _fmt_ts(fifteen.get('orh_break_time')),
@@ -253,6 +264,9 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
         'Trigger Break Time': _fmt_ts(trigger.get('trigger_break_time')),
         'Retest Day': _fmt_day(retest),
         'Fail Day': _fmt_day(failure),
+        'Final Trigger': trigger['trigger_type'],
+        'Final Status': final_status,
+        'Final Fail Day': _fmt_day(failure),
     }])
 
     first_15 = _format_intraday(intraday.head(15))

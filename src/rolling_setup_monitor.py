@@ -173,7 +173,7 @@ def reference_low_at_trigger(intraday: pd.DataFrame | None, trigger_break_time) 
     return _num(through_trigger['low'].min())
 
 
-def orh_trigger_assessment(or_json: str, minutes: int, intraday: pd.DataFrame | None) -> dict:
+def orh_trigger_assessment(or_json: str, minutes: int, intraday: pd.DataFrame | None, daily: pd.DataFrame | None = None) -> dict:
     data = _loads(or_json)
     trigger_break_time = _ts(data.get('orh_break_time'))
     trigger_level = _num(data.get('orh'))
@@ -185,7 +185,9 @@ def orh_trigger_assessment(or_json: str, minutes: int, intraday: pd.DataFrame | 
         broke_orh = bool(data.get('broke_orh') and not data.get('orh_then_orl') and not _same_bar_break(data))
     else:
         broke_orh = bool(data.get('broke_orh') and not _same_bar_break(data) and trigger_break_time is not None)
-    failed_after_trigger = day0_fail(_regular_session_bars(intraday), trigger_break_time, reference_low) if broke_orh else False
+    daily_bars = daily if daily is not None else pd.DataFrame()
+    failure_day = fail_day(_regular_session_bars(intraday), daily_bars, trigger_break_time, reference_low) if broke_orh else None
+    failed_after_trigger = failure_day is not None
     return {
         'broke_orh': broke_orh,
         'trigger_level': trigger_level,
@@ -193,6 +195,7 @@ def orh_trigger_assessment(or_json: str, minutes: int, intraday: pd.DataFrame | 
         'reference_low': reference_low,
         'reference_basis': f'LOD at {minutes}m Trigger' if trigger_low is not None else f'{minutes}m OR',
         'failed_after_trigger': failed_after_trigger,
+        'failure_day': failure_day,
     }
 
 
@@ -203,22 +206,44 @@ def orh_framework_failed(or_json: str, assessment: dict) -> bool:
     return bool(data.get('broke_orh') and (data.get('orh_then_orl') or _same_bar_break(data)))
 
 
-def alt_required_qualified(or_1m: str, or_5m: str, or_15m: str, close_location, intraday: pd.DataFrame | None = None) -> bool:
-    one_assessment = orh_trigger_assessment(or_1m, 1, intraday)
-    five_assessment = orh_trigger_assessment(or_5m, 5, intraday)
+def alt_required_qualified(or_1m: str, or_5m: str, or_15m: str, close_location, intraday: pd.DataFrame | None = None, daily: pd.DataFrame | None = None) -> bool:
+    one_assessment = orh_trigger_assessment(or_1m, 1, intraday, daily)
+    five_assessment = orh_trigger_assessment(or_5m, 5, intraday, daily)
     fifteen = _loads(or_15m)
+    fifteen_fail = fail_day(_regular_session_bars(intraday), daily if daily is not None else pd.DataFrame(), _ts(fifteen.get('orh_break_time')), _num(fifteen.get('orl')))
     return bool(
         orh_framework_failed(or_1m, one_assessment)
         and orh_framework_failed(or_5m, five_assessment)
         and fifteen.get('broke_orh')
         and _has_close_location(close_location, 0.80)
+        and fifteen_fail is None
     )
 
 
-def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location, intraday: pd.DataFrame | None = None) -> dict:
+def failed_or_trigger_reference(one_assessment: dict, five_assessment: dict) -> dict:
+    failed = []
+    for label, assessment in [('1m ORH', one_assessment), ('5m ORH', five_assessment)]:
+        if assessment.get('broke_orh') and assessment.get('failed_after_trigger'):
+            failed.append((assessment.get('failure_day'), label, assessment))
+    if not failed:
+        return {}
+    failed.sort(key=lambda item: (99 if item[0] is None else item[0], 0 if item[1] == '1m ORH' else 1))
+    failure_day, label, assessment = failed[0]
+    return {
+        'trigger_type': 'Failed OR Trigger',
+        'trigger_level': assessment.get('trigger_level'),
+        'reference_low': assessment.get('reference_low'),
+        'reference_basis': f"Failed {assessment.get('reference_basis')}",
+        'trigger_break_time': assessment.get('trigger_break_time'),
+        'framework_fail_day': failure_day,
+        'failed_framework': label,
+    }
+
+
+def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location, intraday: pd.DataFrame | None = None, daily: pd.DataFrame | None = None) -> dict:
     fifteen = _loads(or_15m)
-    one_assessment = orh_trigger_assessment(or_1m, 1, intraday)
-    five_assessment = orh_trigger_assessment(or_5m, 5, intraday)
+    one_assessment = orh_trigger_assessment(or_1m, 1, intraday, daily)
+    five_assessment = orh_trigger_assessment(or_5m, 5, intraday, daily)
 
     if one_assessment['broke_orh'] and not one_assessment['failed_after_trigger']:
         return {
@@ -238,7 +263,7 @@ def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location
             'trigger_break_time': five_assessment['trigger_break_time'],
         }
 
-    if alt_required_qualified(or_1m, or_5m, or_15m, close_location, intraday):
+    if alt_required_qualified(or_1m, or_5m, or_15m, close_location, intraday, daily):
         return {
             'trigger_type': 'Alt Required',
             'trigger_level': _num(fifteen.get('orh')),
@@ -247,12 +272,18 @@ def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location
             'trigger_break_time': _ts(fifteen.get('orh_break_time')),
         }
 
+    failed_reference = failed_or_trigger_reference(one_assessment, five_assessment)
+    if failed_reference:
+        return failed_reference
+
     return {
         'trigger_type': 'No Trigger',
         'trigger_level': None,
         'reference_low': None,
         'reference_basis': 'Setup-Day Close fallback',
         'trigger_break_time': None,
+        'framework_fail_day': None,
+        'failed_framework': None,
     }
 
 
@@ -280,12 +311,12 @@ def opening_range_width_notes(or_1m: str, or_5m: str, atr14) -> dict:
     }
 
 
-def opening_range_result(or_json: str, minutes: int, trigger_type: str, intraday: pd.DataFrame | None = None) -> str:
+def opening_range_result(or_json: str, minutes: int, trigger_type: str, intraday: pd.DataFrame | None = None, daily: pd.DataFrame | None = None) -> str:
     data = _loads(or_json)
     if trigger_type == 'Alt Required' and minutes in {1, 5}:
         return 'failed'
     clean_type = f'{minutes}m ORH'
-    assessment = orh_trigger_assessment(or_json, minutes, intraday)
+    assessment = orh_trigger_assessment(or_json, minutes, intraday, daily)
     if assessment['broke_orh'] and not assessment['failed_after_trigger']:
         return 'success'
     if assessment['broke_orh'] or (data.get('broke_orh') and (data.get('orh_then_orl') or _same_bar_break(data))):
@@ -357,6 +388,8 @@ def retest_day(intraday: pd.DataFrame, daily: pd.DataFrame, trigger_break_time, 
 
 
 def status_for(trigger_type: str, fail_day_value: int | None) -> str:
+    if trigger_type == 'Failed OR Trigger':
+        return 'Failed'
     if fail_day_value is not None:
         return 'Failed'
     if trigger_type in {'1m ORH', '5m ORH', 'Alt Required'}:
@@ -371,6 +404,7 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
     trigger_level = row.get('trigger_level')
     reference_low = row.get('reference_low')
     setup_close = _num(row.get('close_price'))
+    preset_fail_day = row.get('framework_fail_day')
 
     if daily.empty:
         base_price = trigger_level if trigger_level is not None else setup_close
@@ -382,7 +416,7 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
             'd3_high_pct': None,
             'current_pct_from_setup_close': None,
             'max_gain_from_setup_close': None,
-            'fail_day': fail_day(intraday, daily, row.get('trigger_break_time'), reference_low),
+            'fail_day': preset_fail_day if row.get('trigger_type') == 'Failed OR Trigger' else fail_day(intraday, daily, row.get('trigger_break_time'), reference_low),
             'retest_day': retest_day(intraday, daily, row.get('trigger_break_time'), trigger_level),
             'base_price': base_price,
         }
@@ -402,7 +436,7 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
         'd3_high_pct': _pct(d3_high - base_price, base_price),
         'current_pct_from_setup_close': _pct(latest_close - setup_close, setup_close),
         'max_gain_from_setup_close': _pct(max_high - setup_close, setup_close),
-        'fail_day': fail_day(intraday, daily, row.get('trigger_break_time'), reference_low),
+        'fail_day': preset_fail_day if row.get('trigger_type') == 'Failed OR Trigger' else fail_day(intraday, daily, row.get('trigger_break_time'), reference_low),
         'retest_day': retest_day(intraday, daily, row.get('trigger_break_time'), trigger_level),
         'base_price': base_price,
     }
@@ -573,18 +607,20 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
         record = item.to_dict()
         setup_date = pd.to_datetime(record['watchlist_date']).date()
         ticker_intraday = _bars_for_ticker_date(intraday_bars, record['ticker'], setup_date)
+        ticker_daily = _daily_for_ticker(daily_bars, record['ticker'], setup_date)
         trigger = derive_trigger_reference(
             record.get('or_1m'),
             record.get('or_5m'),
             record.get('or_15m'),
             record.get('close_location'),
             ticker_intraday,
+            ticker_daily,
         )
         record.update(trigger)
         record.update(opening_range_width_notes(record.get('or_1m'), record.get('or_5m'), record.get('atr20')))
         record.update(_follow_through(record, daily_bars, intraday_bars))
-        record['one_min_result'] = opening_range_result(record.get('or_1m'), 1, record['trigger_type'], ticker_intraday)
-        record['five_min_result'] = opening_range_result(record.get('or_5m'), 5, record['trigger_type'], ticker_intraday)
+        record['one_min_result'] = opening_range_result(record.get('or_1m'), 1, record['trigger_type'], ticker_intraday, ticker_daily)
+        record['five_min_result'] = opening_range_result(record.get('or_5m'), 5, record['trigger_type'], ticker_intraday, ticker_daily)
         record['status'] = status_for(record['trigger_type'], record['fail_day'])
         rows.append(record)
 

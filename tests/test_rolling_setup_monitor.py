@@ -142,16 +142,16 @@ def test_1m_flush_then_orh_trigger_fails_when_trigger_time_low_breaks_afterward(
     )
     failure = fail_day(intraday, _daily(), out['trigger_break_time'], out['reference_low'])
 
-    assert out['trigger_type'] == 'No Trigger'
-    assert out['reference_low'] is None
+    assert out['trigger_type'] == 'Failed OR Trigger'
+    assert out['reference_low'] == 9.5
     assert opening_range_result(
         _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:32', orl_break_time='2026-05-01 09:31'),
         1,
         out['trigger_type'],
         intraday,
     ) == 'failed'
-    assert failure is None
-    assert status_for(out['trigger_type'], failure) == 'Unresolved'
+    assert failure == 0
+    assert status_for(out['trigger_type'], failure) == 'Failed'
 
 
 def test_clean_5m_fallback_trigger_level_and_reference_low():
@@ -232,15 +232,15 @@ def test_5m_flush_then_orh_trigger_fails_when_trigger_time_low_breaks_afterward(
     )
     failure = fail_day(intraday, _daily(), out['trigger_break_time'], out['reference_low'])
 
-    assert out['trigger_type'] == 'No Trigger'
-    assert out['reference_low'] is None
+    assert out['trigger_type'] == 'Failed OR Trigger'
+    assert out['reference_low'] == 9.4
     assert opening_range_result(
         _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=11.0, orl=9.6, orh_break_time='2026-05-01 09:35', orl_break_time='2026-05-01 09:32'),
         5,
         out['trigger_type'],
         intraday,
     ) == 'failed'
-    assert failure is None
+    assert failure == 0
 
 
 def test_fail_day_uses_trigger_time_reference_low_not_original_orl():
@@ -339,7 +339,7 @@ def test_alt_required_failed_if_15m_reference_low_breaks_after_trigger():
     )
     failure = fail_day(intraday, _daily(), out['trigger_break_time'], out['reference_low'])
 
-    assert out['trigger_type'] == 'Alt Required'
+    assert out['trigger_type'] == 'Failed OR Trigger'
     assert failure == 0
     assert status_for(out['trigger_type'], failure) == 'Failed'
 
@@ -354,7 +354,67 @@ def test_failed_1m_and_5m_with_low_close_location_is_not_alt_required():
         intraday,
     )
 
-    assert out['trigger_type'] == 'No Trigger'
+    assert out['trigger_type'] == 'Failed OR Trigger'
+
+
+def test_failed_or_trigger_uses_earliest_fail_day_from_primary_frameworks():
+    intraday = pd.DataFrame({
+        'ticker': ['AAPL'] * 8,
+        'trading_date': pd.to_datetime(['2026-05-01'] * 8),
+        'timestamp_et': pd.to_datetime([
+            '2026-05-01 09:30',
+            '2026-05-01 09:31',
+            '2026-05-01 09:32',
+            '2026-05-01 09:35',
+            '2026-05-01 09:36',
+            '2026-05-01 09:37',
+            '2026-05-01 09:38',
+            '2026-05-01 09:39',
+        ]),
+        'high': [10.0, 10.6, 10.4, 11.2, 11.0, 11.0, 11.0, 11.0],
+        'low': [9.8, 10.0, 9.7, 10.9, 9.7, 9.6, 10.5, 9.5],
+        'close': [9.9, 10.5, 10.2, 11.1, 10.8, 10.7, 10.6, 10.5],
+    })
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=False, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:31'),
+        _or(broke_orh=True, broke_orl=False, orh=11.0, orl=9.6, orh_break_time='2026-05-01 09:35'),
+        _or(broke_orh=False, orh=12.0, orl=9.0),
+        0.5,
+        intraday,
+    )
+
+    assert out['trigger_type'] == 'Failed OR Trigger'
+    assert out['failed_framework'] == '1m ORH'
+    assert out['framework_fail_day'] == 0
+
+
+def test_failed_or_trigger_uses_daily_fail_from_primary_framework():
+    intraday = pd.DataFrame({
+        'ticker': ['AAPL'] * 4,
+        'trading_date': pd.to_datetime(['2026-05-01'] * 4),
+        'timestamp_et': pd.to_datetime([
+            '2026-05-01 09:30',
+            '2026-05-01 09:31',
+            '2026-05-01 09:35',
+            '2026-05-01 09:36',
+        ]),
+        'high': [10.0, 10.6, 11.2, 11.0],
+        'low': [9.8, 10.0, 10.9, 10.7],
+        'close': [9.9, 10.5, 11.1, 10.8],
+    })
+    daily = _daily(lows=[10.1, 9.7, 10.2, 10.3])
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=False, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:31'),
+        _or(broke_orh=True, broke_orl=False, orh=11.0, orl=9.6, orh_break_time='2026-05-01 09:35'),
+        _or(broke_orh=False, orh=12.0, orl=9.0),
+        0.5,
+        intraday,
+        daily,
+    )
+
+    assert out['trigger_type'] == 'Failed OR Trigger'
+    assert out['failed_framework'] == '1m ORH'
+    assert out['framework_fail_day'] == 1
 
 
 def test_clean_1m_still_takes_priority_over_alt_required():
@@ -458,6 +518,7 @@ def test_retest_day_no_retest():
 def test_status_values():
     assert status_for('1m ORH', None) == 'Active'
     assert status_for('5m ORH', 1) == 'Failed'
+    assert status_for('Failed OR Trigger', None) == 'Failed'
     assert status_for('No Trigger', None) == 'Unresolved'
 
 
