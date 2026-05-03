@@ -15,7 +15,9 @@ from src.backwatch_source import (
 )
 from src.config import get_settings
 from src.data_maintenance import remove_sample_data
+from src.data_health import data_health_rows
 from src.database import get_connection
+from src.db_backup import create_db_backup
 from src.run_daily import run_daily_pipeline
 from src.watchlist_ingestion import ingest_watchlists
 
@@ -72,6 +74,13 @@ if not source_dir.exists():
 else:
     scanned = scan_source_files(source_dir, settings.watchlists_dir, con)
 
+with st.expander('Data Health / Source Integrity'):
+    health = data_health_rows(con, source_dir, settings.watchlists_dir)
+    if health.empty:
+        st.info('No setup source files or database candidates found yet.')
+    else:
+        st.dataframe(health, width='stretch', hide_index=True)
+
 st.subheader('Daily Workflow')
 if st.button('Process All New Back-Watch Files', type='primary'):
     if not source_dir.exists():
@@ -125,6 +134,13 @@ if st.button('Process All New Back-Watch Files', type='primary'):
             st.info(metrics_message)
 
 with st.expander('Maintenance / Reprocess'):
+    if st.button('Create DB Backup'):
+        try:
+            backup = create_db_backup(settings.db_path, settings.project_root / 'data' / 'exports')
+            st.success(f'DB backup created: `{backup}`')
+        except Exception as exc:
+            st.error(f'DB backup failed: {exc}')
+
     if st.button('Remove Sample/Test Rows From Live Tables'):
         cleanup = remove_sample_data(con)
         st.success('Sample/test cleanup complete.')

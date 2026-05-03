@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -49,7 +49,7 @@ def run_daily_pipeline() -> dict:
                 bars += len(df)
             except Exception as e:
                 failures.append(str(e))
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         daily_requests = cands[['ticker','watchlist_date']].drop_duplicates()
         for _, c in daily_requests.iterrows():
             try:

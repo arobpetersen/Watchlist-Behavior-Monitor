@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -42,12 +42,12 @@ def ingest_watchlists(con, watchlists_dir: Path, files: list[Path] | None = None
                 if exists:
                     continue
                 cid = con.execute("select nextval('candidate_seq')").fetchone()[0]
-                con.execute('insert into watchlist_candidates values (?, ?, ?, ?, ?, ?, ?, ?, ?)', [cid, d, r['ticker'], r['rating'], r['setup'], r['focus'], r['key_level'], f.name, datetime.utcnow()])
+                con.execute('insert into watchlist_candidates values (?, ?, ?, ?, ?, ?, ?, ?, ?)', [cid, d, r['ticker'], r['rating'], r['setup'], r['focus'], r['key_level'], f.name, datetime.now(timezone.utc)])
                 rows_inserted += 1
                 inserted += 1
         except Exception as err:
             failures.append(f'{f.name}: {err}')
-        con.execute('insert into watchlist_files values (?, ?, ?, ?, ?, ?)', [f.name, h, d, rows_seen, rows_inserted, datetime.utcnow()])
+        con.execute('insert into watchlist_files values (?, ?, ?, ?, ?, ?)', [f.name, h, d, rows_seen, rows_inserted, datetime.now(timezone.utc)])
     return {
         'files_scanned': len(files),
         'candidates_inserted': inserted,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from urllib.parse import urljoin
 
 import pandas as pd
@@ -47,7 +47,7 @@ class MassiveClient:
         df['ticker'] = ticker
         df['trading_date'] = date_str
         df['source'] = 'massive'
-        df['fetched_at'] = datetime.utcnow()
+        df['fetched_at'] = datetime.now(timezone.utc)
         return df[['ticker','trading_date','timestamp_et','open','high','low','close','volume','source','fetched_at']]
 
     def fetch_daily(self, ticker: str, from_date: str | date | datetime, to_date: str | date | datetime) -> pd.DataFrame:
@@ -67,5 +67,5 @@ class MassiveClient:
             df['vwap'] = None
         df['ticker'] = ticker
         df['source'] = 'massive'
-        df['fetched_at'] = datetime.utcnow()
+        df['fetched_at'] = datetime.now(timezone.utc)
         return df[['ticker','trading_date','open','high','low','close','volume','vwap','source','fetched_at']]

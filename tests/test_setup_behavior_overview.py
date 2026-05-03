@@ -154,6 +154,7 @@ def test_summarize_window_counts_percentages_and_medians():
     assert out['Retested'] == '2 (50%)'
     assert out['Wide 1m OR'] == '2 (50%)'
     assert out['Wide 5m OR'] == '2 (50%)'
+    assert out['D3 Eligible'] == '3 (75%)'
     assert out['Median Current'] == '1.5%'
     assert out['Median Max'] == '7.0%'
     assert out['Median D3 High'] == '7.0%'
@@ -184,6 +185,7 @@ def test_summarize_window_empty_and_unavailable_values_format_cleanly():
 
     one_incomplete = summarize_window(_history().iloc[[0]], window)
     assert one_incomplete['Median D3 High'] == '-'
+    assert one_incomplete['D3 Eligible'] == '0 (0%)'
 
 
 def test_detail_rows_match_expected_columns_and_window_filter():
@@ -220,8 +222,10 @@ def test_selected_window_metrics_group_diagnostics_separately():
     ]
     comparison = comparison_rows(pd.DataFrame([summary], columns=FULL_SUMMARY_COLUMNS))
     diagnostics = dict(groups[3]['metrics'])
+    current_outcome = dict(groups[1]['metrics'])
 
     assert 'Failed 1m' not in comparison.columns
+    assert current_outcome['D3 Eligible'] == '3 (75%)'
     assert diagnostics['Failed 1m'] == '3 (75%)'
     assert diagnostics['Failed 5m'] == '2 (50%)'
     assert diagnostics['Wide 1m OR'] == '2 (50%)'

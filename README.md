@@ -23,6 +23,8 @@ Sample data lives outside the production ingestion folder in `examples/sample_ba
 ## Back-Watch Source Folder
 Set `BACKWATCH_SOURCE_DIR` to your local TC2000/export folder. The main app page reads CSV/XLSX/XLS files from that folder, infers the setup date from the filename, previews normalized tickers, and saves a canonical CSV into `data/watchlists/`.
 
+The main app page also includes a Data Health / Source Integrity section that compares source ticker counts with database candidate counts by setup date and canonical file. Maintenance includes a Create DB Backup button that copies the DuckDB file into `data/exports/backups/`.
+
 Recommended source folder:
 ```env
 BACKWATCH_SOURCE_DIR=C:/Users/arobp/OneDrive/Documents/Trade/Watchlist-Behavior-Monitor-main/tc2000

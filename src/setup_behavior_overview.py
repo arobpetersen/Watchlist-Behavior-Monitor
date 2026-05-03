@@ -29,6 +29,7 @@ FULL_SUMMARY_COLUMNS = [
     'Retested',
     'Wide 1m OR',
     'Wide 5m OR',
+    'D3 Eligible',
     'Median Current',
     'Median Max',
     'Median D3 High',
@@ -206,6 +207,7 @@ def summarize_window(history: pd.DataFrame, window: OverviewWindow) -> dict:
         'Retested': count_fmt(int((retest.fillna('').astype(str) != '').sum())),
         'Wide 1m OR': count_fmt(_contains(notes, 'Wide 1m OR')),
         'Wide 5m OR': count_fmt(_contains(notes, 'Wide 5m OR')),
+        'D3 Eligible': count_fmt(len(d3_values)),
         'Median Current': _fmt_pct(rows['current_pct_raw'].median() if 'current_pct_raw' in rows and not rows.empty else None),
         'Median Max': _fmt_pct(rows['max_pct_raw'].median() if 'max_pct_raw' in rows and not rows.empty else None),
         'Median D3 High': _fmt_pct(d3_values.median() if not d3_values.empty else None),
@@ -267,6 +269,7 @@ def selected_window_metrics(window_summary: dict) -> list[dict]:
                 ('Median Current', window_summary.get('Median Current', '-')),
                 ('Median Max', window_summary.get('Median Max', '-')),
                 ('Median D3 High', window_summary.get('Median D3 High', '-')),
+                ('D3 Eligible', window_summary.get('D3 Eligible', '-')),
             ],
         },
         {

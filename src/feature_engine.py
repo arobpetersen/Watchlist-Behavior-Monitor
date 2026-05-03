@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -62,7 +62,7 @@ def compute_features(con, candidate: dict) -> bool:
         'close_location':(close-low)/max(high-low,1e-9),'closed_near_high':(close-low)/max(high-low,1e-9)>=0.8,'closed_near_low':(close-low)/max(high-low,1e-9)<=0.2,
         'session_vwap':float(df['vwap'].iloc[-1]),'closed_above_vwap':close>float(df['vwap'].iloc[-1]),'ever_below_vwap':bool((df['low']<df['vwap']).any()),'ever_above_vwap':bool((df['high']>df['vwap']).any()),
         'lost_vwap':False,'reclaimed_vwap':False,'vwap_reclaim_then_new_hod':False,
-        'or_1m':json.dumps(opening_range(df,1)),'or_5m':json.dumps(opening_range(df,5)),'or_15m':json.dumps(opening_range(df,15)),'calculated_at':datetime.utcnow()
+        'or_1m':json.dumps(opening_range(df,1)),'or_5m':json.dumps(opening_range(df,5)),'or_15m':json.dumps(opening_range(df,15)),'calculated_at':datetime.now(timezone.utc)
     }
     rec.update(daily_context)
     cols=list(rec.keys())
