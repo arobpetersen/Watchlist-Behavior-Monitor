@@ -12,11 +12,13 @@ streamlit run app.py
 ```
 
 ## Input
-Drop CSV/XLSX files into `data/watchlists/`.
+Canonical CSV files in `data/watchlists/` are the production files used by the app after Back-Watch source exports are normalized.
 Required: `ticker`.
 Optional: `rating, setup, focus, key_level`.
 
 Each file represents setup candidates for that setup date. The dashboard summarizes objective behavior such as VWAP, opening range outcomes, close location, ATR14/RVOL context, and short D+1 to D+3 follow-through.
+
+Sample data lives outside the production ingestion folder in `examples/sample_backwatch.csv`. Files with sample, example, or test in the filename are skipped by ingestion.
 
 ## Back-Watch Source Folder
 Set `BACKWATCH_SOURCE_DIR` to your local TC2000/export folder. The main app page reads CSV/XLSX/XLS files from that folder, infers the setup date from the filename, previews normalized tickers, and saves a canonical CSV into `data/watchlists/`.
@@ -44,6 +46,8 @@ Daily workflow:
 4. Click Process All New Back-Watch Files.
 5. Review Daily Snapshot, Rolling Behavior, and Ticker Detail.
 
+If a Back-Watch export was uploaded incorrectly, use the main app page's Maintenance / Reprocess expander. Select the corrected source file and click Reprocess Selected Back-Watch File. The app removes candidate rows tied to that canonical source file, keeps cached market bars, recreates the canonical CSV, re-ingests the file, and reruns metrics.
+
 ## Rolling Setup Monitor
 The Rolling Setup Monitor page shows ticker-level monitoring for the last 5 setup dates. It uses a simple objective trigger reference ladder:
 
@@ -56,5 +60,6 @@ It tracks current follow-through from the trigger reference when one exists, and
 ## Commands
 - Run pipeline: `python -m src.run_daily`
 - Inspect DB counts: `python -m src.db_inspect`
+- Remove sample/test/example candidate rows: `python -m src.data_maintenance --remove-samples`
 - Run tests on Windows temp permission issues: `pytest -q --basetemp=.pytest_tmp`
 - If OneDrive blocks pytest temp cleanup, use an external temp path: `pytest -q --basetemp=C:\Temp\wbm_pytest`

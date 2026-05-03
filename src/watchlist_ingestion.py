@@ -6,17 +6,24 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.backwatch_source import infer_setup_date
+from src.backwatch_source import infer_setup_date, is_sample_or_test_file
 
 
 def infer_date(name: str) -> str | None:
     return infer_setup_date(name)
 
 
-def ingest_watchlists(con, watchlists_dir: Path) -> dict:
-    files = sorted([*watchlists_dir.glob('*.csv'), *watchlists_dir.glob('*.xlsx')])
+def ingest_watchlists(con, watchlists_dir: Path, files: list[Path] | None = None) -> dict:
+    if files is None:
+        files = sorted([*watchlists_dir.glob('*.csv'), *watchlists_dir.glob('*.xlsx')])
+    else:
+        files = sorted([Path(f) for f in files])
     inserted, failures = 0, []
+    skipped_sample_files = 0
     for f in files:
+        if is_sample_or_test_file(f.name):
+            skipped_sample_files += 1
+            continue
         rows_seen, rows_inserted = 0, 0
         d = infer_date(f.name)
         h = hashlib.sha256(f.read_bytes()).hexdigest()
@@ -41,4 +48,9 @@ def ingest_watchlists(con, watchlists_dir: Path) -> dict:
         except Exception as err:
             failures.append(f'{f.name}: {err}')
         con.execute('insert into watchlist_files values (?, ?, ?, ?, ?, ?)', [f.name, h, d, rows_seen, rows_inserted, datetime.utcnow()])
-    return {'files_scanned': len(files), 'candidates_inserted': inserted, 'failures': failures}
+    return {
+        'files_scanned': len(files),
+        'candidates_inserted': inserted,
+        'skipped_sample_files': skipped_sample_files,
+        'failures': failures,
+    }

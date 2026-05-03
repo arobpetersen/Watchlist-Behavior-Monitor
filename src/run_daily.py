@@ -15,6 +15,7 @@ from src.watchlist_ingestion import ingest_watchlists
 SUMMARY_KEYS = [
     'files_scanned',
     'candidates_inserted',
+    'skipped_sample_files',
     'bars_fetched',
     'daily_bars_fetched',
     'daily_bars_skipped_existing',
@@ -104,6 +105,7 @@ def run_daily_pipeline() -> dict:
         'db_path': str(s.db_path.resolve()),
         'files_scanned': ingest['files_scanned'],
         'candidates_inserted': ingest['candidates_inserted'],
+        'skipped_sample_files': ingest.get('skipped_sample_files', 0),
         'bars_fetched': bars,
         'daily_bars_fetched': daily_bars_fetched,
         'daily_bars_skipped_existing': daily_bars_skipped_existing,
@@ -119,6 +121,7 @@ def print_summary(summary: dict) -> None:
     print('Run Summary')
     print(f"- files scanned: {summary['files_scanned']}")
     print(f"- candidates inserted: {summary['candidates_inserted']}")
+    print(f"- skipped_sample_files: {summary.get('skipped_sample_files', 0)}")
     print(f"- bars fetched: {summary['bars_fetched']}")
     print(f"- daily_bars_fetched: {summary['daily_bars_fetched']}")
     print(f"- daily_bars_skipped_existing: {summary['daily_bars_skipped_existing']}")

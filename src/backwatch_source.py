@@ -10,6 +10,7 @@ import pandas as pd
 
 SUPPORTED_EXTENSIONS = {'.csv', '.xlsx', '.xls'}
 CANONICAL_COLUMNS = ['ticker', 'rating', 'setup', 'focus', 'key_level']
+SAMPLE_NAME_KEYWORDS = {'sample', 'example', 'test'}
 TICKER_COLUMNS = {
     'ticker',
     'symbol',
@@ -60,6 +61,12 @@ def list_source_files(source_dir: Path) -> list[SourceFile]:
             stat = path.stat()
             files.append(SourceFile(path.name, path, datetime.fromtimestamp(stat.st_mtime), stat.st_size))
     return sorted(files, key=lambda f: f.modified_at, reverse=True)
+
+
+def is_sample_or_test_file(name: str) -> bool:
+    stem = Path(name).stem.lower()
+    parts = [p for p in re.split(r'[^a-z0-9]+', stem) if p]
+    return any(keyword in parts for keyword in SAMPLE_NAME_KEYWORDS)
 
 
 def infer_setup_date(name: str) -> str | None:
@@ -165,6 +172,9 @@ def _already_loaded(con, setup_date: str, canonical_name: str, tickers: list[str
 def scan_source_files(source_dir: Path, watchlists_dir: Path, con=None) -> list[SourceFileStatus]:
     statuses = []
     for source in list_source_files(source_dir):
+        if is_sample_or_test_file(source.name):
+            statuses.append(SourceFileStatus(source.name, source.path, None, None, 'Skipped Sample/Test', 'Sample, test, and example files are ignored.'))
+            continue
         setup_date = infer_setup_date(source.name)
         if not setup_date:
             statuses.append(SourceFileStatus(source.name, source.path, None, None, 'Missing Date', 'No setup date found in filename.'))
@@ -205,3 +215,35 @@ def process_new_source_files(source_dir: Path, watchlists_dir: Path, con) -> tup
         except Exception as exc:
             updated.append(SourceFileStatus(row.source_file, row.path, row.inferred_setup_date, row.ticker_count, 'Error', str(exc), row.canonical_file))
     return updated, saved_paths
+
+
+def reprocess_source_file(con, source_path: Path, watchlists_dir: Path) -> dict:
+    from src.data_maintenance import remove_candidates_for_source
+    from src.watchlist_ingestion import ingest_watchlists
+
+    if is_sample_or_test_file(source_path.name):
+        raise ValueError('Sample, test, and example files cannot be reprocessed into live tables.')
+    setup_date = infer_setup_date(source_path.name)
+    if not setup_date:
+        raise ValueError('No setup date found in filename.')
+    normalized = normalize_backwatch_file(source_path)
+    if normalized.empty:
+        raise ValueError('No symbol-like tickers detected.')
+
+    canonical_path = _canonical_path(source_path, setup_date, watchlists_dir)
+    removed = remove_candidates_for_source(con, setup_date, canonical_path.name)
+    output_path, saved = save_canonical_watchlist(source_path, setup_date, watchlists_dir)
+    ingest = ingest_watchlists(con, watchlists_dir, files=[output_path])
+    return {
+        'source_file': source_path.name,
+        'setup_date': setup_date,
+        'canonical_file': output_path.name,
+        'old_candidates_removed': removed['candidates_removed'],
+        'features_removed': removed['features_removed'],
+        'labels_removed': removed['labels_removed'],
+        'watchlist_file_rows_removed': removed['watchlist_file_rows_removed'],
+        'new_candidates_inserted': ingest['candidates_inserted'],
+        'tickers': len(saved),
+        'skipped_sample_files': ingest.get('skipped_sample_files', 0),
+        'failures': ingest['failures'],
+    }

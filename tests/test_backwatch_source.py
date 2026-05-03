@@ -8,9 +8,11 @@ import pytest
 from src.backwatch_source import (
     canonical_filename,
     infer_setup_date,
+    is_sample_or_test_file,
     list_source_files,
     normalize_backwatch_file,
     process_new_source_files,
+    reprocess_source_file,
     resolve_source_dir,
     save_canonical_watchlist,
     scan_source_files,
@@ -49,6 +51,11 @@ def test_list_source_files_filters_supported_files(tmp_path: Path):
         '2026-05-01_backwatch.xlsx',
         '2026-05-02_backwatch.xls',
     }
+
+
+@pytest.mark.parametrize('name', ['sample_2026-04-30.csv', '2026-04-30_sample_backwatch.csv', 'example_2026-04-30.xlsx', '2026-04-30_test.csv'])
+def test_sample_file_name_detection(name):
+    assert is_sample_or_test_file(name)
 
 
 def test_resolve_source_dir_falls_back_to_parent_tc2000(tmp_path: Path):
@@ -114,6 +121,7 @@ def test_scan_source_files_mixed_statuses(tmp_path: Path):
     (watchlists_dir / canonical_filename('2026-05-01', '2026-05-01_backwatch')).write_text('ticker,rating,setup,focus,key_level\nNVDA,,,,\n')
     (source_dir / 'backwatch_without_date.csv').write_text('ticker\nTSLA\n')
     (source_dir / '2026-05-02_backwatch.csv').write_text('ticker\nnot a symbol?\n')
+    (source_dir / 'sample_2026-05-03_backwatch.csv').write_text('ticker\nAAPL\n')
     con = get_connection(':memory:')
 
     rows = scan_source_files(source_dir, watchlists_dir, con)
@@ -124,6 +132,7 @@ def test_scan_source_files_mixed_statuses(tmp_path: Path):
     assert by_file['2026-05-01_backwatch.csv'].status == 'Already Processed'
     assert by_file['backwatch_without_date.csv'].status == 'Missing Date'
     assert by_file['2026-05-02_backwatch.csv'].status == 'No Valid Tickers'
+    assert by_file['sample_2026-05-03_backwatch.csv'].status == 'Skipped Sample/Test'
 
 
 def test_process_new_source_files_saves_only_new_files(tmp_path: Path):
@@ -144,3 +153,50 @@ def test_process_new_source_files_saves_only_new_files(tmp_path: Path):
         '2026-04-30_backwatch.csv': 'Processed',
         '2026-05-01_backwatch.csv': 'Already Processed',
     }
+
+
+def test_reprocess_source_file_removes_old_and_inserts_corrected_tickers(tmp_path: Path):
+    source_dir = tmp_path / 'tc2000'
+    watchlists_dir = tmp_path / 'watchlists'
+    source_dir.mkdir()
+    watchlists_dir.mkdir()
+    source = source_dir / '2026-04-30_backwatch.csv'
+    source.write_text('ticker\nAAPL\nMSFT\n')
+    con = get_connection(':memory:')
+
+    first = reprocess_source_file(con, source, watchlists_dir)
+    source.write_text('ticker\nMSFT\nNVDA\n')
+    second = reprocess_source_file(con, source, watchlists_dir)
+
+    rows = con.execute('select ticker, source_file from watchlist_candidates order by ticker').fetchall()
+    assert first['new_candidates_inserted'] == 2
+    assert second['old_candidates_removed'] == 2
+    assert second['new_candidates_inserted'] == 2
+    assert [r[0] for r in rows] == ['MSFT', 'NVDA']
+    assert con.execute('select count(*) from watchlist_candidates').fetchone()[0] == 2
+    assert con.execute('select count(*) from watchlist_files').fetchone()[0] == 1
+
+
+def test_reprocess_source_file_removes_related_features_and_labels_but_leaves_bars(tmp_path: Path):
+    source_dir = tmp_path / 'tc2000'
+    watchlists_dir = tmp_path / 'watchlists'
+    source_dir.mkdir()
+    watchlists_dir.mkdir()
+    source = source_dir / '2026-04-30_backwatch.csv'
+    source.write_text('ticker\nAAPL\n')
+    con = get_connection(':memory:')
+    reprocess_source_file(con, source, watchlists_dir)
+    cid = con.execute('select candidate_id from watchlist_candidates').fetchone()[0]
+    con.execute("insert into entry_day_features (candidate_id, watchlist_date, ticker) values (?, '2026-04-30', 'AAPL')", [cid])
+    con.execute("insert into behavior_labels values (?, '2026-04-30', 'AAPL', 'label', '', '')", [cid])
+    con.execute("insert into daily_bars values ('AAPL', '2026-04-30', 1, 1, 1, 1, 1, null, 'test', current_timestamp)")
+    source.write_text('ticker\nNVDA\n')
+
+    summary = reprocess_source_file(con, source, watchlists_dir)
+
+    assert summary['features_removed'] == 1
+    assert summary['labels_removed'] == 1
+    assert con.execute('select ticker from watchlist_candidates').fetchone()[0] == 'NVDA'
+    assert con.execute('select count(*) from entry_day_features').fetchone()[0] == 0
+    assert con.execute('select count(*) from behavior_labels').fetchone()[0] == 0
+    assert con.execute('select count(*) from daily_bars').fetchone()[0] == 1

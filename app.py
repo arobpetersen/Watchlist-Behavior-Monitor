@@ -4,13 +4,17 @@ import pandas as pd
 import streamlit as st
 
 from src.backwatch_source import (
+    infer_setup_date,
+    is_sample_or_test_file,
     list_source_files,
     normalize_backwatch_file,
     process_new_source_files,
+    reprocess_source_file,
     resolve_source_dir,
     scan_source_files,
 )
 from src.config import get_settings
+from src.data_maintenance import remove_sample_data
 from src.database import get_connection
 from src.run_daily import run_daily_pipeline
 from src.watchlist_ingestion import ingest_watchlists
@@ -34,6 +38,9 @@ def _summary_table(summary: dict):
         ('Source files scanned', 'source_files_scanned'),
         ('New files processed', 'new_files_processed'),
         ('Already processed files skipped', 'already_processed_files_skipped'),
+        ('Sample/test files skipped', 'skipped_sample_files'),
+        ('Reprocessed files', 'reprocessed_files'),
+        ('Candidates removed', 'candidates_removed'),
         ('Files missing date', 'files_missing_date'),
         ('Files with no valid tickers', 'files_no_valid_tickers'),
         ('Candidates inserted', 'candidates_inserted'),
@@ -93,6 +100,9 @@ if st.button('Process All New Back-Watch Files', type='primary'):
             'source_files_scanned': len(processed_rows),
             'new_files_processed': sum(1 for r in processed_rows if r.status == 'Processed'),
             'already_processed_files_skipped': sum(1 for r in processed_rows if r.status == 'Already Processed'),
+            'skipped_sample_files': sum(1 for r in processed_rows if r.status == 'Skipped Sample/Test') + ingest_result.get('skipped_sample_files', 0),
+            'reprocessed_files': 0,
+            'candidates_removed': 0,
             'files_missing_date': sum(1 for r in processed_rows if r.status == 'Missing Date'),
             'files_no_valid_tickers': sum(1 for r in processed_rows if r.status == 'No Valid Tickers'),
             'candidates_inserted': ingest_result['candidates_inserted'],
@@ -113,6 +123,87 @@ if st.button('Process All New Back-Watch Files', type='primary'):
             st.write(failures)
         if metrics_message:
             st.info(metrics_message)
+
+with st.expander('Maintenance / Reprocess'):
+    if st.button('Remove Sample/Test Rows From Live Tables'):
+        cleanup = remove_sample_data(con)
+        st.success('Sample/test cleanup complete.')
+        st.dataframe(pd.DataFrame([cleanup]), width='stretch', hide_index=True)
+
+    files = list_source_files(source_dir) if source_dir.exists() else []
+    real_files = [f for f in files if not is_sample_or_test_file(f.name) and infer_setup_date(f.name)]
+    if real_files:
+        labels = [f.name for f in real_files]
+        selected_name = st.selectbox('Back-Watch Source File', labels)
+        selected = real_files[labels.index(selected_name)]
+        try:
+            preview = normalize_backwatch_file(selected.path)
+            st.write(f'Setup date: `{infer_setup_date(selected.name)}`')
+            st.write(f'Tickers detected: {len(preview)}')
+        except Exception as exc:
+            preview = pd.DataFrame()
+            st.warning(f'Could not preview selected file: {exc}')
+
+        if st.button('Reprocess Selected Back-Watch File'):
+            with st.spinner('Reprocessing selected Back-Watch file...'):
+                try:
+                    reprocess_summary = reprocess_source_file(con, selected.path, settings.watchlists_dir)
+                    con.close()
+                    pipeline_summary = {}
+                    if settings.massive_api_key:
+                        pipeline_summary = run_daily_pipeline()
+                    else:
+                        reprocess_summary['failures'].append('API key missing; file was reprocessed but metrics were not updated.')
+                    st.success('Selected Back-Watch file reprocessed.')
+                    st.dataframe(pd.DataFrame([{
+                        'Selected File': reprocess_summary['source_file'],
+                        'Setup Date': reprocess_summary['setup_date'],
+                        'Old Candidates Removed': reprocess_summary['old_candidates_removed'],
+                        'New Candidates Inserted': reprocess_summary['new_candidates_inserted'],
+                        'Features Calculated': pipeline_summary.get('features_calculated', 0),
+                        'Labels Assigned': pipeline_summary.get('labels_assigned', 0),
+                        'Failures': len(reprocess_summary['failures']) + len(pipeline_summary.get('failures', [])),
+                    }]), width='stretch', hide_index=True)
+                    failures = reprocess_summary['failures'] + pipeline_summary.get('failures', [])
+                    if failures:
+                        st.warning('Failures')
+                        st.write(failures)
+                except Exception as exc:
+                    st.error(f'Reprocess failed: {exc}')
+
+        if st.button('Reprocess All Source Files'):
+            summaries, failures = [], []
+            with st.spinner('Reprocessing all Back-Watch source files...'):
+                for source in real_files:
+                    try:
+                        summaries.append(reprocess_source_file(con, source.path, settings.watchlists_dir))
+                    except Exception as exc:
+                        failures.append(f'{source.name}: {exc}')
+                con.close()
+                pipeline_summary = {}
+                if settings.massive_api_key:
+                    pipeline_summary = run_daily_pipeline()
+                else:
+                    failures.append('API key missing; files were reprocessed but metrics were not updated.')
+            st.success('All Back-Watch source files reprocessed.')
+            st.dataframe(_summary_table({
+                'source_files_scanned': len(files),
+                'new_files_processed': 0,
+                'already_processed_files_skipped': 0,
+                'skipped_sample_files': sum(1 for f in files if is_sample_or_test_file(f.name)),
+                'reprocessed_files': len(summaries),
+                'candidates_removed': sum(s['old_candidates_removed'] for s in summaries),
+                'candidates_inserted': sum(s['new_candidates_inserted'] for s in summaries),
+                'features_calculated': pipeline_summary.get('features_calculated', 0),
+                'labels_assigned': pipeline_summary.get('labels_assigned', 0),
+                'failures_count': len(failures) + len(pipeline_summary.get('failures', [])),
+            }), width='stretch', hide_index=True)
+            all_failures = failures + pipeline_summary.get('failures', [])
+            if all_failures:
+                st.warning('Failures')
+                st.write(all_failures)
+    else:
+        st.info('No real Back-Watch source files are available to reprocess.')
 
 st.subheader('Source Files')
 if source_dir.exists():
