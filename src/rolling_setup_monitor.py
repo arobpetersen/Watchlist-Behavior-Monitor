@@ -316,7 +316,7 @@ def pdh_trigger_assessment(
     open_over_pdh = setup_open > pdh
     if open_over_pdh:
         return {
-            'pdh_result': '-',
+            'pdh_result': 'Gap',
             'prior_day_high': pdh,
             'setup_day_open': setup_open,
             'open_over_pdh': True,
@@ -683,7 +683,7 @@ def _badge_class(column: str, value: str) -> str:
         return f'monitor-badge trigger-{normalized}'
     if column in {'PDH', '1m ORH', '5m ORH'} and value in {'success', 'failed'}:
         return f'monitor-badge result-{value}'
-    if value == '-':
+    if value in {'-', 'Gap'}:
         return 'monitor-badge status-muted'
     return ''
 
@@ -796,7 +796,7 @@ def format_summary_blocks_html(summary: dict) -> str:
     setups_count = int(summary.get('Setups', 0) or 0)
     groups = [
         ('Overall', [('Setups', 'Setups', False), ('Day Success', 'Day Success', True), ('Day Fail', 'Day Fail', True), ('Unresolved', 'Unresolved', True), ('Active', 'Active', True), ('Later Failed', 'Later Failed', True)]),
-        ('PDH', [('PDH Success', 'PDH', True), ('PDH Failed', 'Failed PDH Trigger', True)]),
+        ('PDH', [('Gap', 'PDH Gap', True), ('Success', 'PDH', True), ('Failed', 'Failed PDH Trigger', True)]),
         ('1m OR', [('Clean 1m', 'Clean 1m', True), ('Failed 1m', '1m Failed', True)]),
         ('5m OR', [('Clean 5m', 'Clean 5m', True), ('Failed 5m', '5m Failed', True)]),
         ('Alternate / Other', [('Alt Required', 'Alt Required', True), ('No Trigger', 'No Trigger', True), ('Retested', 'Retested', True)]),
@@ -857,8 +857,10 @@ def detail_table(table: pd.DataFrame) -> pd.DataFrame:
 
 
 def day_summary(df: pd.DataFrame) -> dict:
+    pdh = df['PDH'] if 'PDH' in df else pd.Series(dtype=object)
     return {
         'Setups': len(df),
+        'PDH Gap': int((pdh == 'Gap').sum()) if not df.empty else 0,
         'PDH': int((df['Trigger'] == 'PDH').sum()) if not df.empty else 0,
         'Failed PDH Trigger': int((df['Trigger'] == 'Failed PDH Trigger').sum()) if not df.empty else 0,
         'Clean 1m': int((df['1m ORH'] == 'success').sum()) if not df.empty else 0,

@@ -131,10 +131,10 @@ def test_clean_1m_orh_trigger_level_and_reference_low():
     assert out['trigger_break_time'] == pd.Timestamp('2026-05-01 09:31')
 
 
-def test_pdh_result_not_applicable_when_open_over_prior_day_high():
+def test_pdh_result_gap_when_open_over_prior_day_high():
     out = pdh_trigger_assessment(9.9, 10.0, _pdh_intraday(), _daily())
 
-    assert out['pdh_result'] == '-'
+    assert out['pdh_result'] == 'Gap'
     assert out['open_over_pdh'] is True
 
 
@@ -259,7 +259,7 @@ def test_gap_over_pdh_display_marks_pdh_not_applicable_and_keeps_orh_results():
         'ticker': 'TWLO',
         'status': 'Active',
         'trigger_type': '5m ORH',
-        'pdh_result': '-',
+        'pdh_result': 'Gap',
         'pdh_governed': False,
         'one_min_result': 'failed',
         'five_min_result': 'success',
@@ -301,7 +301,7 @@ def test_gap_over_pdh_display_marks_pdh_not_applicable_and_keeps_orh_results():
 
     table = _format_section_table(raw)
 
-    assert table.loc[0, 'PDH'] == '-'
+    assert table.loc[0, 'PDH'] == 'Gap'
     assert table.loc[0, '1m ORH'] == 'failed'
     assert table.loc[0, '5m ORH'] == 'success'
 
@@ -373,7 +373,7 @@ def test_open_over_pdh_uses_orh_stack():
     )
 
     assert out['trigger_type'] == '1m ORH'
-    assert out['pdh_result'] == '-'
+    assert out['pdh_result'] == 'Gap'
     assert out['pdh_governed'] is False
 
 
@@ -1132,6 +1132,7 @@ def test_format_summary_blocks_html_includes_group_titles():
         'Day Fail': 0,
         'Unresolved': 1,
         'PDH': 1,
+        'PDH Gap': 1,
         'Failed PDH Trigger': 1,
         'Clean 1m': 1,
         '1m Failed': 1,
@@ -1158,8 +1159,9 @@ def test_format_summary_blocks_html_includes_group_titles():
     assert 'Day Fail</span><strong>0 (0%)</strong>' in html
     assert 'Active</span><strong>1 (33%)</strong>' in html
     assert 'Later Failed</span><strong>1 (33%)</strong>' in html
-    assert 'PDH Success</span><strong>1 (33%)</strong>' in html
-    assert 'PDH Failed</span><strong>1 (33%)</strong>' in html
+    assert 'Gap</span><strong>1 (33%)</strong>' in html
+    assert 'Success</span><strong>1 (33%)</strong>' in html
+    assert 'Failed</span><strong>1 (33%)</strong>' in html
     assert 'Clean 5m</span><strong>0 (0%)</strong>' in html
     assert 'Median Current</span><strong>5.0%</strong>' in html
     assert 'Median Current</span><strong>5.0% (' not in html
@@ -1174,6 +1176,7 @@ def test_format_summary_blocks_html_uses_zero_percent_when_no_setups():
         'Day Fail': 0,
         'Unresolved': 0,
         'PDH': 0,
+        'PDH Gap': 0,
         'Failed PDH Trigger': 0,
         'Clean 1m': 0,
         '1m Failed': 0,
@@ -1190,7 +1193,7 @@ def test_format_summary_blocks_html_uses_zero_percent_when_no_setups():
     assert 'Setups</span><strong>0</strong>' in html
     assert 'Day Success</span><strong>0 (0%)</strong>' in html
     assert 'Active</span><strong>0 (0%)</strong>' in html
-    assert 'PDH Success</span><strong>0 (0%)</strong>' in html
+    assert 'Gap</span><strong>0 (0%)</strong>' in html
     assert 'Failed 1m</span><strong>0 (0%)</strong>' in html
     assert 'No Trigger</span><strong>0 (0%)</strong>' in html
 
@@ -1309,12 +1312,13 @@ def test_day_summary_counts_pdh_and_excludes_pdh_rows_from_orh_counts():
     df = pd.DataFrame([
         {'Trigger': 'PDH', '1m ORH': '-', '5m ORH': '-', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retest Day': '', 'current_pct_raw': 0.04, 'max_pct_raw': 0.08, 'd3_high_pct_raw': 0.10},
         {'Trigger': 'Failed PDH Trigger', '1m ORH': '-', '5m ORH': '-', 'Trigger Day': 'Fail', 'Current Status': muted, 'Retest Day': '', 'current_pct_raw': -0.01, 'max_pct_raw': 0.02, 'd3_high_pct_raw': 0.03},
-        {'Trigger': '1m ORH', '1m ORH': 'success', '5m ORH': 'success', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retest Day': '', 'current_pct_raw': 0.02, 'max_pct_raw': 0.04, 'd3_high_pct_raw': 0.05},
+        {'Trigger': '1m ORH', 'PDH': 'Gap', '1m ORH': 'success', '5m ORH': 'success', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retest Day': '', 'current_pct_raw': 0.02, 'max_pct_raw': 0.04, 'd3_high_pct_raw': 0.05},
     ])
 
     summary = day_summary(df)
 
     assert summary['PDH'] == 1
+    assert summary['PDH Gap'] == 1
     assert summary['Failed PDH Trigger'] == 1
     assert summary['Clean 1m'] == 1
     assert summary['Clean 5m'] == 1
