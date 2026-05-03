@@ -109,7 +109,7 @@ def test_clean_1m_orh_trigger_level_and_reference_low():
     assert out['trigger_break_time'] == pd.Timestamp('2026-05-01 09:31')
 
 
-def test_1m_flush_then_orh_trigger_uses_trigger_time_low_and_stays_active():
+def test_1m_orl_break_before_orh_late_orh_is_failed():
     intraday = _flush_then_trigger_intraday(after_low=9.6)
     out = derive_trigger_reference(
         _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:32', orl_break_time='2026-05-01 09:31'),
@@ -120,17 +120,18 @@ def test_1m_flush_then_orh_trigger_uses_trigger_time_low_and_stays_active():
     )
     failure = fail_day(intraday, _daily(lows=[10.1, 10.0, 10.2, 10.3]), out['trigger_break_time'], out['reference_low'])
 
-    assert out['trigger_type'] == '1m ORH'
+    assert out['trigger_type'] == 'Failed OR Trigger'
+    assert out['failed_framework'] == '1m ORH'
     assert out['reference_low'] == 9.5
-    assert out['reference_basis'] == 'LOD at 1m Trigger'
+    assert out['reference_basis'] == 'Failed LOD at 1m Trigger'
     assert opening_range_result(
         _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:32', orl_break_time='2026-05-01 09:31'),
         1,
         out['trigger_type'],
         intraday,
-    ) == 'success'
+    ) == 'failed'
     assert failure is None
-    assert status_for(out['trigger_type'], failure) == 'Active'
+    assert status_for(out['trigger_type'], out['framework_fail_day']) == 'Failed'
 
 
 def test_1m_flush_then_orh_trigger_fails_when_trigger_time_low_breaks_afterward():
@@ -419,24 +420,7 @@ def test_failed_or_trigger_uses_daily_fail_from_primary_framework():
     assert out['framework_fail_day'] == 1
 
 
-def test_5m_orl_break_invalidates_selected_1m_orh_without_alt_required():
-    intraday = _flush_then_trigger_intraday(after_low=9.6)
-    out = derive_trigger_reference(
-        _or(broke_orh=True, broke_orl=False, orh_then_orl=False, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:32'),
-        _or(broke_orh=True, broke_orl=True, orh_then_orl=True, orh=11.0, orl=9.6, orh_break_time='2026-05-01 09:35', orl_break_time='2026-05-01 09:36'),
-        _or(broke_orh=False, broke_orl=False, orh=12.0, orl=9.0),
-        0.50,
-        intraday,
-    )
-
-    assert out['trigger_type'] == 'Failed OR Trigger'
-    assert out['failed_framework'] == '5m ORL'
-    assert out['framework_fail_day'] == 0
-    assert out['trigger_level'] == 10.5
-    assert out['reference_low'] == 9.6
-
-
-def test_twlo_style_1m_trigger_5m_orl_break_no_alt_required_is_failed():
+def test_twlo_style_1m_fails_but_5m_trigger_succeeds_after_pretrigger_flush():
     intraday = pd.DataFrame({
         'ticker': ['TWLO'] * 7,
         'trading_date': pd.to_datetime(['2026-05-01'] * 7),
@@ -461,14 +445,57 @@ def test_twlo_style_1m_trigger_5m_orl_break_no_alt_required_is_failed():
         intraday,
     )
 
-    assert out['trigger_type'] == 'Failed OR Trigger'
-    assert out['failed_framework'] == '5m ORL'
+    assert out['trigger_type'] == '5m ORH'
+    assert out['reference_low'] == 171.01
+    assert opening_range_result(
+        _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=179.47, orl=177.28, orh_break_time='2026-05-01 13:03', orl_break_time='2026-05-01 09:31'),
+        1,
+        out['trigger_type'],
+        intraday,
+    ) == 'failed'
     assert opening_range_result(
         _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=179.47, orl=173.33, orh_break_time='2026-05-01 13:03', orl_break_time='2026-05-01 09:35'),
         5,
         out['trigger_type'],
         intraday,
-    ) == 'failed'
+    ) == 'success'
+    assert status_for(out['trigger_type'], fail_day(intraday, _daily(lows=[180.0, 179.0, 178.0, 177.0]), out['trigger_break_time'], out['reference_low'])) == 'Active'
+
+
+def test_prch_style_5m_reference_low_break_after_trigger_is_failed():
+    intraday = pd.DataFrame({
+        'ticker': ['PRCH'] * 6,
+        'trading_date': pd.to_datetime(['2026-04-29'] * 6),
+        'timestamp_et': pd.to_datetime([
+            '2026-04-29 09:30',
+            '2026-04-29 09:31',
+            '2026-04-29 09:32',
+            '2026-04-29 09:33',
+            '2026-04-29 09:34',
+            '2026-04-29 09:35',
+        ]),
+        'high': [10.32, 10.20, 10.40, 10.45, 10.50, 10.70],
+        'low': [9.91, 10.00, 9.90, 10.10, 10.20, 10.55],
+        'close': [10.10, 10.15, 10.30, 10.35, 10.45, 10.65],
+    })
+    daily = pd.DataFrame({
+        'ticker': ['PRCH'] * 4,
+        'trading_date': pd.to_datetime(['2026-04-29', '2026-04-30', '2026-05-01', '2026-05-04']),
+        'high': [10.90, 10.80, 10.70, 10.60],
+        'low': [9.90, 9.80, 9.95, 10.00],
+        'close': [10.65, 10.10, 10.20, 10.30],
+    })
+    out = derive_trigger_reference(
+        _or(broke_orh=False, broke_orl=True, orh=10.32, orl=9.91),
+        _or(broke_orh=True, broke_orl=False, orh=10.69, orl=9.90, orh_break_time='2026-04-29 09:35'),
+        _or(broke_orh=False, orh=10.83, orl=9.90),
+        0.30,
+        intraday,
+        daily,
+    )
+
+    assert out['trigger_type'] == 'Failed OR Trigger'
+    assert out['failed_framework'] == '5m ORH'
     assert status_for(out['trigger_type'], out['framework_fail_day']) == 'Failed'
 
 
