@@ -34,6 +34,7 @@ AUDIT_COLUMNS = [
     'Selected Trigger',
     'Trigger Level',
     'Reference Low',
+    'Reference Basis',
     'Trigger Break Time',
     'Retest Day',
     'Fail Day',
@@ -212,8 +213,8 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
     setup_day = pd.to_datetime(record['watchlist_date']).date()
     one = _loads(record.get('or_1m'))
     five = _loads(record.get('or_5m'))
-    trigger = derive_trigger_reference(record.get('or_1m'), record.get('or_5m'), record.get('or_15m'), record.get('close_location'))
     intraday = _regular_intraday(con, record['ticker'], setup_day)
+    trigger = derive_trigger_reference(record.get('or_1m'), record.get('or_5m'), record.get('or_15m'), record.get('close_location'), intraday)
     daily = _daily_for_ticker(con, record['ticker'], setup_day)
     retest = retest_day(intraday, daily, trigger.get('trigger_break_time'), trigger.get('trigger_level'))
     failure = fail_day(intraday, daily, trigger.get('trigger_break_time'), trigger.get('reference_low'))
@@ -227,17 +228,18 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
         '1m OR End': _fmt_ts(_session_timestamp(setup_day, 9, 31)),
         '1m ORH Break Time': _fmt_ts(one.get('orh_break_time')),
         '1m ORL Break After ORH Time': _orl_after_orh_time(one),
-        '1m OR Result': opening_range_result(record.get('or_1m'), 1, trigger['trigger_type']),
+        '1m OR Result': opening_range_result(record.get('or_1m'), 1, trigger['trigger_type'], intraday),
         '5m ORH': _fmt_price(five.get('orh')),
         '5m ORL': _fmt_price(five.get('orl')),
         '5m OR Start': _fmt_ts(_session_timestamp(setup_day, 9, 30)),
         '5m OR End': _fmt_ts(_session_timestamp(setup_day, 9, 35)),
         '5m ORH Break Time': _fmt_ts(five.get('orh_break_time')),
         '5m ORL Break After ORH Time': _orl_after_orh_time(five),
-        '5m OR Result': opening_range_result(record.get('or_5m'), 5, trigger['trigger_type']),
+        '5m OR Result': opening_range_result(record.get('or_5m'), 5, trigger['trigger_type'], intraday),
         'Selected Trigger': trigger['trigger_type'],
         'Trigger Level': _fmt_price(trigger.get('trigger_level')),
         'Reference Low': _fmt_price(trigger.get('reference_low')),
+        'Reference Basis': trigger.get('reference_basis') or '',
         'Trigger Break Time': _fmt_ts(trigger.get('trigger_break_time')),
         'Retest Day': _fmt_day(retest),
         'Fail Day': _fmt_day(failure),
