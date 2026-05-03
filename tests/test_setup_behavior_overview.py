@@ -438,6 +438,8 @@ def test_trigger_outcome_comparison_rows_and_denominators():
 
     one_last_10 = comparison[(comparison['Trigger'] == '1m ORH') & (comparison['Window'] == 'Last 10 Setup Dates')].iloc[0]
     assert one_last_10['Setups'] == 4
+    assert one_last_10['Eligible'] == 4
+    assert one_last_10['Ineligible'] == 0
     assert one_last_10['Triggered'] == 2
     assert one_last_10['Trigger Rate'] == '50%'
     assert one_last_10['Success'] == 1
@@ -455,6 +457,8 @@ def test_trigger_outcome_by_window_tables_drop_window_column_and_group_triggers(
     assert last_10.columns.tolist() == TRIGGER_COMPARISON_BY_WINDOW_COLUMNS
     assert 'Window' not in last_10.columns
     assert last_10['Trigger'].tolist() == ['1m ORH', '5m ORH', 'PDH']
+    assert 'Eligible' in last_10.columns
+    assert 'Ineligible' in last_10.columns
     assert last_10.loc[0, 'Triggered'] == 2
     assert last_10.loc[1, 'Triggered'] == 2
     assert last_10.loc[2, 'Triggered'] == 1
@@ -488,11 +492,28 @@ def test_trigger_outcome_comparison_later_failed_active_and_medians():
     assert five_last_10['Median Max'] == '6.5%'
 
 
+def test_trigger_outcome_pdh_gap_is_ineligible_for_trigger_rate():
+    comparison = trigger_outcome_comparison(_trigger_comparison_history())
+
+    pdh_last_10 = comparison[(comparison['Trigger'] == 'PDH') & (comparison['Window'] == 'Last 10 Setup Dates')].iloc[0]
+    assert pdh_last_10['Setups'] == 4
+    assert pdh_last_10['Eligible'] == 3
+    assert pdh_last_10['Ineligible'] == 1
+    assert pdh_last_10['Triggered'] == 1
+    assert pdh_last_10['Trigger Rate'] == '33%'
+    assert pdh_last_10['Success'] == 1
+    assert pdh_last_10['Success %'] == '100%'
+    assert pdh_last_10['Failed'] == 0
+    assert pdh_last_10['Fail %'] == '0%'
+
+
 def test_trigger_outcome_comparison_zero_trigger_display():
     comparison = trigger_outcome_comparison(_trigger_comparison_history())
 
     pdh_last_5 = comparison[(comparison['Trigger'] == 'PDH') & (comparison['Window'] == 'Last 5 Setup Dates')].iloc[0]
     assert pdh_last_5['Setups'] == 2
+    assert pdh_last_5['Eligible'] == 1
+    assert pdh_last_5['Ineligible'] == 1
     assert pdh_last_5['Triggered'] == 0
     assert pdh_last_5['Trigger Rate'] == '0%'
     assert pdh_last_5['Success %'] == '-'
@@ -501,6 +522,24 @@ def test_trigger_outcome_comparison_zero_trigger_display():
     assert pdh_last_5['Active %'] == '-'
     assert pdh_last_5['Median Current'] == '-'
     assert pdh_last_5['Median Max'] == '-'
+
+
+def test_trigger_outcome_eligible_zero_display():
+    comparison = trigger_outcome_comparison({
+        'Last 5 Setup Dates': pd.DataFrame([
+            {'Ticker': 'A', 'Current Status': 'Active', 'PDH': 'Gap', 'current_pct_raw': 0.01, 'max_pct_raw': 0.02},
+            {'Ticker': 'B', 'Current Status': 'Active', 'PDH': 'N/A', 'current_pct_raw': 0.03, 'max_pct_raw': 0.04},
+        ])
+    })
+
+    pdh = comparison[(comparison['Trigger'] == 'PDH') & (comparison['Window'] == 'Last 5 Setup Dates')].iloc[0]
+    assert pdh['Setups'] == 2
+    assert pdh['Eligible'] == 0
+    assert pdh['Ineligible'] == 2
+    assert pdh['Triggered'] == 0
+    assert pdh['Trigger Rate'] == '-'
+    assert pdh['Success %'] == '-'
+    assert pdh['Fail %'] == '-'
 
 
 def test_trigger_event_outcomes_are_separate_from_primary_trigger_grouping():
@@ -522,6 +561,17 @@ def test_filter_detail_rows_by_trigger_level_and_result():
 
     pdh_blank = filter_detail_rows(detail, trigger_level='PDH', trigger_result='blank')
     assert pdh_blank['Ticker'].tolist() == ['AAA', 'EEE', 'BBB', 'CCC']
+
+
+def test_filter_detail_rows_by_ineligible_gap_result():
+    detail = pd.DataFrame([
+        {'Ticker': 'A', 'PDH': 'Gap', '1m ORH': 'success', '5m ORH': '-'},
+        {'Ticker': 'B', 'PDH': 'success', '1m ORH': '-', '5m ORH': '-'},
+    ])
+
+    gap = filter_detail_rows(detail, trigger_level='PDH', trigger_result='Gap')
+
+    assert gap['Ticker'].tolist() == ['A']
 
 
 def test_filter_detail_rows_by_current_status_bucket():

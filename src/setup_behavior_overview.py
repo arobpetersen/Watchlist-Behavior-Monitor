@@ -371,6 +371,21 @@ def _is_blank_or_dash(series: pd.Series) -> pd.Series:
     return normalized.isin({'', '-', '—', 'â€”'})
 
 
+def _normalized_result(series: pd.Series) -> pd.Series:
+    return series.fillna('').astype(str).str.strip()
+
+
+def _ineligible_trigger_mask(series: pd.Series) -> pd.Series:
+    normalized = _normalized_result(series).str.casefold()
+    return normalized.isin({'gap', 'n/a', 'na', 'not applicable', 'not-applicable'})
+
+
+def _eligible_trigger_mask(series: pd.Series) -> pd.Series:
+    # Blank/dash currently means the trigger level was applicable but did not
+    # trigger. Explicit not-applicable states, such as PDH Gap, are excluded.
+    return ~_ineligible_trigger_mask(series)
+
+
 def _pct_of_rows(count: int, denominator: int) -> str:
     if denominator <= 0:
         return '-'
@@ -635,6 +650,8 @@ TRIGGER_COMPARISON_COLUMNS = [
     'Trigger',
     'Window',
     'Setups',
+    'Eligible',
+    'Ineligible',
     'Triggered',
     'Trigger Rate',
     'Failed',
@@ -658,11 +675,14 @@ def trigger_outcome_comparison(history_by_window: dict[str, pd.DataFrame]) -> pd
             if rows.empty or column not in rows:
                 values = pd.Series('', index=rows.index)
             else:
-                values = rows[column].fillna('').astype(str).str.strip()
+                values = _normalized_result(rows[column])
             success_mask = values.eq('success')
             failed_mask = values.eq('failed')
+            eligible_mask = _eligible_trigger_mask(values)
             triggered_mask = success_mask | failed_mask
             triggered = rows[triggered_mask].copy()
+            eligible_count = int(eligible_mask.sum())
+            ineligible_count = setups - eligible_count
             triggered_count = len(triggered)
             later_failed_count = int(_is_later_failed(triggered['Current Status']).sum()) if triggered_count and 'Current Status' in triggered else 0
             active_count = int(triggered['Current Status'].eq('Active').sum()) if triggered_count and 'Current Status' in triggered else 0
@@ -670,8 +690,10 @@ def trigger_outcome_comparison(history_by_window: dict[str, pd.DataFrame]) -> pd
                 'Trigger': trigger_name,
                 'Window': window_label,
                 'Setups': setups,
+                'Eligible': eligible_count,
+                'Ineligible': ineligible_count,
                 'Triggered': triggered_count,
-                'Trigger Rate': _fmt_rate(triggered_count, setups),
+                'Trigger Rate': _fmt_rate(triggered_count, eligible_count),
                 'Success': int(success_mask.sum()),
                 'Success %': _fmt_rate(int(success_mask.sum()), triggered_count),
                 'Failed': int(failed_mask.sum()),

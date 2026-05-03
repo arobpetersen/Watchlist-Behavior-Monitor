@@ -57,7 +57,8 @@ else:
     else:
         st.dataframe(overview['trigger_outcome_comparison'], width='stretch', hide_index=True)
     st.caption(
-        'Trigger Rate uses all setups in the window. Fail %, Success %, Active %, and Later Failed % use triggered setups only.'
+        'Trigger Rate uses eligible setups only. Fail %, Success %, Active %, and Later Failed % use triggered setups only. '
+        'Ineligible setups are excluded when a trigger was not valid for that setup.'
     )
 
     st.subheader('Selected Window Opening Path')
@@ -91,7 +92,7 @@ else:
     with filter_cols[0]:
         trigger_level = st.selectbox('Trigger event level', ['All', '1m ORH', '5m ORH', 'PDH'])
     with filter_cols[1]:
-        trigger_result = st.selectbox('Trigger event result', ['All', 'success', 'failed', 'blank'])
+        trigger_result = st.selectbox('Trigger event result', ['All', 'success', 'failed', 'blank', 'Gap'])
     with filter_cols[2]:
         current_status = st.selectbox('Current status', ['All', 'Active', 'Later Failed', 'Unresolved'])
     with filter_cols[3]:
