@@ -580,21 +580,28 @@ def format_monitor_table_html(df: pd.DataFrame) -> str:
 '''
 
 
+def _summary_count_with_pct(summary: dict, key: str, denominator: int) -> str:
+    count = int(summary.get(key, 0) or 0)
+    pct = 0 if denominator <= 0 else round((count / denominator) * 100)
+    return f'{count} ({pct}%)'
+
+
 def format_summary_blocks_html(summary: dict) -> str:
+    setups_count = int(summary.get('Setups', 0) or 0)
     groups = [
-        ('Overall', [('Setups', 'Setups'), ('Active', 'Active'), ('Failed', 'Failed'), ('Unresolved', 'Unresolved')]),
-        ('1m OR', [('Clean 1m', 'Clean 1m'), ('Failed 1m', '1m Failed')]),
-        ('5m OR', [('Clean 5m', 'Clean 5m'), ('Failed 5m', '5m Failed')]),
-        ('Alternate / Other', [('Alt Required', 'Alt Required'), ('No Trigger', 'No Trigger'), ('Retested', 'Retested')]),
-        ('Follow-Through', [('Median Current', 'Median Current %'), ('Median Max', 'Median Max %'), ('Median D3 High', 'Median D3 High %')]),
+        ('Overall', [('Setups', 'Setups', False), ('Active', 'Active', True), ('Failed', 'Failed', True), ('Unresolved', 'Unresolved', True)]),
+        ('1m OR', [('Clean 1m', 'Clean 1m', True), ('Failed 1m', '1m Failed', True)]),
+        ('5m OR', [('Clean 5m', 'Clean 5m', True), ('Failed 5m', '5m Failed', True)]),
+        ('Alternate / Other', [('Alt Required', 'Alt Required', True), ('No Trigger', 'No Trigger', True), ('Retested', 'Retested', True)]),
+        ('Follow-Through', [('Median Current', 'Median Current %', False), ('Median Max', 'Median Max %', False), ('Median D3 High', 'Median D3 High %', False)]),
     ]
     cards = []
     for title, metrics in groups:
-        items = ''.join(
-            f'<div class="summary-item"><span>{escape(label)}</span><strong>{escape(str(summary.get(key, "")))}</strong></div>'
-            for label, key in metrics
-        )
-        cards.append(f'<section class="summary-card"><h4>{escape(title)}</h4>{items}</section>')
+        items = []
+        for label, key, show_pct in metrics:
+            value = _summary_count_with_pct(summary, key, setups_count) if show_pct else str(summary.get(key, ''))
+            items.append(f'<div class="summary-item"><span>{escape(label)}</span><strong>{escape(value)}</strong></div>')
+        cards.append(f'<section class="summary-card"><h4>{escape(title)}</h4>{"".join(items)}</section>')
     return f'''
 <style>
 .summary-grid {{

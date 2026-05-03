@@ -667,6 +667,35 @@ def test_format_summary_blocks_html_includes_group_titles():
     assert 'Alternate / Other' in html
     assert 'Follow-Through' in html
     assert 'Median D3 High' in html
+    assert 'Active</span><strong>1 (33%)</strong>' in html
+    assert 'Failed</span><strong>1 (33%)</strong>' in html
+    assert 'Clean 5m</span><strong>0 (0%)</strong>' in html
+    assert 'Median Current</span><strong>5.0%</strong>' in html
+    assert 'Median Current</span><strong>5.0% (' not in html
+
+
+def test_format_summary_blocks_html_uses_zero_percent_when_no_setups():
+    html = format_summary_blocks_html({
+        'Setups': 0,
+        'Active': 0,
+        'Failed': 0,
+        'Unresolved': 0,
+        'Clean 1m': 0,
+        '1m Failed': 0,
+        'Clean 5m': 0,
+        '5m Failed': 0,
+        'Alt Required': 0,
+        'No Trigger': 0,
+        'Retested': 0,
+        'Median Current %': '',
+        'Median Max %': '',
+        'Median D3 High %': '',
+    })
+
+    assert 'Setups</span><strong>0</strong>' in html
+    assert 'Active</span><strong>0 (0%)</strong>' in html
+    assert 'Failed 1m</span><strong>0 (0%)</strong>' in html
+    assert 'No Trigger</span><strong>0 (0%)</strong>' in html
 
 
 def test_format_section_table_formats_nan_day_values_as_blank():
