@@ -518,26 +518,15 @@ def factual_read(window_summary: dict, opening_behavior: pd.DataFrame | None = N
     window = window_summary.get('Window', 'Selected window')
     setups = window_summary.get('Setups', 0)
     setup_dates_count = window_summary.get('Setup Dates', 0)
-    day_success = window_summary.get('Day Success', '-')
-    active = window_summary.get('Active', '-')
-    later_failed = window_summary.get('Later Failed', '-')
+    day_success_pct = _pct_from_count_text(window_summary.get('Day Success', '-'))
+    active_pct = _pct_from_count_text(window_summary.get('Active', '-'))
+    later_failed_pct = _pct_from_count_text(window_summary.get('Later Failed', '-'))
     median_current = window_summary.get('Median Current', '-')
     median_max = window_summary.get('Median Max', '-')
-    clean_1m = _opening_count(opening_behavior, 'Clean 1m ORH Success')
-    reclaimed = _opening_count(opening_behavior, '1m ORH Failed, Later Reclaimed')
-    failed_all = _opening_count(opening_behavior, 'Failed All Opening Triggers')
-    behavior = (
-        f'Opening path detail shows {clean_1m} clean 1m ORH setup'
-        f'{"s" if clean_1m != 1 else ""}, {reclaimed} early 1m ORH failure'
-        f'{"s" if reclaimed != 1 else ""} followed by later 5m ORH/PDH reclaim, and {failed_all} setup'
-        f'{"s" if failed_all != 1 else ""} with all displayed opening triggers failed.'
-    )
-
     return (
-        f'{window} includes {setups} setups across {setup_dates_count} setup dates. '
-        f'{day_success} succeeded on trigger day, {active} remain active, and {later_failed} failed later. '
-        f'Median current return is {median_current} and median max return is {median_max}. '
-        f'{behavior}'
+        f'{window}: {setups} setups across {setup_dates_count} setup dates, '
+        f'{day_success_pct} Day Success, {active_pct} Active, {later_failed_pct} Later Failed, '
+        f'{median_current} Median Current, {median_max} Median Max.'
     )
 
 
@@ -657,6 +646,7 @@ TRIGGER_COMPARISON_COLUMNS = [
     'Median Current',
     'Median Max',
 ]
+TRIGGER_COMPARISON_BY_WINDOW_COLUMNS = [column for column in TRIGGER_COMPARISON_COLUMNS if column != 'Window']
 
 
 def trigger_outcome_comparison(history_by_window: dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -692,6 +682,17 @@ def trigger_outcome_comparison(history_by_window: dict[str, pd.DataFrame]) -> pd
                 'Median Max': _fmt_pct(triggered['max_pct_raw'].median() if 'max_pct_raw' in triggered and triggered_count else None),
             })
     return pd.DataFrame(out, columns=TRIGGER_COMPARISON_COLUMNS)
+
+
+def trigger_outcome_by_window_tables(trigger_outcomes: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    tables = {}
+    for window_label in ['Last 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']:
+        if trigger_outcomes.empty:
+            tables[window_label] = pd.DataFrame(columns=TRIGGER_COMPARISON_BY_WINDOW_COLUMNS)
+            continue
+        rows = trigger_outcomes[trigger_outcomes['Window'] == window_label].copy()
+        tables[window_label] = rows[TRIGGER_COMPARISON_BY_WINDOW_COLUMNS].reset_index(drop=True)
+    return tables
 
 
 def trigger_quality_table(rows: pd.DataFrame) -> pd.DataFrame:
@@ -781,6 +782,7 @@ def setup_behavior_overview(con) -> dict:
             'mixes': {},
             'opening_behavior': {},
             'trigger_outcome_comparison': pd.DataFrame(columns=TRIGGER_COMPARISON_COLUMNS),
+            'trigger_outcome_by_window': {},
             'trigger_quality': {},
             'details': {},
             'windows': [],
@@ -797,6 +799,7 @@ def setup_behavior_overview(con) -> dict:
         included = {date.date() for date in window.setup_dates}
         history_by_window[window.label] = history[pd.to_datetime(history['Setup Date']).dt.date.isin(included)].copy() if not history.empty else pd.DataFrame()
     opening_behavior = {label: opening_behavior_table(history_by_window[label]) for label in summary_by_window}
+    trigger_outcomes = trigger_outcome_comparison(history_by_window)
     return {
         'summary': summary,
         'window_summaries': window_summaries,
@@ -806,7 +809,8 @@ def setup_behavior_overview(con) -> dict:
         'snapshot_cards': {label: snapshot_cards_html(row) for label, row in summary_by_window.items()},
         'mixes': {label: mix_tables(row) for label, row in summary_by_window.items()},
         'opening_behavior': opening_behavior,
-        'trigger_outcome_comparison': trigger_outcome_comparison(history_by_window),
+        'trigger_outcome_comparison': trigger_outcomes,
+        'trigger_outcome_by_window': trigger_outcome_by_window_tables(trigger_outcomes),
         'trigger_quality': {label: trigger_quality_table(history_by_window[label]) for label in summary_by_window},
         'details': details,
         'windows': windows,

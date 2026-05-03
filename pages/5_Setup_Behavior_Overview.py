@@ -49,10 +49,15 @@ else:
     st.write(overview['reads'][selected_window])
 
     st.subheader('Trigger Event Outcomes Across Windows')
-    st.dataframe(overview['trigger_outcome_comparison'], width='stretch', hide_index=True)
+    trigger_event_mode = st.radio('Display mode', ['By Window', 'By Trigger'], horizontal=True)
+    if trigger_event_mode == 'By Window':
+        for window_label, table in overview['trigger_outcome_by_window'].items():
+            st.markdown(f'**{window_label}**')
+            st.dataframe(table, width='stretch', hide_index=True)
+    else:
+        st.dataframe(overview['trigger_outcome_comparison'], width='stretch', hide_index=True)
     st.caption(
-        'Rows are grouped by trigger, then setup-date window. Trigger Rate uses all setups in the window. '
-        'Fail %, Success %, Active %, and Later Failed % use triggered setups only.'
+        'Trigger Rate uses all setups in the window. Fail %, Success %, Active %, and Later Failed % use triggered setups only.'
     )
 
     st.subheader('Selected Window Opening Path')
@@ -84,9 +89,9 @@ else:
     st.subheader('Selected Window Ticker Detail')
     filter_cols = st.columns(4)
     with filter_cols[0]:
-        trigger_level = st.selectbox('Trigger level', ['All', '1m ORH', '5m ORH', 'PDH'])
+        trigger_level = st.selectbox('Trigger event level', ['All', '1m ORH', '5m ORH', 'PDH'])
     with filter_cols[1]:
-        trigger_result = st.selectbox('Trigger result', ['All', 'success', 'failed', 'blank'])
+        trigger_result = st.selectbox('Trigger event result', ['All', 'success', 'failed', 'blank'])
     with filter_cols[2]:
         current_status = st.selectbox('Current status', ['All', 'Active', 'Later Failed', 'Unresolved'])
     with filter_cols[3]:

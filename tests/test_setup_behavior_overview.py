@@ -10,6 +10,7 @@ from src.setup_behavior_overview import (
     DETAIL_COLUMNS,
     FULL_SUMMARY_COLUMNS,
     SUMMARY_COLUMNS,
+    TRIGGER_COMPARISON_BY_WINDOW_COLUMNS,
     TRIGGER_COMPARISON_COLUMNS,
     comparison_rows,
     detail_rows,
@@ -24,6 +25,7 @@ from src.setup_behavior_overview import (
     snapshot_cards_html,
     setup_behavior_overview,
     summarize_window,
+    trigger_outcome_by_window_tables,
     trigger_outcome_comparison,
     trigger_quality_table,
 )
@@ -306,15 +308,10 @@ def test_factual_read_is_objective_and_contains_key_metrics():
     summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
     text = factual_read(summary, opening_behavior_table(_history().iloc[:4]))
 
-    assert 'Last 10 Setup Dates includes 4 setups across 3 setup dates.' in text
-    assert '3 (75%) succeeded on trigger day' in text
-    assert '1 (25%) remain active' in text
-    assert '2 (50%) failed later' in text
-    assert 'Median current return is 1.5%' in text
-    assert 'median max return is 7.0%' in text
-    assert 'Opening path detail shows 1 clean 1m ORH setup' in text
-    assert '1 early 1m ORH failure followed by later 5m ORH/PDH reclaim' in text
-    assert '1 setup with all displayed opening triggers failed' in text
+    assert text == (
+        'Last 10 Setup Dates: 4 setups across 3 setup dates, 75% Day Success, '
+        '25% Active, 50% Later Failed, 1.5% Median Current, 7.0% Median Max.'
+    )
     lowered = text.lower()
     assert 'trade more aggressively' not in lowered
     assert 'avoid' not in lowered
@@ -447,6 +444,37 @@ def test_trigger_outcome_comparison_rows_and_denominators():
     assert one_last_10['Success %'] == '50%'
     assert one_last_10['Failed'] == 1
     assert one_last_10['Fail %'] == '50%'
+
+
+def test_trigger_outcome_by_window_tables_drop_window_column_and_group_triggers():
+    comparison = trigger_outcome_comparison(_trigger_comparison_history())
+    by_window = trigger_outcome_by_window_tables(comparison)
+
+    assert list(by_window) == ['Last 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
+    last_10 = by_window['Last 10 Setup Dates']
+    assert last_10.columns.tolist() == TRIGGER_COMPARISON_BY_WINDOW_COLUMNS
+    assert 'Window' not in last_10.columns
+    assert last_10['Trigger'].tolist() == ['1m ORH', '5m ORH', 'PDH']
+    assert last_10.loc[0, 'Triggered'] == 2
+    assert last_10.loc[1, 'Triggered'] == 2
+    assert last_10.loc[2, 'Triggered'] == 1
+
+
+def test_trigger_outcome_by_trigger_table_remains_available_and_unchanged():
+    comparison = trigger_outcome_comparison(_trigger_comparison_history())
+
+    assert comparison.columns.tolist() == TRIGGER_COMPARISON_COLUMNS
+    assert comparison[['Trigger', 'Window']].values.tolist() == [
+        ['1m ORH', 'Last 5 Setup Dates'],
+        ['1m ORH', 'Last 10 Setup Dates'],
+        ['1m ORH', 'Last 20 Setup Dates'],
+        ['5m ORH', 'Last 5 Setup Dates'],
+        ['5m ORH', 'Last 10 Setup Dates'],
+        ['5m ORH', 'Last 20 Setup Dates'],
+        ['PDH', 'Last 5 Setup Dates'],
+        ['PDH', 'Last 10 Setup Dates'],
+        ['PDH', 'Last 20 Setup Dates'],
+    ]
 
 
 def test_trigger_outcome_comparison_later_failed_active_and_medians():
@@ -680,5 +708,6 @@ def test_setup_behavior_overview_handles_zero_setup_dates():
     assert out['opening_behavior'] == {}
     assert out['trigger_outcome_comparison'].columns.tolist() == TRIGGER_COMPARISON_COLUMNS
     assert out['trigger_outcome_comparison'].empty
+    assert out['trigger_outcome_by_window'] == {}
     assert out['details'] == {}
     assert out['windows'] == []
