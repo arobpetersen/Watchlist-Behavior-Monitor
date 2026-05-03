@@ -6,6 +6,7 @@ from src.or_trigger_audit import audit_for_candidate, setup_dates, tickers_for_s
 from src.rolling_setup_monitor import (
     MAIN_COLUMNS,
     apply_setup_rating_updates,
+    dataframe_height,
     detail_table,
     main_table,
     rating_dropdown_options,
@@ -78,7 +79,7 @@ else:
             editable,
             key=f"monitor_editor_{section['setup_date']}",
             width='stretch',
-            height='auto',
+            height=dataframe_height(len(editable)),
             hide_index=True,
             column_order=MAIN_COLUMNS,
             disabled=[c for c in editable.columns if c not in {'Setup', 'Rating'}],
@@ -105,4 +106,5 @@ else:
                 st.info('No Setup/Rating changes to save.')
 
         with st.expander('Show full detail table', expanded=False):
-            st.dataframe(detail_table(table), width='stretch', height='auto', hide_index=True)
+            detail = detail_table(table)
+            st.dataframe(detail, width='stretch', height=dataframe_height(len(detail)), hide_index=True)

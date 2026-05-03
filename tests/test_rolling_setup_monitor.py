@@ -8,6 +8,7 @@ import pandas as pd
 from src.rolling_setup_monitor import (
     _format_section_table,
     apply_setup_rating_updates,
+    dataframe_height,
     day_summary,
     derive_trigger_reference,
     detail_table,
@@ -684,6 +685,12 @@ def test_sort_monitor_rows_status_then_current_pct():
     out = sort_monitor_rows(df)
 
     assert out['Ticker'].tolist() == ['ACTIVE1', 'ACTIVE2', 'UNRES', 'FAIL']
+
+
+def test_dataframe_height_expands_with_rows():
+    assert dataframe_height(0) == 120
+    assert dataframe_height(2) == 120
+    assert dataframe_height(11) == 431
 
 
 def test_setup_dropdown_preserves_unknown_existing_value():
