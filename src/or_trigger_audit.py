@@ -35,6 +35,14 @@ AUDIT_COLUMNS = [
     'Open Over PDH',
     'Displayed PDH',
     'PDH Result',
+    'PDH Fail Time',
+    '1m Recovery Qualified',
+    '1m Recovery Break Time',
+    '1m Recovery Reference Low',
+    '5m Recovery Qualified',
+    '5m Recovery Break Time',
+    '5m Recovery Reference Low',
+    'Alt Recovery Qualified',
     'PDH Trigger Break Time',
     'PDH Trigger Level',
     'PDH Reference Low',
@@ -271,8 +279,8 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
     trigger_mode = 'PDH-governed' if pdh.get('open_over_pdh') is False else 'ORH stack active'
     raw_one_result = opening_range_result(record.get('or_1m'), 1, trigger['trigger_type'], intraday, daily)
     raw_five_result = opening_range_result(record.get('or_5m'), 5, trigger['trigger_type'], intraday, daily)
-    displayed_one = '-' if trigger.get('pdh_governed') else raw_one_result or '-'
-    displayed_five = '-' if trigger.get('pdh_governed') else raw_five_result or '-'
+    displayed_one = 'success' if trigger.get('pdh_recovery_trigger') == '1m ORH' else '-' if trigger.get('pdh_governed') else raw_one_result or '-'
+    displayed_five = 'success' if trigger.get('pdh_recovery_trigger') == '5m ORH' else '-' if trigger.get('pdh_governed') else raw_five_result or '-'
     displayed_pdh = pdh.get('pdh_result') or '-'
 
     audit = pd.DataFrame([{
@@ -293,6 +301,14 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
         'Open Over PDH': '' if pdh.get('open_over_pdh') is None else 'Yes' if pdh.get('open_over_pdh') else 'No',
         'Displayed PDH': displayed_pdh,
         'PDH Result': pdh.get('pdh_result') or '-',
+        'PDH Fail Time': _fmt_ts(trigger.get('pdh_fail_time')),
+        '1m Recovery Qualified': 'Yes' if trigger.get('one_recovery_qualified') else '',
+        '1m Recovery Break Time': _fmt_ts(trigger.get('one_recovery_break_time')),
+        '1m Recovery Reference Low': _fmt_price(trigger.get('one_recovery_reference_low')),
+        '5m Recovery Qualified': 'Yes' if trigger.get('five_recovery_qualified') else '',
+        '5m Recovery Break Time': _fmt_ts(trigger.get('five_recovery_break_time')),
+        '5m Recovery Reference Low': _fmt_price(trigger.get('five_recovery_reference_low')),
+        'Alt Recovery Qualified': 'Yes' if trigger.get('alt_recovery_qualified') else '',
         'PDH Trigger Break Time': _fmt_ts(pdh.get('trigger_break_time')),
         'PDH Trigger Level': _fmt_price(pdh.get('trigger_level') if pdh.get('broke_pdh') else None),
         'PDH Reference Low': _fmt_price(pdh.get('reference_low')),

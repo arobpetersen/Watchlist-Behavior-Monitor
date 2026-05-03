@@ -79,6 +79,28 @@ def _pdh_intraday(lows_after_trigger=None, highs=None):
     })
 
 
+def _pdh_failed_recovery_intraday(highs=None, lows=None):
+    highs = highs or [9.9, 10.2, 10.4, 10.7, 10.8, 11.2, 11.0]
+    lows = lows or [9.8, 9.7, 9.6, 9.9, 10.0, 10.4, 10.2]
+    return pd.DataFrame({
+        'ticker': ['AAPL'] * 7,
+        'trading_date': pd.to_datetime(['2026-05-01'] * 7),
+        'timestamp_et': pd.to_datetime([
+            '2026-05-01 09:30',
+            '2026-05-01 09:31',
+            '2026-05-01 09:32',
+            '2026-05-01 09:33',
+            '2026-05-01 09:34',
+            '2026-05-01 09:35',
+            '2026-05-01 09:36',
+        ]),
+        'open': [9.8, 9.9, 10.1, 10.5, 10.6, 11.0, 10.9],
+        'high': highs,
+        'low': lows,
+        'close': [9.9, 10.1, 9.8, 10.6, 10.7, 11.0, 10.8],
+    })
+
+
 def _flush_then_trigger_intraday(after_low=9.6):
     return pd.DataFrame({
         'ticker': ['AAPL'] * 5,
@@ -196,6 +218,134 @@ def test_pdh_break_fails_day1_stays_trigger_day_success_with_failed_d1_status():
     assert failure == 1
     assert trigger_day == 'Success'
     assert current_status_display(trigger_day, failure) == 'Failed D1'
+
+
+def test_failed_pdh_allows_1m_recovery_after_pdh_failure():
+    intraday = _pdh_failed_recovery_intraday()
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=True, orh=10.5, orl=9.8),
+        _or(broke_orh=True, broke_orl=False, orh=11.0, orl=9.6),
+        _or(orh=11.5, orl=9.5),
+        0.5,
+        intraday,
+        _daily(lows=[10.1, 10.2, 10.3, 10.4]),
+        10.0,
+        9.8,
+    )
+
+    assert out['pdh_result'] == 'failed'
+    assert out['trigger_type'] == '1m ORH'
+    assert out['pdh_recovery_trigger'] == '1m ORH'
+    assert out['one_recovery_qualified'] is True
+    assert out['trigger_break_time'] == pd.Timestamp('2026-05-01 09:33')
+    assert out['reference_low'] == 9.6
+    assert out['reference_basis'] == 'LOD at 1m Recovery Trigger'
+
+
+def test_failed_pdh_allows_5m_recovery_and_later_d1_failure():
+    intraday = _pdh_failed_recovery_intraday(highs=[9.9, 10.2, 10.4, 10.6, 10.8, 11.2, 11.0])
+    daily = _daily(lows=[10.1, 9.5, 10.2, 10.3])
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=True, orh=10.0, orl=9.8),
+        _or(broke_orh=True, broke_orl=False, orh=11.0, orl=9.6),
+        _or(orh=11.5, orl=9.5),
+        0.5,
+        intraday,
+        daily,
+        10.0,
+        9.8,
+    )
+    failure = fail_day(intraday, daily, out['trigger_break_time'], out['reference_low'])
+    trigger_day = trigger_day_status(out['trigger_type'], failure)
+
+    assert out['trigger_type'] == '5m ORH'
+    assert out['pdh_recovery_trigger'] == '5m ORH'
+    assert out['one_recovery_qualified'] is False
+    assert out['five_recovery_qualified'] is True
+    assert out['trigger_break_time'] == pd.Timestamp('2026-05-01 09:35')
+    assert trigger_day == 'Success'
+    assert current_status_display(trigger_day, failure) == 'Failed D1'
+
+
+def test_failed_pdh_allows_alt_required_recovery():
+    intraday = _pdh_failed_recovery_intraday(highs=[9.9, 10.2, 10.4, 10.6, 10.8, 11.0, 11.6])
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=True, orh=10.0, orl=9.8),
+        _or(broke_orh=False, broke_orl=False, orh=10.0, orl=9.6),
+        _or(broke_orh=True, broke_orl=False, orh=11.5, orl=9.5),
+        0.85,
+        intraday,
+        _daily(lows=[10.1, 10.2, 10.3, 10.4]),
+        10.0,
+        9.8,
+    )
+
+    assert out['trigger_type'] == 'Alt Required'
+    assert out['pdh_recovery_trigger'] == 'Alt Required'
+    assert out['alt_recovery_qualified'] is True
+    assert out['reference_low'] == 9.5
+    assert out['reference_basis'] == '15m OR Reference'
+
+
+def test_failed_pdh_without_recovery_stays_failed_pdh_trigger():
+    intraday = _pdh_failed_recovery_intraday(highs=[9.9, 10.2, 10.4, 10.6, 10.8, 11.0, 11.1])
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=True, orh=10.0, orl=9.8),
+        _or(broke_orh=False, broke_orl=False, orh=10.0, orl=9.6),
+        _or(broke_orh=False, broke_orl=False, orh=11.5, orl=9.5),
+        0.5,
+        intraday,
+        _daily(),
+        10.0,
+        9.8,
+    )
+
+    assert out['trigger_type'] == 'Failed PDH Trigger'
+    assert out['framework_fail_day'] == 0
+    assert out['one_recovery_qualified'] is False
+    assert out['five_recovery_qualified'] is False
+    assert out['alt_recovery_qualified'] is False
+
+
+def test_failed_pdh_recovery_requires_level_above_pdh_after_failure_and_day0_hold():
+    before_failure_break = _pdh_failed_recovery_intraday(highs=[9.9, 10.7, 10.4, 10.6, 10.8, 11.0, 11.1])
+    low_level = _pdh_failed_recovery_intraday()
+    fails_after_recovery = _pdh_failed_recovery_intraday(lows=[9.8, 9.7, 9.6, 9.9, 10.0, 10.4, 9.5])
+
+    before = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=True, orh=10.5, orl=9.8),
+        _or(broke_orh=False, broke_orl=False, orh=10.0, orl=9.6),
+        _or(orh=11.5, orl=9.5),
+        0.5,
+        before_failure_break,
+        _daily(),
+        10.0,
+        9.8,
+    )
+    low = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=True, orh=10.0, orl=9.8),
+        _or(broke_orh=True, broke_orl=False, orh=10.0, orl=9.6),
+        _or(orh=11.5, orl=9.5),
+        0.5,
+        low_level,
+        _daily(),
+        10.0,
+        9.8,
+    )
+    broken_ref = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=True, orh=10.5, orl=9.8),
+        _or(broke_orh=False, broke_orl=False, orh=10.0, orl=9.6),
+        _or(orh=11.5, orl=9.5),
+        0.5,
+        fails_after_recovery,
+        _daily(),
+        10.0,
+        9.8,
+    )
+
+    assert before['trigger_type'] == 'Failed PDH Trigger'
+    assert low['trigger_type'] == 'Failed PDH Trigger'
+    assert broken_ref['trigger_type'] == 'Failed PDH Trigger'
 
 
 def test_pdh_governed_display_hides_orh_results_but_detail_keeps_raw_diagnostics():
@@ -1084,6 +1234,9 @@ def test_main_and_detail_table_columns_and_blank_handling():
     ]
     assert detail_table(df).columns.tolist() == [
         'Ticker', 'Prior Day High', 'Setup Day Open', 'Open Over PDH', 'PDH Result',
+        'PDH Fail Time', '1m Recovery Qualified', '1m Recovery Break Time',
+        '1m Recovery Reference Low', '5m Recovery Qualified', '5m Recovery Break Time',
+        '5m Recovery Reference Low', 'Alt Recovery Qualified',
         'PDH Trigger Break Time', 'PDH Trigger Level', 'PDH Reference Low', 'PDH Reference Basis',
         'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
         'Fail Day', 'Latest Close', 'Setup Close', 'Setup High', 'Setup Low',

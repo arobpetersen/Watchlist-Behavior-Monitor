@@ -54,6 +54,14 @@ DETAIL_COLUMNS = [
     'Setup Day Open',
     'Open Over PDH',
     'PDH Result',
+    'PDH Fail Time',
+    '1m Recovery Qualified',
+    '1m Recovery Break Time',
+    '1m Recovery Reference Low',
+    '5m Recovery Qualified',
+    '5m Recovery Break Time',
+    '5m Recovery Reference Low',
+    'Alt Recovery Qualified',
     'PDH Trigger Break Time',
     'PDH Trigger Level',
     'PDH Reference Low',
@@ -289,6 +297,17 @@ def failed_or_trigger_reference(one_assessment: dict, five_assessment: dict) -> 
     }
 
 
+def day0_fail_time(intraday: pd.DataFrame, trigger_break_time, reference_low: float | None) -> pd.Timestamp | None:
+    break_time = _ts(trigger_break_time)
+    if intraday.empty or break_time is None or reference_low is None:
+        return None
+    post_trigger = intraday[intraday['timestamp_et'] > break_time]
+    failures = post_trigger[post_trigger['low'] < float(reference_low)]
+    if failures.empty:
+        return None
+    return _ts(failures.iloc[0]['timestamp_et'])
+
+
 def pdh_trigger_assessment(
     prior_day_high,
     setup_day_open=None,
@@ -356,6 +375,67 @@ def pdh_trigger_assessment(
         'reference_low': reference_low,
         'reference_basis': 'LOD at PDH Trigger',
         'failure_day': failure_day,
+        'fail_time': day0_fail_time(bars, trigger_break_time, reference_low) if failure_day == 0 else None,
+    }
+
+
+def _recovery_assessment(
+    label: str,
+    level,
+    pdh,
+    pdh_fail_time,
+    intraday: pd.DataFrame | None,
+    daily: pd.DataFrame | None,
+    reference_low_override=None,
+    reference_basis: str | None = None,
+    close_location=None,
+) -> dict:
+    trigger_level = _num(level)
+    prior_high = _num(pdh)
+    fail_time = _ts(pdh_fail_time)
+    bars = _regular_session_bars(intraday)
+    if trigger_level is None or prior_high is None or fail_time is None or bars.empty:
+        return {'qualified': False, 'break_time': None, 'reference_low': None}
+    if trigger_level <= prior_high:
+        return {'qualified': False, 'break_time': None, 'reference_low': None}
+    if label == 'Alt Required' and not _has_close_location(close_location, 0.80):
+        return {'qualified': False, 'break_time': None, 'reference_low': None}
+
+    breaks = bars[bars['high'] > trigger_level]
+    if breaks.empty:
+        return {'qualified': False, 'break_time': None, 'reference_low': None}
+    first_break = _ts(breaks.iloc[0]['timestamp_et'])
+    if first_break is None or first_break <= fail_time:
+        return {'qualified': False, 'break_time': None, 'reference_low': None}
+
+    through_trigger = bars[bars['timestamp_et'] <= first_break]
+    reference_low = _num(reference_low_override)
+    if reference_low is None:
+        reference_low = _num(through_trigger['low'].min()) if not through_trigger.empty else None
+    if reference_low is None:
+        return {'qualified': False, 'break_time': first_break, 'reference_low': None}
+
+    if day0_fail(bars, first_break, reference_low):
+        return {'qualified': False, 'break_time': first_break, 'reference_low': reference_low}
+
+    return {
+        'qualified': True,
+        'break_time': first_break,
+        'reference_low': reference_low,
+        'reference_basis': reference_basis or f'LOD at {label} Recovery Trigger',
+    }
+
+
+def _pdh_recovery_details(one: dict, five: dict, alt: dict, pdh_fail_time) -> dict:
+    return {
+        'pdh_fail_time': pdh_fail_time,
+        'one_recovery_qualified': bool(one.get('qualified')),
+        'one_recovery_break_time': one.get('break_time'),
+        'one_recovery_reference_low': one.get('reference_low'),
+        'five_recovery_qualified': bool(five.get('qualified')),
+        'five_recovery_break_time': five.get('break_time'),
+        'five_recovery_reference_low': five.get('reference_low'),
+        'alt_recovery_qualified': bool(alt.get('qualified')),
     }
 
 
@@ -378,6 +458,76 @@ def derive_trigger_reference(
 
     if pdh_governed and pdh_assessment['broke_pdh']:
         if pdh_assessment['failure_day'] == 0:
+            pdh_fail_time = pdh_assessment.get('fail_time')
+            one_recovery = _recovery_assessment(
+                '1m',
+                _loads(or_1m).get('orh'),
+                prior_day_high,
+                pdh_fail_time,
+                intraday,
+                daily,
+                reference_basis='LOD at 1m Recovery Trigger',
+            )
+            five_recovery = _recovery_assessment(
+                '5m',
+                _loads(or_5m).get('orh'),
+                prior_day_high,
+                pdh_fail_time,
+                intraday,
+                daily,
+                reference_basis='LOD at 5m Recovery Trigger',
+            )
+            alt_recovery = _recovery_assessment(
+                'Alt Required',
+                fifteen.get('orh'),
+                prior_day_high,
+                pdh_fail_time,
+                intraday,
+                daily,
+                reference_low_override=fifteen.get('orl'),
+                reference_basis='15m OR Reference',
+                close_location=close_location,
+            )
+            recovery_details = _pdh_recovery_details(one_recovery, five_recovery, alt_recovery, pdh_fail_time)
+            base_details = {
+                'pdh_result': pdh_assessment['pdh_result'],
+                'pdh_trigger_break_time': pdh_assessment['trigger_break_time'],
+                'pdh_trigger_level': pdh_assessment['trigger_level'],
+                'pdh_reference_low': pdh_assessment['reference_low'],
+                'pdh_reference_basis': pdh_assessment['reference_basis'],
+                'pdh_governed': True,
+                **recovery_details,
+            }
+            if one_recovery.get('qualified'):
+                return {
+                    'trigger_type': '1m ORH',
+                    'trigger_level': _num(_loads(or_1m).get('orh')),
+                    'reference_low': one_recovery.get('reference_low'),
+                    'reference_basis': one_recovery.get('reference_basis'),
+                    'trigger_break_time': one_recovery.get('break_time'),
+                    'pdh_recovery_trigger': '1m ORH',
+                    **base_details,
+                }
+            if five_recovery.get('qualified'):
+                return {
+                    'trigger_type': '5m ORH',
+                    'trigger_level': _num(_loads(or_5m).get('orh')),
+                    'reference_low': five_recovery.get('reference_low'),
+                    'reference_basis': five_recovery.get('reference_basis'),
+                    'trigger_break_time': five_recovery.get('break_time'),
+                    'pdh_recovery_trigger': '5m ORH',
+                    **base_details,
+                }
+            if alt_recovery.get('qualified'):
+                return {
+                    'trigger_type': 'Alt Required',
+                    'trigger_level': _num(fifteen.get('orh')),
+                    'reference_low': alt_recovery.get('reference_low'),
+                    'reference_basis': alt_recovery.get('reference_basis'),
+                    'trigger_break_time': alt_recovery.get('break_time'),
+                    'pdh_recovery_trigger': 'Alt Required',
+                    **base_details,
+                }
             return {
                 'trigger_type': 'Failed PDH Trigger',
                 'trigger_level': pdh_assessment['trigger_level'],
@@ -392,6 +542,7 @@ def derive_trigger_reference(
                 'pdh_reference_low': pdh_assessment['reference_low'],
                 'pdh_reference_basis': pdh_assessment['reference_basis'],
                 'pdh_governed': True,
+                **recovery_details,
             }
         return {
             'trigger_type': 'PDH',
@@ -956,6 +1107,14 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Setup Day Open': raw.get('setup_day_open', blank_series).apply(_fmt_price),
         'Open Over PDH': raw.get('open_over_pdh', blank_series).apply(lambda v: '' if v is None or pd.isna(v) else 'Yes' if bool(v) else 'No'),
         'PDH Result': raw.get('pdh_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
+        'PDH Fail Time': raw.get('pdh_fail_time', blank_series).apply(_fmt_ts),
+        '1m Recovery Qualified': raw.get('one_recovery_qualified', blank_series).apply(lambda v: 'Yes' if bool(v) else ''),
+        '1m Recovery Break Time': raw.get('one_recovery_break_time', blank_series).apply(_fmt_ts),
+        '1m Recovery Reference Low': raw.get('one_recovery_reference_low', blank_series).apply(_fmt_price),
+        '5m Recovery Qualified': raw.get('five_recovery_qualified', blank_series).apply(lambda v: 'Yes' if bool(v) else ''),
+        '5m Recovery Break Time': raw.get('five_recovery_break_time', blank_series).apply(_fmt_ts),
+        '5m Recovery Reference Low': raw.get('five_recovery_reference_low', blank_series).apply(_fmt_price),
+        'Alt Recovery Qualified': raw.get('alt_recovery_qualified', blank_series).apply(lambda v: 'Yes' if bool(v) else ''),
         'PDH Trigger Break Time': raw.get('pdh_trigger_break_time', blank_series).apply(_fmt_ts),
         'PDH Trigger Level': raw.get('pdh_trigger_level', blank_series).apply(_fmt_price),
         'PDH Reference Low': raw.get('pdh_reference_low', blank_series).apply(_fmt_price),
@@ -1057,8 +1216,8 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
         record['raw_one_min_result'] = raw_one_min_result
         record['raw_five_min_result'] = raw_five_min_result
         if record.get('pdh_governed'):
-            record['one_min_result'] = '-'
-            record['five_min_result'] = '-'
+            record['one_min_result'] = 'success' if record.get('pdh_recovery_trigger') == '1m ORH' else '-'
+            record['five_min_result'] = 'success' if record.get('pdh_recovery_trigger') == '5m ORH' else '-'
         else:
             record['one_min_result'] = raw_one_min_result or '-'
             record['five_min_result'] = raw_five_min_result or '-'
