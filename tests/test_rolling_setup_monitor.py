@@ -22,6 +22,8 @@ from src.rolling_setup_monitor import (
     setup_dropdown_options,
     sort_monitor_rows,
     status_for,
+    current_status_display,
+    trigger_day_status,
 )
 
 
@@ -591,6 +593,24 @@ def test_status_values():
     assert status_for('No Trigger', None) == 'Unresolved'
 
 
+def test_trigger_day_display_values():
+    assert trigger_day_status('1m ORH', None) == 'Success'
+    assert trigger_day_status('5m ORH', 1) == 'Success'
+    assert trigger_day_status('Alt Required', 2) == 'Success'
+    assert trigger_day_status('Failed OR Trigger', 3) == 'Success'
+    assert trigger_day_status('Failed OR Trigger', 0) == 'Fail'
+    assert trigger_day_status('No Trigger', None) == 'Unresolved'
+
+
+def test_current_status_display_values():
+    assert current_status_display('Success', None) == 'Active'
+    assert current_status_display('Success', 1) == 'Failed D1'
+    assert current_status_display('Success', 2) == 'Failed D2'
+    assert current_status_display('Success', 3) == 'Failed D3'
+    assert current_status_display('Fail', 0) == '—'
+    assert current_status_display('Unresolved', None) == '—'
+
+
 def test_opening_range_display_results():
     assert opening_range_result(_or(broke_orh=True, orh_then_orl=False), 1, '1m ORH') == 'success'
     assert opening_range_result(_or(broke_orh=True, orh_then_orl=True), 1, '5m ORH') == 'failed'
@@ -635,13 +655,15 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'candidate_id': 1,
         'Ticker': 'AAPL',
         'Status': 'Active',
+        'Current Status': 'Active',
+        'Trigger Day': 'Success',
         'Trigger': '1m ORH',
         '1m ORH': 'success',
         '5m ORH': '',
         'Notes': 'Wide 1m OR',
         'Current %': '1.0%',
         'Max %': '3.0%',
-        'D3 High %': '',
+        'D3 High %': '-',
         'Retest Day': '',
         'Fail Day': '',
         'Setup': '',
@@ -668,13 +690,13 @@ def test_main_and_detail_table_columns_and_blank_handling():
     }])
 
     assert main_table(df).columns.tolist() == [
-        'Ticker', 'Status', 'Trigger', '1m ORH', '5m ORH', 'Notes', 'Current %', 'Max %',
-        'D3 High %', 'Retest Day', 'Fail Day', 'Setup', 'Rating',
+        'Ticker', 'Current Status', 'Trigger Day', 'Trigger', '1m ORH', '5m ORH', 'Notes',
+        'Current %', 'Max %', 'D3 High %', 'Retest Day', 'Setup', 'Rating',
     ]
     assert detail_table(df).columns.tolist() == [
         'Ticker', 'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
-        'Latest Close', 'Setup Close', 'Setup High', 'Setup Low', 'Current vs Setup Close',
-        'Max Gain from Setup Close', 'RVOL', 'Range / ATR14', '1m OR Width / ATR14',
+        'Fail Day', 'Latest Close', 'Setup Close', 'Setup High', 'Setup Low',
+        'Current vs Setup Close', 'Max Gain from Setup Close', 'RVOL', 'Range / ATR14', '1m OR Width / ATR14',
         '5m OR Width / ATR14', 'Close Bucket',
         '1m OR Result', '5m OR Result',
     ]
@@ -684,7 +706,8 @@ def test_main_and_detail_table_columns_and_blank_handling():
 def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
     df = pd.DataFrame([{
         'Ticker': '<ABC>',
-        'Status': 'Active',
+        'Current Status': 'Active',
+        'Trigger Day': 'Success',
         'Trigger': 'Alt Required',
         '1m ORH': 'success',
         '5m ORH': 'failed',
@@ -698,7 +721,8 @@ def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
     assert '<th>Current</th>' in html
     assert '<th>Retest</th>' in html
     assert '&lt;ABC&gt;' in html
-    assert 'status-active' in html
+    assert 'current-status-active' in html
+    assert 'trigger-day-success' in html
     assert 'trigger-alt-required' in html
     assert 'result-success' in html
     assert 'result-failed' in html
@@ -712,7 +736,9 @@ def test_format_summary_blocks_html_includes_group_titles():
     summary = {
         'Setups': 3,
         'Active': 1,
-        'Failed': 1,
+        'Later Failed': 1,
+        'Day Success': 2,
+        'Day Fail': 0,
         'Unresolved': 1,
         'Clean 1m': 1,
         '1m Failed': 1,
@@ -734,8 +760,10 @@ def test_format_summary_blocks_html_includes_group_titles():
     assert 'Alternate / Other' in html
     assert 'Follow-Through' in html
     assert 'Median D3 High' in html
+    assert 'Day Success</span><strong>2 (67%)</strong>' in html
+    assert 'Day Fail</span><strong>0 (0%)</strong>' in html
     assert 'Active</span><strong>1 (33%)</strong>' in html
-    assert 'Failed</span><strong>1 (33%)</strong>' in html
+    assert 'Later Failed</span><strong>1 (33%)</strong>' in html
     assert 'Clean 5m</span><strong>0 (0%)</strong>' in html
     assert 'Median Current</span><strong>5.0%</strong>' in html
     assert 'Median Current</span><strong>5.0% (' not in html
@@ -745,7 +773,9 @@ def test_format_summary_blocks_html_uses_zero_percent_when_no_setups():
     html = format_summary_blocks_html({
         'Setups': 0,
         'Active': 0,
-        'Failed': 0,
+        'Later Failed': 0,
+        'Day Success': 0,
+        'Day Fail': 0,
         'Unresolved': 0,
         'Clean 1m': 0,
         '1m Failed': 0,
@@ -760,6 +790,7 @@ def test_format_summary_blocks_html_uses_zero_percent_when_no_setups():
     })
 
     assert 'Setups</span><strong>0</strong>' in html
+    assert 'Day Success</span><strong>0 (0%)</strong>' in html
     assert 'Active</span><strong>0 (0%)</strong>' in html
     assert 'Failed 1m</span><strong>0 (0%)</strong>' in html
     assert 'No Trigger</span><strong>0 (0%)</strong>' in html
@@ -802,13 +833,57 @@ def test_format_section_table_formats_nan_day_values_as_blank():
 
     assert table.loc[0, 'Retest Day'] == ''
     assert table.loc[0, 'Fail Day'] == ''
+    assert table.loc[0, 'D3 High %'] == '-'
+
+
+def test_format_section_table_derives_status_display_fields():
+    base = {
+        'candidate_id': 1,
+        'ticker': 'AAPL',
+        'status': 'Active',
+        'one_min_result': 'success',
+        'five_min_result': '',
+        'notes': '',
+        'current_pct': 0.01,
+        'max_pct': 0.03,
+        'd3_high_pct': 0.05,
+        'retest_day': None,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.5,
+        'reference_low': 9.8,
+        'reference_basis': '1m OR',
+        'trigger_break_time': None,
+        'latest_close': 10.6,
+        'close_price': 10.0,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.06,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }
+    raw = pd.DataFrame([
+        {**base, 'candidate_id': 1, 'trigger_type': '1m ORH', 'fail_day': None},
+        {**base, 'candidate_id': 2, 'trigger_type': '5m ORH', 'fail_day': 1},
+        {**base, 'candidate_id': 3, 'trigger_type': 'Failed OR Trigger', 'fail_day': 0},
+        {**base, 'candidate_id': 4, 'trigger_type': 'No Trigger', 'fail_day': None},
+    ])
+
+    table = _format_section_table(raw)
+
+    assert table['Trigger Day'].tolist() == ['Success', 'Success', 'Fail', 'Unresolved']
+    assert table['Current Status'].tolist() == ['Active', 'Failed D1', '—', '—']
 
 
 def test_day_summary_metrics():
     df = pd.DataFrame([
-        {'Trigger': '1m ORH', '1m ORH': 'success', '5m ORH': '', 'Status': 'Active', 'Retest Day': 'Day 1', 'current_pct_raw': 0.10, 'max_pct_raw': 0.20, 'd3_high_pct_raw': 0.25},
-        {'Trigger': 'Alt Required', '1m ORH': 'failed', '5m ORH': 'failed', 'Status': 'Failed', 'Retest Day': '', 'current_pct_raw': 0.00, 'max_pct_raw': 0.10, 'd3_high_pct_raw': 0.15},
-        {'Trigger': 'No Trigger', '1m ORH': '', '5m ORH': '', 'Status': 'Unresolved', 'Retest Day': '', 'current_pct_raw': None, 'max_pct_raw': None, 'd3_high_pct_raw': None},
+        {'Trigger': '1m ORH', '1m ORH': 'success', '5m ORH': '', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retest Day': 'D1', 'current_pct_raw': 0.10, 'max_pct_raw': 0.20, 'd3_high_pct_raw': 0.25},
+        {'Trigger': 'Alt Required', '1m ORH': 'failed', '5m ORH': 'failed', 'Trigger Day': 'Success', 'Current Status': 'Failed D2', 'Retest Day': '', 'current_pct_raw': 0.00, 'max_pct_raw': 0.10, 'd3_high_pct_raw': 0.15},
+        {'Trigger': 'No Trigger', '1m ORH': '', '5m ORH': '', 'Trigger Day': 'Unresolved', 'Current Status': '—', 'Retest Day': '', 'current_pct_raw': None, 'max_pct_raw': None, 'd3_high_pct_raw': None},
     ])
 
     summary = day_summary(df)
@@ -819,25 +894,28 @@ def test_day_summary_metrics():
     assert summary['No Trigger'] == 1
     assert summary['1m Failed'] == 1
     assert summary['5m Failed'] == 1
+    assert summary['Day Success'] == 2
+    assert summary['Day Fail'] == 0
+    assert summary['Unresolved'] == 1
     assert summary['Active'] == 1
-    assert summary['Failed'] == 1
+    assert summary['Later Failed'] == 1
     assert summary['Retested'] == 1
     assert summary['Median Current %'] == '5.0%'
     assert summary['Median Max %'] == '15.0%'
     assert summary['Median D3 High %'] == '20.0%'
 
 
-def test_sort_monitor_rows_status_then_current_pct():
+def test_sort_monitor_rows_current_status_then_current_pct():
     df = pd.DataFrame([
-        {'Ticker': 'FAIL', 'Status': 'Failed', 'current_pct_raw': 0.50},
-        {'Ticker': 'UNRES', 'Status': 'Unresolved', 'current_pct_raw': 0.30},
-        {'Ticker': 'ACTIVE2', 'Status': 'Active', 'current_pct_raw': 0.10},
-        {'Ticker': 'ACTIVE1', 'Status': 'Active', 'current_pct_raw': 0.20},
+        {'Ticker': 'FAIL', 'Current Status': 'Failed D1', 'current_pct_raw': 0.50},
+        {'Ticker': 'UNRES', 'Current Status': '—', 'current_pct_raw': 0.30},
+        {'Ticker': 'ACTIVE2', 'Current Status': 'Active', 'current_pct_raw': 0.10},
+        {'Ticker': 'ACTIVE1', 'Current Status': 'Active', 'current_pct_raw': 0.20},
     ])
 
     out = sort_monitor_rows(df)
 
-    assert out['Ticker'].tolist() == ['ACTIVE1', 'ACTIVE2', 'UNRES', 'FAIL']
+    assert out['Ticker'].tolist() == ['ACTIVE1', 'ACTIVE2', 'FAIL', 'UNRES']
 
 
 def test_setup_dropdown_preserves_unknown_existing_value():

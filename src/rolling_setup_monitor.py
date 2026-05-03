@@ -31,7 +31,8 @@ RATING_OPTIONS = ['', '1', '2', '3', '4', '5']
 
 MAIN_COLUMNS = [
     'Ticker',
-    'Status',
+    'Current Status',
+    'Trigger Day',
     'Trigger',
     '1m ORH',
     '5m ORH',
@@ -40,7 +41,6 @@ MAIN_COLUMNS = [
     'Max %',
     'D3 High %',
     'Retest Day',
-    'Fail Day',
     'Setup',
     'Rating',
 ]
@@ -52,7 +52,6 @@ MAIN_COLUMN_LABELS = {
     'Max %': 'Max',
     'D3 High %': 'D3 High',
     'Retest Day': 'Retest',
-    'Fail Day': 'Fail',
 }
 
 DETAIL_COLUMNS = [
@@ -61,6 +60,7 @@ DETAIL_COLUMNS = [
     'Reference Low',
     'Reference Basis',
     'Trigger Break Time',
+    'Fail Day',
     'Latest Close',
     'Setup Close',
     'Setup High',
@@ -76,7 +76,7 @@ DETAIL_COLUMNS = [
     '5m OR Result',
 ]
 
-STATUS_PRIORITY = {'Active': 0, 'Unresolved': 1, 'Failed': 2}
+STATUS_PRIORITY = {'Active': 0, 'Failed D1': 1, 'Failed D2': 2, 'Failed D3': 3, '—': 4}
 
 
 def _loads(value: Any) -> dict:
@@ -146,6 +146,32 @@ def _fmt_day(value: int | None) -> str:
     if value is None or pd.isna(value):
         return ''
     return f'Day {int(value)}'
+
+
+def _fmt_compact_day(value: int | None) -> str:
+    if value is None or pd.isna(value):
+        return ''
+    return f'D{int(value)}'
+
+
+def _fmt_d3_pct(value) -> str:
+    return '-' if value is None or pd.isna(value) else _fmt_pct(value)
+
+
+def trigger_day_status(trigger_type: str, fail_day_value: int | None) -> str:
+    if trigger_type == 'No Trigger':
+        return 'Unresolved'
+    if fail_day_value == 0:
+        return 'Fail'
+    return 'Success'
+
+
+def current_status_display(trigger_day: str, fail_day_value: int | None) -> str:
+    if trigger_day != 'Success':
+        return '—'
+    if fail_day_value in {1, 2, 3}:
+        return f'Failed D{int(fail_day_value)}'
+    return 'Active'
 
 
 def _has_close_location(value: Any, threshold: float) -> bool:
@@ -442,14 +468,14 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
     base_price = trigger_level if trigger_level is not None else setup_close
     max_high = _num(daily['high'].max())
     d3 = daily.iloc[:4]
-    d3_high = _num(d3['high'].max()) if not d3.empty else None
+    d3_high = _num(d3['high'].max()) if len(d3) >= 4 else None
 
     return {
         'latest_trading_date': latest['trading_date'],
         'latest_close': latest_close,
         'current_pct': _pct(latest_close - base_price, base_price),
         'max_pct': _pct(max_high - base_price, base_price),
-        'd3_high_pct': _pct(d3_high - base_price, base_price),
+        'd3_high_pct': _pct(d3_high - base_price, base_price) if d3_high is not None else None,
         'current_pct_from_setup_close': _pct(latest_close - setup_close, setup_close),
         'max_gain_from_setup_close': _pct(max_high - setup_close, setup_close),
         'fail_day': preset_fail_day if row.get('trigger_type') == 'Failed OR Trigger' else fail_day(intraday, daily, row.get('trigger_break_time'), reference_low),
@@ -462,7 +488,8 @@ def sort_monitor_rows(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df.copy()
     table = df.copy()
-    table['_status_priority'] = table['Status'].map(STATUS_PRIORITY).fillna(99)
+    status_column = 'Current Status' if 'Current Status' in table else 'Status'
+    table['_status_priority'] = table[status_column].map(STATUS_PRIORITY).fillna(99)
     table['_current_sort'] = table['current_pct_raw'].fillna(float('-inf'))
     return table.sort_values(
         ['_status_priority', '_current_sort', 'Ticker'],
@@ -478,8 +505,12 @@ def main_table(table: pd.DataFrame) -> pd.DataFrame:
 
 def _badge_class(column: str, value: str) -> str:
     normalized = value.lower().replace(' ', '-').replace('/', '-')
-    if column == 'Status':
-        return f'monitor-badge status-{normalized}'
+    if column == 'Current Status':
+        if value == '—':
+            return 'monitor-badge status-muted'
+        return f'monitor-badge current-status-{normalized}'
+    if column == 'Trigger Day':
+        return f'monitor-badge trigger-day-{normalized}'
     if column == 'Trigger':
         return f'monitor-badge trigger-{normalized}'
     if column in {'1m ORH', '5m ORH'} and value in {'success', 'failed'}:
@@ -555,17 +586,17 @@ def format_monitor_table_html(df: pd.DataFrame) -> str:
   font-size: 0.78rem;
   font-weight: 650;
 }}
-.status-active, .result-success {{
+.current-status-active, .trigger-day-success, .result-success {{
   color: #baf7d0;
   background: rgba(46, 160, 91, 0.24);
   border: 1px solid rgba(94, 218, 138, 0.36);
 }}
-.status-failed, .result-failed {{
+.current-status-failed-d1, .current-status-failed-d2, .current-status-failed-d3, .trigger-day-fail, .result-failed {{
   color: #ffc7c7;
   background: rgba(196, 61, 61, 0.24);
   border: 1px solid rgba(240, 112, 112, 0.35);
 }}
-.status-unresolved {{
+.trigger-day-unresolved, .status-muted {{
   color: rgba(250, 250, 250, 0.78);
   background: rgba(148, 163, 184, 0.18);
   border: 1px solid rgba(148, 163, 184, 0.30);
@@ -594,7 +625,7 @@ def _summary_count_with_pct(summary: dict, key: str, denominator: int) -> str:
 def format_summary_blocks_html(summary: dict) -> str:
     setups_count = int(summary.get('Setups', 0) or 0)
     groups = [
-        ('Overall', [('Setups', 'Setups', False), ('Active', 'Active', True), ('Failed', 'Failed', True), ('Unresolved', 'Unresolved', True)]),
+        ('Overall', [('Setups', 'Setups', False), ('Day Success', 'Day Success', True), ('Day Fail', 'Day Fail', True), ('Unresolved', 'Unresolved', True), ('Active', 'Active', True), ('Later Failed', 'Later Failed', True)]),
         ('1m OR', [('Clean 1m', 'Clean 1m', True), ('Failed 1m', '1m Failed', True)]),
         ('5m OR', [('Clean 5m', 'Clean 5m', True), ('Failed 5m', '5m Failed', True)]),
         ('Alternate / Other', [('Alt Required', 'Alt Required', True), ('No Trigger', 'No Trigger', True), ('Retested', 'Retested', True)]),
@@ -659,8 +690,11 @@ def day_summary(df: pd.DataFrame) -> dict:
         '5m Failed': int((df['5m ORH'] == 'failed').sum()) if not df.empty else 0,
         'Alt Required': int((df['Trigger'] == 'Alt Required').sum()) if not df.empty else 0,
         'No Trigger': int((df['Trigger'] == 'No Trigger').sum()) if not df.empty else 0,
-        'Active': int((df['Status'] == 'Active').sum()) if not df.empty else 0,
-        'Failed': int((df['Status'] == 'Failed').sum()) if not df.empty else 0,
+        'Day Success': int((df['Trigger Day'] == 'Success').sum()) if not df.empty else 0,
+        'Day Fail': int((df['Trigger Day'] == 'Fail').sum()) if not df.empty else 0,
+        'Unresolved': int((df['Trigger Day'] == 'Unresolved').sum()) if not df.empty else 0,
+        'Active': int((df['Current Status'] == 'Active').sum()) if not df.empty else 0,
+        'Later Failed': int(df['Current Status'].isin({'Failed D1', 'Failed D2', 'Failed D3'}).sum()) if not df.empty else 0,
         'Retested': int((df['Retest Day'] != '').sum()) if not df.empty else 0,
         'Median Current %': _fmt_pct(df['current_pct_raw'].median()) if not df.empty else '',
         'Median Max %': _fmt_pct(df['max_pct_raw'].median()) if not df.empty else '',
@@ -707,18 +741,28 @@ def apply_setup_rating_updates(con, original: pd.DataFrame, edited: pd.DataFrame
 
 def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
     blank_series = pd.Series([None] * len(raw), index=raw.index)
+    trigger_days = [
+        trigger_day_status(trigger_type, fail_day_value)
+        for trigger_type, fail_day_value in zip(raw['trigger_type'], raw['fail_day'])
+    ]
+    current_statuses = [
+        current_status_display(trigger_day, fail_day_value)
+        for trigger_day, fail_day_value in zip(trigger_days, raw['fail_day'])
+    ]
     display = pd.DataFrame({
         'candidate_id': raw['candidate_id'],
         'Ticker': raw['ticker'].astype(str),
         'Status': raw['status'],
+        'Current Status': current_statuses,
+        'Trigger Day': trigger_days,
         'Trigger': raw['trigger_type'],
         '1m ORH': raw['one_min_result'],
         '5m ORH': raw['five_min_result'],
         'Notes': raw.get('notes', blank_series).apply(_blank),
         'Current %': raw['current_pct'].apply(_fmt_pct),
         'Max %': raw['max_pct'].apply(_fmt_pct),
-        'D3 High %': raw['d3_high_pct'].apply(_fmt_pct),
-        'Retest Day': raw['retest_day'].apply(_fmt_day),
+        'D3 High %': raw['d3_high_pct'].apply(_fmt_d3_pct),
+        'Retest Day': raw['retest_day'].apply(_fmt_compact_day),
         'Fail Day': raw['fail_day'].apply(_fmt_day),
         'Setup': raw['setup'].apply(_blank),
         'Rating': raw['rating'].apply(lambda v: '' if _num(v) is None else str(int(float(v))) if float(v).is_integer() else str(float(v))),
