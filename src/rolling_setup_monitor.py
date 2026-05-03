@@ -196,14 +196,31 @@ def orh_trigger_assessment(or_json: str, minutes: int, intraday: pd.DataFrame | 
     }
 
 
+def orh_framework_failed(or_json: str, assessment: dict) -> bool:
+    data = _loads(or_json)
+    if assessment.get('broke_orh') and assessment.get('failed_after_trigger'):
+        return True
+    return bool(data.get('broke_orh') and (data.get('orh_then_orl') or _same_bar_break(data)))
+
+
+def alt_required_qualified(or_1m: str, or_5m: str, or_15m: str, close_location, intraday: pd.DataFrame | None = None) -> bool:
+    one_assessment = orh_trigger_assessment(or_1m, 1, intraday)
+    five_assessment = orh_trigger_assessment(or_5m, 5, intraday)
+    fifteen = _loads(or_15m)
+    return bool(
+        orh_framework_failed(or_1m, one_assessment)
+        and orh_framework_failed(or_5m, five_assessment)
+        and fifteen.get('broke_orh')
+        and _has_close_location(close_location, 0.80)
+    )
+
+
 def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location, intraday: pd.DataFrame | None = None) -> dict:
-    one = _loads(or_1m)
-    five = _loads(or_5m)
     fifteen = _loads(or_15m)
     one_assessment = orh_trigger_assessment(or_1m, 1, intraday)
     five_assessment = orh_trigger_assessment(or_5m, 5, intraday)
 
-    if one_assessment['broke_orh']:
+    if one_assessment['broke_orh'] and not one_assessment['failed_after_trigger']:
         return {
             'trigger_type': '1m ORH',
             'trigger_level': one_assessment['trigger_level'],
@@ -212,7 +229,7 @@ def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location
             'trigger_break_time': one_assessment['trigger_break_time'],
         }
 
-    if five_assessment['broke_orh']:
+    if five_assessment['broke_orh'] and not five_assessment['failed_after_trigger']:
         return {
             'trigger_type': '5m ORH',
             'trigger_level': five_assessment['trigger_level'],
@@ -221,13 +238,7 @@ def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location
             'trigger_break_time': five_assessment['trigger_break_time'],
         }
 
-    if (
-        one.get('broke_orh')
-        and one.get('broke_orl')
-        and five.get('broke_orh')
-        and five.get('broke_orl')
-        and _has_close_location(close_location, 0.80)
-    ):
+    if alt_required_qualified(or_1m, or_5m, or_15m, close_location, intraday):
         return {
             'trigger_type': 'Alt Required',
             'trigger_level': _num(fifteen.get('orh')),

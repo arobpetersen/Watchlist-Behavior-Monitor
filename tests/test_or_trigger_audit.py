@@ -119,12 +119,14 @@ def test_audit_fields_and_break_rows_use_strict_comparisons():
     assert row['1m ORL Break After ORH Time'] == '2026-04-29 09:33:00'
     assert row['1m OR Result'] == 'failed'
     assert row['5m OR Result'] == 'success'
-    assert row['Selected Trigger'] == '1m ORH'
-    assert row['Trigger Level'] == '1.10'
-    assert row['Reference Low'] == '1.00'
-    assert row['Reference Basis'] == 'LOD at 1m Trigger'
-    assert row['Trigger Break Time'] == '2026-04-29 09:31:00'
-    assert row['Fail Day'] == 'Day 0'
+    assert row['Alt Required Qualified'] == ''
+    assert row['15m ORH'] == '1.25'
+    assert row['15m ORL'] == '0.90'
+    assert row['Selected Trigger'] == '5m ORH'
+    assert row['Trigger Level'] == '1.20'
+    assert row['Reference Low'] == '0.99'
+    assert row['Reference Basis'] == 'LOD at 5m Trigger'
+    assert row['Trigger Break Time'] == '2026-04-29 09:35:00'
     assert len(audit['first_15_bars']) == 5
     assert not break_rows['Timestamp'].str.contains('09:32:00').any()
     assert break_rows['Timestamp'].str.contains('09:31:00').any()

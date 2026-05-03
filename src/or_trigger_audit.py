@@ -7,6 +7,7 @@ import pandas as pd
 
 from src.feature_engine import calc_vwap, session_filter
 from src.rolling_setup_monitor import (
+    alt_required_qualified,
     derive_trigger_reference,
     fail_day,
     opening_range_result,
@@ -31,6 +32,10 @@ AUDIT_COLUMNS = [
     '5m ORH Break Time',
     '5m ORL Break After ORH Time',
     '5m OR Result',
+    'Alt Required Qualified',
+    '15m ORH',
+    '15m ORL',
+    '15m ORH Break Time',
     'Selected Trigger',
     'Trigger Level',
     'Reference Low',
@@ -213,6 +218,7 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
     setup_day = pd.to_datetime(record['watchlist_date']).date()
     one = _loads(record.get('or_1m'))
     five = _loads(record.get('or_5m'))
+    fifteen = _loads(record.get('or_15m'))
     intraday = _regular_intraday(con, record['ticker'], setup_day)
     trigger = derive_trigger_reference(record.get('or_1m'), record.get('or_5m'), record.get('or_15m'), record.get('close_location'), intraday)
     daily = _daily_for_ticker(con, record['ticker'], setup_day)
@@ -236,6 +242,10 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
         '5m ORH Break Time': _fmt_ts(five.get('orh_break_time')),
         '5m ORL Break After ORH Time': _orl_after_orh_time(five),
         '5m OR Result': opening_range_result(record.get('or_5m'), 5, trigger['trigger_type'], intraday),
+        'Alt Required Qualified': 'Yes' if alt_required_qualified(record.get('or_1m'), record.get('or_5m'), record.get('or_15m'), record.get('close_location'), intraday) else '',
+        '15m ORH': _fmt_price(fifteen.get('orh')),
+        '15m ORL': _fmt_price(fifteen.get('orl')),
+        '15m ORH Break Time': _fmt_ts(fifteen.get('orh_break_time')),
         'Selected Trigger': trigger['trigger_type'],
         'Trigger Level': _fmt_price(trigger.get('trigger_level')),
         'Reference Low': _fmt_price(trigger.get('reference_low')),
