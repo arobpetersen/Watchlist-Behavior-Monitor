@@ -11,6 +11,7 @@ from src.rolling_setup_monitor import (
     derive_trigger_reference,
     fail_day,
     opening_range_result,
+    pdh_trigger_assessment,
     retest_day,
     status_for,
 )
@@ -27,6 +28,14 @@ AUDIT_COLUMNS = [
     '1m ORL Break After ORH Time',
     '1m ORH Attempted',
     '1m OR Result',
+    'Prior Day High',
+    'Setup Day Open',
+    'Open Over PDH',
+    'PDH Result',
+    'PDH Trigger Break Time',
+    'PDH Trigger Level',
+    'PDH Reference Low',
+    'PDH Reference Basis',
     '5m ORH',
     '5m ORL',
     '5m OR Start',
@@ -129,12 +138,21 @@ def _orl_after_orh_time(or_data: dict) -> str:
 
 def _daily_for_ticker(con, ticker: str, setup_date) -> pd.DataFrame:
     df = con.execute(
-        'select * from daily_bars where ticker=? and trading_date>=? order by trading_date',
-        [ticker, str(setup_date)],
+        'select * from daily_bars where ticker=? order by trading_date',
+        [ticker],
     ).df()
     if not df.empty:
         df['trading_date'] = pd.to_datetime(df['trading_date']).dt.date
     return df
+
+
+def _prior_day_high(daily: pd.DataFrame, setup_date) -> float | None:
+    if daily.empty:
+        return None
+    prior = daily[pd.to_datetime(daily['trading_date']).dt.date < setup_date]
+    if prior.empty:
+        return None
+    return _num(prior.iloc[-1].get('high'))
 
 
 def _regular_intraday(con, ticker: str, setup_date) -> pd.DataFrame:
@@ -205,6 +223,7 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
         """
         select c.candidate_id,c.watchlist_date,c.ticker,
                f.or_1m,f.or_5m,f.or_15m,f.close_location
+               ,f.open_price
         from watchlist_candidates c
         left join entry_day_features f using(candidate_id,watchlist_date,ticker)
         where c.watchlist_date=? and c.ticker=?
@@ -226,11 +245,23 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
     five = _loads(record.get('or_5m'))
     fifteen = _loads(record.get('or_15m'))
     intraday = _regular_intraday(con, record['ticker'], setup_day)
-    daily = _daily_for_ticker(con, record['ticker'], setup_day)
-    trigger = derive_trigger_reference(record.get('or_1m'), record.get('or_5m'), record.get('or_15m'), record.get('close_location'), intraday, daily)
+    daily_all = _daily_for_ticker(con, record['ticker'], setup_day)
+    prior_high = _prior_day_high(daily_all, setup_day)
+    daily = daily_all[pd.to_datetime(daily_all['trading_date']).dt.date >= setup_day].copy() if not daily_all.empty else daily_all
+    pdh = pdh_trigger_assessment(prior_high, record.get('open_price'), intraday, daily)
+    trigger = derive_trigger_reference(
+        record.get('or_1m'),
+        record.get('or_5m'),
+        record.get('or_15m'),
+        record.get('close_location'),
+        intraday,
+        daily,
+        prior_high,
+        record.get('open_price'),
+    )
     retest = retest_day(intraday, daily, trigger.get('trigger_break_time'), trigger.get('trigger_level'))
     failure = fail_day(intraday, daily, trigger.get('trigger_break_time'), trigger.get('reference_low'))
-    if trigger.get('trigger_type') == 'Failed OR Trigger':
+    if trigger.get('trigger_type') in {'Failed OR Trigger', 'Failed PDH Trigger'}:
         failure = trigger.get('framework_fail_day')
     final_status = status_for(trigger.get('trigger_type'), failure)
 
@@ -245,6 +276,14 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
         '1m ORL Break After ORH Time': _orl_after_orh_time(one),
         '1m ORH Attempted': 'Yes' if one.get('broke_orh') else '',
         '1m OR Result': opening_range_result(record.get('or_1m'), 1, trigger['trigger_type'], intraday, daily),
+        'Prior Day High': _fmt_price(prior_high),
+        'Setup Day Open': _fmt_price(pdh.get('setup_day_open')),
+        'Open Over PDH': '' if pdh.get('open_over_pdh') is None else 'Yes' if pdh.get('open_over_pdh') else 'No',
+        'PDH Result': pdh.get('pdh_result') or '',
+        'PDH Trigger Break Time': _fmt_ts(pdh.get('trigger_break_time')),
+        'PDH Trigger Level': _fmt_price(pdh.get('trigger_level') if pdh.get('broke_pdh') else None),
+        'PDH Reference Low': _fmt_price(pdh.get('reference_low')),
+        'PDH Reference Basis': pdh.get('reference_basis') or '',
         '5m ORH': _fmt_price(five.get('orh')),
         '5m ORL': _fmt_price(five.get('orl')),
         '5m OR Start': _fmt_ts(_session_timestamp(setup_day, 9, 30)),

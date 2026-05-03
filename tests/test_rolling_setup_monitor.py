@@ -17,6 +17,7 @@ from src.rolling_setup_monitor import (
     main_table,
     opening_range_result,
     opening_range_width_notes,
+    pdh_trigger_assessment,
     rating_dropdown_options,
     retest_day,
     setup_dropdown_options,
@@ -56,6 +57,25 @@ def _daily(lows=None):
         'high': [11.0, 11.4, 11.5, 11.2],
         'low': lows,
         'close': [10.8, 11.1, 10.9, 11.0],
+    })
+
+
+def _pdh_intraday(lows_after_trigger=None, highs=None):
+    lows_after_trigger = lows_after_trigger or [10.6, 10.8]
+    highs = highs or [10.1, 10.6, 11.2, 11.4]
+    return pd.DataFrame({
+        'ticker': ['AAPL'] * 4,
+        'trading_date': pd.to_datetime(['2026-05-01'] * 4),
+        'timestamp_et': pd.to_datetime([
+            '2026-05-01 09:30',
+            '2026-05-01 09:31',
+            '2026-05-01 09:32',
+            '2026-05-01 09:33',
+        ]),
+        'open': [10.0, 10.2, 10.8, 11.0],
+        'high': highs,
+        'low': [9.8, 9.9, *lows_after_trigger],
+        'close': [10.0, 10.4, 11.0, 11.2],
     })
 
 
@@ -109,6 +129,124 @@ def test_clean_1m_orh_trigger_level_and_reference_low():
     assert out['reference_low'] == 9.8
     assert out['reference_basis'] == '1m OR'
     assert out['trigger_break_time'] == pd.Timestamp('2026-05-01 09:31')
+
+
+def test_pdh_result_slash_when_open_over_prior_day_high():
+    out = pdh_trigger_assessment(9.9, 10.0, _pdh_intraday(), _daily())
+
+    assert out['pdh_result'] == '/'
+    assert out['open_over_pdh'] is True
+
+
+def test_pdh_break_holds_selects_pdh_trigger():
+    intraday = _pdh_intraday()
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=False, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:31'),
+        _or(broke_orh=True, broke_orl=False, orh=11.0, orl=9.6, orh_break_time='2026-05-01 09:35'),
+        _or(orh=12.0, orl=9.2),
+        0.5,
+        intraday,
+        _daily(lows=[10.1, 10.2, 10.3, 10.4]),
+        11.0,
+        10.0,
+    )
+
+    assert out['trigger_type'] == 'PDH'
+    assert out['pdh_result'] == 'success'
+    assert out['trigger_level'] == 11.0
+    assert out['reference_low'] == 9.8
+    assert out['reference_basis'] == 'LOD at PDH Trigger'
+
+
+def test_pdh_break_fails_day0_selects_failed_pdh_trigger():
+    intraday = _pdh_intraday(lows_after_trigger=[10.6, 9.7])
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=False, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:31'),
+        _or(broke_orh=True, broke_orl=False, orh=11.0, orl=9.6, orh_break_time='2026-05-01 09:35'),
+        _or(orh=12.0, orl=9.2),
+        0.5,
+        intraday,
+        _daily(),
+        11.0,
+        10.0,
+    )
+
+    assert out['trigger_type'] == 'Failed PDH Trigger'
+    assert out['pdh_result'] == 'failed'
+    assert out['framework_fail_day'] == 0
+    assert status_for(out['trigger_type'], out['framework_fail_day']) == 'Failed'
+
+
+def test_pdh_break_fails_day1_stays_trigger_day_success_with_failed_d1_status():
+    intraday = _pdh_intraday()
+    out = derive_trigger_reference(
+        _or(broke_orh=False, broke_orl=False, orh=10.5, orl=9.8),
+        _or(broke_orh=False, broke_orl=False, orh=11.0, orl=9.6),
+        _or(orh=12.0, orl=9.2),
+        0.5,
+        intraday,
+        _daily(lows=[10.1, 9.7, 10.3, 10.4]),
+        11.0,
+        10.0,
+    )
+    failure = fail_day(intraday, _daily(lows=[10.1, 9.7, 10.3, 10.4]), out['trigger_break_time'], out['reference_low'])
+    trigger_day = trigger_day_status(out['trigger_type'], failure)
+
+    assert out['trigger_type'] == 'PDH'
+    assert failure == 1
+    assert trigger_day == 'Success'
+    assert current_status_display(trigger_day, failure) == 'Failed D1'
+
+
+def test_pdh_never_breaks_falls_back_to_clean_1m():
+    intraday = _pdh_intraday(highs=[10.1, 10.6, 10.8, 10.9])
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=False, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:31'),
+        _or(broke_orh=True, broke_orl=False, orh=10.9, orl=9.6, orh_break_time='2026-05-01 09:35'),
+        _or(orh=12.0, orl=9.2),
+        0.5,
+        intraday,
+        _daily(lows=[10.1, 10.2, 10.3, 10.4]),
+        11.0,
+        10.0,
+    )
+
+    assert out['trigger_type'] == '1m ORH'
+    assert out['pdh_result'] == ''
+
+
+def test_pdh_never_breaks_falls_back_to_clean_5m():
+    intraday = _pdh_intraday(highs=[10.1, 10.2, 10.8, 10.9])
+    out = derive_trigger_reference(
+        _or(broke_orh=False, broke_orl=False, orh=10.5, orl=9.8),
+        _or(broke_orh=True, broke_orl=False, orh=10.7, orl=9.6, orh_break_time='2026-05-01 09:32'),
+        _or(orh=12.0, orl=9.2),
+        0.5,
+        intraday,
+        _daily(lows=[10.1, 10.2, 10.3, 10.4]),
+        11.0,
+        10.0,
+    )
+
+    assert out['trigger_type'] == '5m ORH'
+    assert out['pdh_result'] == ''
+
+
+def test_pdh_never_breaks_and_no_fallback_is_no_trigger():
+    intraday = _pdh_intraday(highs=[10.1, 10.2, 10.8, 10.9])
+    out = derive_trigger_reference(
+        _or(broke_orh=False, broke_orl=False, orh=10.5, orl=9.8),
+        _or(broke_orh=False, broke_orl=False, orh=10.7, orl=9.6),
+        _or(orh=12.0, orl=9.2),
+        0.5,
+        intraday,
+        _daily(),
+        11.0,
+        10.0,
+    )
+
+    assert out['trigger_type'] == 'No Trigger'
+    assert out['pdh_result'] == ''
 
 
 def test_1m_orl_break_before_orh_late_orh_is_failed():
@@ -795,11 +933,13 @@ def test_main_and_detail_table_columns_and_blank_handling():
     }])
 
     assert main_table(df).columns.tolist() == [
-        'Ticker', 'Current Status', 'Trigger Day', 'Trigger', '1m ORH', '5m ORH', 'Notes',
+        'Ticker', 'Current Status', 'Trigger Day', 'Trigger', 'PDH', '1m ORH', '5m ORH', 'Notes',
         'Current %', 'Max %', 'D3 High %', 'Retest Day', 'Setup', 'Rating',
     ]
     assert detail_table(df).columns.tolist() == [
-        'Ticker', 'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
+        'Ticker', 'Prior Day High', 'Setup Day Open', 'Open Over PDH', 'PDH Result',
+        'PDH Trigger Break Time', 'PDH Trigger Level', 'PDH Reference Low', 'PDH Reference Basis',
+        'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
         'Fail Day', 'Latest Close', 'Setup Close', 'Setup High', 'Setup Low',
         'Current vs Setup Close', 'Max Gain from Setup Close', 'RVOL', 'Range / ATR14', '1m OR Width / ATR14',
         '5m OR Width / ATR14', 'Close Bucket',

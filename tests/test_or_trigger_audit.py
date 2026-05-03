@@ -29,7 +29,8 @@ def _con():
           or_1m json,
           or_5m json,
           or_15m json,
-          close_location double
+          close_location double,
+          open_price double
         )
     """)
     con.execute("""
@@ -58,7 +59,7 @@ def _con():
     """)
     con.execute("insert into watchlist_candidates values (1, '2026-04-29', 'FCEL')")
     con.execute(
-        "insert into entry_day_features values (?, ?, ?, ?, ?, ?, ?)",
+        "insert into entry_day_features values (?, ?, ?, ?, ?, ?, ?, ?)",
         [
             1,
             '2026-04-29',
@@ -67,8 +68,10 @@ def _con():
             _or(orh=1.20, orl=0.95, broke_orh=True, broke_orl=False, orh_break_time='2026-04-29 09:35:00', orl_break_time=None, orh_then_orl=False),
             _or(orh=1.25, orl=0.90),
             0.7,
+            1.2,
         ],
     )
+    con.execute("insert into daily_bars values ('FCEL', '2026-04-28', 1.0, 1.15, 0.95, 1.05, 1000)")
     bars = pd.DataFrame({
         'ticker': ['FCEL'] * 7,
         'trading_date': ['2026-04-29'] * 7,
@@ -119,6 +122,10 @@ def test_audit_fields_and_break_rows_use_strict_comparisons():
     assert row['1m ORL Break After ORH Time'] == '2026-04-29 09:33:00'
     assert row['1m ORH Attempted'] == 'Yes'
     assert row['1m OR Result'] == 'failed'
+    assert row['Prior Day High'] == '1.15'
+    assert row['Setup Day Open'] == '1.20'
+    assert row['Open Over PDH'] == 'Yes'
+    assert row['PDH Result'] == '/'
     assert row['5m ORH Attempted'] == 'Yes'
     assert row['5m OR Result'] == 'failed'
     assert row['Alt Required Qualified'] == ''

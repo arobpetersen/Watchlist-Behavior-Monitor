@@ -54,10 +54,10 @@ If a Back-Watch export was uploaded incorrectly, use the main app page's Mainten
 The Rolling Setup Monitor page shows ticker-level monitoring for the last 5 setup dates. It uses a simple objective trigger reference ladder:
 
 ```text
-Clean 1m ORH -> Clean 5m ORH -> Alternate Means Required using 15m ORH reference -> No Clean OR Trigger
+PDH when setup opens at or below prior-day high -> Clean 1m ORH -> Clean 5m ORH -> Alternate Means Required using 15m ORH reference -> No Clean OR Trigger
 ```
 
-It tracks current follow-through from the trigger reference when one exists, and from the setup-day close for all names. This page is for setup behavior monitoring only; it is not a trade journal or backtest.
+If the setup opens above prior-day high, PDH is marked as already cleared and the monitor uses the existing ORH stack. It tracks current follow-through from the selected trigger reference when one exists, and from the setup-day close for all names. This page is for setup behavior monitoring only; it is not a trade journal or backtest.
 
 ## Setup Behavior Overview
 The Setup Behavior Overview page compares Back-Watch setup behavior across Last 1 Week, Last 2 Weeks, and Last 1 Month windows. It uses the same Rolling Setup Monitor definitions, then shows a compact window comparison, selected-window grouped breakdown, and ticker detail for the selected window.

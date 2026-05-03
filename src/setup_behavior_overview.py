@@ -23,6 +23,8 @@ FULL_SUMMARY_COLUMNS = [
     'Failed 1m',
     'Clean 5m',
     'Failed 5m',
+    'PDH',
+    'Failed PDH Trigger',
     'Alt Required',
     'Failed OR Trigger',
     'No Trigger',
@@ -61,6 +63,7 @@ DETAIL_COLUMNS = [
     'Current Status',
     'Trigger Day',
     'Trigger',
+    'PDH',
     '1m ORH',
     '5m ORH',
     'Notes',
@@ -180,6 +183,7 @@ def summarize_window(history: pd.DataFrame, window: OverviewWindow) -> dict:
     current_status = rows['Current Status'] if 'Current Status' in rows else pd.Series(dtype=object)
     trigger_day = rows['Trigger Day'] if 'Trigger Day' in rows else pd.Series(dtype=object)
     trigger = rows['Trigger'] if 'Trigger' in rows else pd.Series(dtype=object)
+    pdh = rows['PDH'] if 'PDH' in rows else pd.Series(dtype=object)
     one = rows['1m ORH'] if '1m ORH' in rows else pd.Series(dtype=object)
     five = rows['5m ORH'] if '5m ORH' in rows else pd.Series(dtype=object)
     notes = rows['Notes'] if 'Notes' in rows else pd.Series(dtype=object)
@@ -201,6 +205,8 @@ def summarize_window(history: pd.DataFrame, window: OverviewWindow) -> dict:
         'Failed 1m': count_fmt(_count(one, 'failed')),
         'Clean 5m': count_fmt(_count(five, 'success')),
         'Failed 5m': count_fmt(_count(five, 'failed')),
+        'PDH': count_fmt(_count(trigger, 'PDH')),
+        'Failed PDH Trigger': count_fmt(_count(trigger, 'Failed PDH Trigger')),
         'Alt Required': count_fmt(_count(trigger, 'Alt Required')),
         'Failed OR Trigger': count_fmt(_count(trigger, 'Failed OR Trigger')),
         'No Trigger': count_fmt(_count(trigger, 'No Trigger')),
@@ -228,6 +234,7 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
         'Current Status': rows['Current Status'].apply(_display),
         'Trigger Day': rows['Trigger Day'].apply(_display),
         'Trigger': rows['Trigger'].apply(_display),
+        'PDH': rows['PDH'].apply(_display) if 'PDH' in rows else '-',
         '1m ORH': rows['1m ORH'].apply(_display),
         '5m ORH': rows['5m ORH'].apply(_display),
         'Notes': rows['Notes'].apply(_display),
@@ -277,6 +284,8 @@ def selected_window_metrics(window_summary: dict) -> list[dict]:
             'metrics': [
                 ('Clean 1m', window_summary.get('Clean 1m', '-')),
                 ('Clean 5m', window_summary.get('Clean 5m', '-')),
+                ('PDH', window_summary.get('PDH', '-')),
+                ('Failed PDH Trigger', window_summary.get('Failed PDH Trigger', '-')),
                 ('Alt Required', window_summary.get('Alt Required', '-')),
                 ('Failed OR Trigger', window_summary.get('Failed OR Trigger', '-')),
                 ('No Trigger', window_summary.get('No Trigger', '-')),

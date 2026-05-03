@@ -27,6 +27,7 @@ MAIN_COLUMNS = [
     'Current Status',
     'Trigger Day',
     'Trigger',
+    'PDH',
     '1m ORH',
     '5m ORH',
     'Notes',
@@ -49,6 +50,14 @@ MAIN_COLUMN_LABELS = {
 
 DETAIL_COLUMNS = [
     'Ticker',
+    'Prior Day High',
+    'Setup Day Open',
+    'Open Over PDH',
+    'PDH Result',
+    'PDH Trigger Break Time',
+    'PDH Trigger Level',
+    'PDH Reference Low',
+    'PDH Reference Basis',
     'Trigger Level',
     'Reference Low',
     'Reference Basis',
@@ -280,10 +289,127 @@ def failed_or_trigger_reference(one_assessment: dict, five_assessment: dict) -> 
     }
 
 
-def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location, intraday: pd.DataFrame | None = None, daily: pd.DataFrame | None = None) -> dict:
+def pdh_trigger_assessment(
+    prior_day_high,
+    setup_day_open=None,
+    intraday: pd.DataFrame | None = None,
+    daily: pd.DataFrame | None = None,
+) -> dict:
+    pdh = _num(prior_day_high)
+    bars = _regular_session_bars(intraday)
+    setup_open = _num(setup_day_open)
+    if setup_open is None and not bars.empty:
+        setup_open = _num(bars.iloc[0].get('open'))
+    if pdh is None or setup_open is None:
+        return {
+            'pdh_result': '',
+            'prior_day_high': pdh,
+            'setup_day_open': setup_open,
+            'open_over_pdh': None,
+            'broke_pdh': False,
+            'trigger_level': pdh,
+            'trigger_break_time': None,
+            'reference_low': None,
+            'reference_basis': '',
+            'failure_day': None,
+        }
+    open_over_pdh = setup_open > pdh
+    if open_over_pdh:
+        return {
+            'pdh_result': '/',
+            'prior_day_high': pdh,
+            'setup_day_open': setup_open,
+            'open_over_pdh': True,
+            'broke_pdh': False,
+            'trigger_level': pdh,
+            'trigger_break_time': None,
+            'reference_low': None,
+            'reference_basis': '',
+            'failure_day': None,
+        }
+    breaks = bars[bars['high'] > pdh] if not bars.empty else pd.DataFrame()
+    if breaks.empty:
+        return {
+            'pdh_result': '',
+            'prior_day_high': pdh,
+            'setup_day_open': setup_open,
+            'open_over_pdh': False,
+            'broke_pdh': False,
+            'trigger_level': pdh,
+            'trigger_break_time': None,
+            'reference_low': None,
+            'reference_basis': '',
+            'failure_day': None,
+        }
+    trigger_break_time = breaks.iloc[0]['timestamp_et']
+    through_trigger = bars[bars['timestamp_et'] <= trigger_break_time]
+    reference_low = _num(through_trigger['low'].min()) if not through_trigger.empty else None
+    failure_day = fail_day(bars, daily if daily is not None else pd.DataFrame(), trigger_break_time, reference_low)
+    return {
+        'pdh_result': 'failed' if failure_day == 0 else 'success',
+        'prior_day_high': pdh,
+        'setup_day_open': setup_open,
+        'open_over_pdh': False,
+        'broke_pdh': True,
+        'trigger_level': pdh,
+        'trigger_break_time': trigger_break_time,
+        'reference_low': reference_low,
+        'reference_basis': 'LOD at PDH Trigger',
+        'failure_day': failure_day,
+    }
+
+
+def derive_trigger_reference(
+    or_1m: str,
+    or_5m: str,
+    or_15m: str,
+    close_location,
+    intraday: pd.DataFrame | None = None,
+    daily: pd.DataFrame | None = None,
+    prior_day_high=None,
+    setup_day_open=None,
+) -> dict:
     fifteen = _loads(or_15m)
     one_assessment = orh_trigger_assessment(or_1m, 1, intraday, daily)
     five_assessment = orh_trigger_assessment(or_5m, 5, intraday, daily)
+    pdh_assessment = pdh_trigger_assessment(prior_day_high, setup_day_open, intraday, daily)
+
+    if pdh_assessment['open_over_pdh'] is False and pdh_assessment['broke_pdh']:
+        if pdh_assessment['failure_day'] == 0:
+            return {
+                'trigger_type': 'Failed PDH Trigger',
+                'trigger_level': pdh_assessment['trigger_level'],
+                'reference_low': pdh_assessment['reference_low'],
+                'reference_basis': pdh_assessment['reference_basis'],
+                'trigger_break_time': pdh_assessment['trigger_break_time'],
+                'framework_fail_day': 0,
+                'failed_framework': 'PDH',
+                'pdh_result': pdh_assessment['pdh_result'],
+                'pdh_trigger_break_time': pdh_assessment['trigger_break_time'],
+                'pdh_trigger_level': pdh_assessment['trigger_level'],
+                'pdh_reference_low': pdh_assessment['reference_low'],
+                'pdh_reference_basis': pdh_assessment['reference_basis'],
+            }
+        return {
+            'trigger_type': 'PDH',
+            'trigger_level': pdh_assessment['trigger_level'],
+            'reference_low': pdh_assessment['reference_low'],
+            'reference_basis': pdh_assessment['reference_basis'],
+            'trigger_break_time': pdh_assessment['trigger_break_time'],
+            'pdh_result': pdh_assessment['pdh_result'],
+            'pdh_trigger_break_time': pdh_assessment['trigger_break_time'],
+            'pdh_trigger_level': pdh_assessment['trigger_level'],
+            'pdh_reference_low': pdh_assessment['reference_low'],
+            'pdh_reference_basis': pdh_assessment['reference_basis'],
+        }
+
+    pdh_details = {
+        'pdh_result': pdh_assessment['pdh_result'],
+        'pdh_trigger_break_time': pdh_assessment['trigger_break_time'],
+        'pdh_trigger_level': pdh_assessment['trigger_level'] if pdh_assessment['broke_pdh'] else None,
+        'pdh_reference_low': pdh_assessment['reference_low'],
+        'pdh_reference_basis': pdh_assessment['reference_basis'],
+    }
 
     if one_assessment['broke_orh'] and not one_assessment['failed']:
         return {
@@ -292,6 +418,7 @@ def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location
             'reference_low': one_assessment['reference_low'],
             'reference_basis': one_assessment['reference_basis'],
             'trigger_break_time': one_assessment['trigger_break_time'],
+            **pdh_details,
         }
 
     if five_assessment['broke_orh'] and not five_assessment['failed']:
@@ -301,6 +428,7 @@ def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location
             'reference_low': five_assessment['reference_low'],
             'reference_basis': five_assessment['reference_basis'],
             'trigger_break_time': five_assessment['trigger_break_time'],
+            **pdh_details,
         }
 
     if alt_required_qualified(or_1m, or_5m, or_15m, close_location, intraday, daily):
@@ -310,10 +438,12 @@ def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location
             'reference_low': _num(fifteen.get('orl')),
             'reference_basis': '15m OR Reference',
             'trigger_break_time': _ts(fifteen.get('orh_break_time')),
+            **pdh_details,
         }
 
     failed_reference = failed_or_trigger_reference(one_assessment, five_assessment)
     if failed_reference:
+        failed_reference.update(pdh_details)
         return failed_reference
 
     return {
@@ -324,6 +454,7 @@ def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location
         'trigger_break_time': None,
         'framework_fail_day': None,
         'failed_framework': None,
+        **pdh_details,
     }
 
 
@@ -387,6 +518,19 @@ def _daily_for_ticker(daily_bars: pd.DataFrame, ticker: str, setup_date) -> pd.D
     return bars[bars['trading_date'] >= setup_date].sort_values('trading_date')
 
 
+def _prior_day_high_for_ticker(daily_bars: pd.DataFrame, ticker: str, setup_date) -> float | None:
+    if daily_bars.empty:
+        return None
+    bars = daily_bars[daily_bars['ticker'] == ticker].copy()
+    if bars.empty:
+        return None
+    bars['trading_date'] = pd.to_datetime(bars['trading_date']).dt.date
+    prior = bars[bars['trading_date'] < setup_date].sort_values('trading_date')
+    if prior.empty:
+        return None
+    return _num(prior.iloc[-1].get('high'))
+
+
 def day0_fail(intraday: pd.DataFrame, trigger_break_time, reference_low: float | None) -> bool:
     break_time = _ts(trigger_break_time)
     if intraday.empty or break_time is None or reference_low is None:
@@ -428,11 +572,11 @@ def retest_day(intraday: pd.DataFrame, daily: pd.DataFrame, trigger_break_time, 
 
 
 def status_for(trigger_type: str, fail_day_value: int | None) -> str:
-    if trigger_type == 'Failed OR Trigger':
+    if trigger_type in {'Failed OR Trigger', 'Failed PDH Trigger'}:
         return 'Failed'
     if fail_day_value is not None:
         return 'Failed'
-    if trigger_type in {'1m ORH', '5m ORH', 'Alt Required'}:
+    if trigger_type in {'PDH', '1m ORH', '5m ORH', 'Alt Required'}:
         return 'Active'
     return 'Unresolved'
 
@@ -456,7 +600,7 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
             'd3_high_pct': None,
             'current_pct_from_setup_close': None,
             'max_gain_from_setup_close': None,
-            'fail_day': preset_fail_day if row.get('trigger_type') == 'Failed OR Trigger' else fail_day(intraday, daily, row.get('trigger_break_time'), reference_low),
+            'fail_day': preset_fail_day if row.get('trigger_type') in {'Failed OR Trigger', 'Failed PDH Trigger'} else fail_day(intraday, daily, row.get('trigger_break_time'), reference_low),
             'retest_day': retest_day(intraday, daily, row.get('trigger_break_time'), trigger_level),
             'base_price': base_price,
         }
@@ -476,7 +620,7 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
         'd3_high_pct': _pct(d3_high - base_price, base_price) if d3_high is not None else None,
         'current_pct_from_setup_close': _pct(latest_close - setup_close, setup_close),
         'max_gain_from_setup_close': _pct(max_high - setup_close, setup_close),
-        'fail_day': preset_fail_day if row.get('trigger_type') == 'Failed OR Trigger' else fail_day(intraday, daily, row.get('trigger_break_time'), reference_low),
+        'fail_day': preset_fail_day if row.get('trigger_type') in {'Failed OR Trigger', 'Failed PDH Trigger'} else fail_day(intraday, daily, row.get('trigger_break_time'), reference_low),
         'retest_day': retest_day(intraday, daily, row.get('trigger_break_time'), trigger_level),
         'base_price': base_price,
     }
@@ -498,7 +642,11 @@ def sort_monitor_rows(df: pd.DataFrame) -> pd.DataFrame:
 def main_table(table: pd.DataFrame) -> pd.DataFrame:
     if table.empty:
         return pd.DataFrame(columns=MAIN_COLUMNS)
-    return _clean_display_df(sort_monitor_rows(table)[MAIN_COLUMNS])
+    out = sort_monitor_rows(table).copy()
+    for column in MAIN_COLUMNS:
+        if column not in out:
+            out[column] = ''
+    return _clean_display_df(out[MAIN_COLUMNS])
 
 
 def _badge_class(column: str, value: str) -> str:
@@ -511,8 +659,10 @@ def _badge_class(column: str, value: str) -> str:
         return f'monitor-badge trigger-day-{normalized}'
     if column == 'Trigger':
         return f'monitor-badge trigger-{normalized}'
-    if column in {'1m ORH', '5m ORH'} and value in {'success', 'failed'}:
+    if column in {'PDH', '1m ORH', '5m ORH'} and value in {'success', 'failed'}:
         return f'monitor-badge result-{value}'
+    if column == 'PDH' and value == '/':
+        return 'monitor-badge status-muted'
     return ''
 
 
@@ -599,7 +749,7 @@ def format_monitor_table_html(df: pd.DataFrame) -> str:
   background: rgba(148, 163, 184, 0.18);
   border: 1px solid rgba(148, 163, 184, 0.30);
 }}
-.trigger-1m-orh, .trigger-5m-orh, .trigger-alt-required, .trigger-failed-or-trigger, .trigger-no-trigger {{
+.trigger-pdh, .trigger-failed-pdh-trigger, .trigger-1m-orh, .trigger-5m-orh, .trigger-alt-required, .trigger-failed-or-trigger, .trigger-no-trigger {{
   color: rgba(236, 244, 255, 0.92);
   background: rgba(59, 130, 246, 0.16);
   border: 1px solid rgba(96, 165, 250, 0.28);
@@ -676,12 +826,18 @@ def format_summary_blocks_html(summary: dict) -> str:
 def detail_table(table: pd.DataFrame) -> pd.DataFrame:
     if table.empty:
         return pd.DataFrame(columns=DETAIL_COLUMNS)
-    return _clean_display_df(sort_monitor_rows(table)[DETAIL_COLUMNS])
+    out = sort_monitor_rows(table).copy()
+    for column in DETAIL_COLUMNS:
+        if column not in out:
+            out[column] = ''
+    return _clean_display_df(out[DETAIL_COLUMNS])
 
 
 def day_summary(df: pd.DataFrame) -> dict:
     return {
         'Setups': len(df),
+        'PDH': int((df['Trigger'] == 'PDH').sum()) if not df.empty else 0,
+        'Failed PDH Trigger': int((df['Trigger'] == 'Failed PDH Trigger').sum()) if not df.empty else 0,
         'Clean 1m': int((df['Trigger'] == '1m ORH').sum()) if not df.empty else 0,
         'Clean 5m': int((df['Trigger'] == '5m ORH').sum()) if not df.empty else 0,
         '1m Failed': int((df['1m ORH'] == 'failed').sum()) if not df.empty else 0,
@@ -754,6 +910,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Current Status': current_statuses,
         'Trigger Day': trigger_days,
         'Trigger': raw['trigger_type'],
+        'PDH': raw.get('pdh_result', blank_series).apply(_blank),
         '1m ORH': raw['one_min_result'],
         '5m ORH': raw['five_min_result'],
         'Notes': raw.get('notes', blank_series).apply(_blank),
@@ -764,6 +921,14 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Fail Day': raw['fail_day'].apply(_fmt_day),
         'Setup': raw['setup'].apply(_blank),
         'Rating': raw['rating'].apply(lambda v: '' if _num(v) is None else str(int(float(v))) if float(v).is_integer() else str(float(v))),
+        'Prior Day High': raw.get('prior_day_high', blank_series).apply(_fmt_price),
+        'Setup Day Open': raw.get('setup_day_open', blank_series).apply(_fmt_price),
+        'Open Over PDH': raw.get('open_over_pdh', blank_series).apply(lambda v: '' if v is None or pd.isna(v) else 'Yes' if bool(v) else 'No'),
+        'PDH Result': raw.get('pdh_result', blank_series).apply(_blank),
+        'PDH Trigger Break Time': raw.get('pdh_trigger_break_time', blank_series).apply(_fmt_ts),
+        'PDH Trigger Level': raw.get('pdh_trigger_level', blank_series).apply(_fmt_price),
+        'PDH Reference Low': raw.get('pdh_reference_low', blank_series).apply(_fmt_price),
+        'PDH Reference Basis': raw.get('pdh_reference_basis', blank_series).apply(_blank),
         'Trigger Level': raw['trigger_level'].apply(_fmt_price),
         'Reference Low': raw['reference_low'].apply(_fmt_price),
         'Reference Basis': raw['reference_basis'].apply(_blank),
@@ -804,7 +969,7 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
         f"""
         select c.candidate_id,c.watchlist_date,c.ticker,c.rating,c.setup,c.focus,
                f.high_price,f.low_price,f.close_price,f.close_location,
-               f.or_1m,f.or_5m,f.or_15m,f.atr20,f.relative_volume_20d,f.range_vs_atr20
+               f.open_price,f.or_1m,f.or_5m,f.or_15m,f.atr20,f.relative_volume_20d,f.range_vs_atr20
         from watchlist_candidates c
         left join entry_day_features f using(candidate_id,watchlist_date,ticker)
         where c.watchlist_date in ({placeholders})
@@ -836,6 +1001,7 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
         setup_date = pd.to_datetime(record['watchlist_date']).date()
         ticker_intraday = _bars_for_ticker_date(intraday_bars, record['ticker'], setup_date)
         ticker_daily = _daily_for_ticker(daily_bars, record['ticker'], setup_date)
+        prior_day_high = _prior_day_high_for_ticker(daily_bars, record['ticker'], setup_date)
         trigger = derive_trigger_reference(
             record.get('or_1m'),
             record.get('or_5m'),
@@ -843,7 +1009,15 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
             record.get('close_location'),
             ticker_intraday,
             ticker_daily,
+            prior_day_high,
+            record.get('open_price'),
         )
+        pdh_assessment = pdh_trigger_assessment(prior_day_high, record.get('open_price'), ticker_intraday, ticker_daily)
+        record.update({
+            'prior_day_high': pdh_assessment.get('prior_day_high'),
+            'setup_day_open': pdh_assessment.get('setup_day_open'),
+            'open_over_pdh': pdh_assessment.get('open_over_pdh'),
+        })
         record.update(trigger)
         record.update(opening_range_width_notes(record.get('or_1m'), record.get('or_5m'), record.get('atr20')))
         record.update(_follow_through(record, daily_bars, intraday_bars))

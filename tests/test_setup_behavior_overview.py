@@ -231,6 +231,25 @@ def test_selected_window_metrics_group_diagnostics_separately():
     assert diagnostics['Wide 1m OR'] == '2 (50%)'
 
 
+def test_pdh_trigger_mix_aggregation_stays_out_of_top_comparison():
+    history = _history().copy()
+    history.loc[0, 'Trigger'] = 'PDH'
+    history.loc[0, 'PDH'] = 'success'
+    history.loc[1, 'Trigger'] = 'Failed PDH Trigger'
+    history.loc[1, 'PDH'] = 'failed'
+    summary = summarize_window(history, overview_windows('2026-05-08')[0])
+    groups = selected_window_metrics(summary)
+    trigger_mix = dict(groups[2]['metrics'])
+    comparison = comparison_rows(pd.DataFrame([summary], columns=FULL_SUMMARY_COLUMNS))
+
+    assert summary['PDH'] == '1 (33%)'
+    assert summary['Failed PDH Trigger'] == '1 (33%)'
+    assert trigger_mix['PDH'] == '1 (33%)'
+    assert trigger_mix['Failed PDH Trigger'] == '1 (33%)'
+    assert 'PDH' not in comparison.columns
+    assert 'Failed PDH Trigger' not in comparison.columns
+
+
 def test_factual_read_is_objective_and_contains_key_metrics():
     summary = summarize_window(_history(), overview_windows('2026-05-08')[1])
     text = factual_read(summary)
