@@ -26,6 +26,24 @@ def test_opening_range_equal_high_does_not_count_as_orh_break():
     assert opening_range(df, 1)['broke_orh'] is False
 
 
+def test_opening_range_5m_orh_break_starts_after_range_and_uses_strict_greater_than():
+    ts = pd.date_range('2026-05-01 09:30', periods=7, freq='min')
+    df = pd.DataFrame({
+        'timestamp_et': ts,
+        'open': [10] * 7,
+        'high': [10.0, 10.2, 10.3, 10.1, 10.5, 10.5, 10.51],
+        'low': [9.8, 9.7, 9.9, 9.8, 9.9, 9.8, 9.9],
+        'close': [10] * 7,
+        'volume': [100] * 7,
+    })
+
+    out = opening_range(df, 5)
+
+    assert out['orh'] == 10.5
+    assert out['broke_orh'] is True
+    assert out['orh_break_time'] == '2026-05-01 09:36:00'
+
+
 def test_opening_range_uses_strict_less_than_for_orl_break():
     ts = pd.date_range('2026-05-01 09:30', periods=3, freq='min')
     df = pd.DataFrame({'timestamp_et': ts, 'open': [10, 10, 10], 'high': [10, 9.8, 9.8], 'low': [9, 9, 8.99], 'close': [10, 9.5, 9.2], 'volume': [100, 100, 100]})

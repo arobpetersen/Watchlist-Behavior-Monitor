@@ -161,6 +161,24 @@ def _same_bar_break(data: dict) -> bool:
     return orh_time is not None and orl_time is not None and orh_time == orl_time
 
 
+def _opening_range_end(data: dict, minutes: int) -> pd.Timestamp | None:
+    orh_time = _ts(data.get('orh_break_time'))
+    orl_time = _ts(data.get('orl_break_time'))
+    anchor = orh_time if orh_time is not None else orl_time
+    if anchor is None:
+        return None
+    return anchor.replace(hour=9, minute=30, second=0, microsecond=0) + pd.Timedelta(minutes=minutes)
+
+
+def orl_break_after_opening_range(or_json: str, minutes: int) -> pd.Timestamp | None:
+    data = _loads(or_json)
+    break_time = _ts(data.get('orl_break_time'))
+    range_end = _opening_range_end(data, minutes)
+    if break_time is None or range_end is None:
+        return None
+    return break_time if break_time >= range_end else None
+
+
 def _clean_orh(data: dict) -> bool:
     return bool(data.get('broke_orh') and not data.get('orh_then_orl') and not _same_bar_break(data))
 
@@ -253,10 +271,30 @@ def failed_or_trigger_reference(one_assessment: dict, five_assessment: dict) -> 
 
 def derive_trigger_reference(or_1m: str, or_5m: str, or_15m: str, close_location, intraday: pd.DataFrame | None = None, daily: pd.DataFrame | None = None) -> dict:
     fifteen = _loads(or_15m)
+    five = _loads(or_5m)
     one_assessment = orh_trigger_assessment(or_1m, 1, intraday, daily)
     five_assessment = orh_trigger_assessment(or_5m, 5, intraday, daily)
+    five_orl_break_time = orl_break_after_opening_range(or_5m, 5)
 
     if one_assessment['broke_orh'] and not one_assessment['failed_after_trigger']:
+        if five_orl_break_time is not None:
+            if alt_required_qualified(or_1m, or_5m, or_15m, close_location, intraday, daily):
+                return {
+                    'trigger_type': 'Alt Required',
+                    'trigger_level': _num(fifteen.get('orh')),
+                    'reference_low': _num(fifteen.get('orl')),
+                    'reference_basis': '15m OR Reference',
+                    'trigger_break_time': _ts(fifteen.get('orh_break_time')),
+                }
+            return {
+                'trigger_type': 'Failed OR Trigger',
+                'trigger_level': one_assessment['trigger_level'],
+                'reference_low': _num(five.get('orl')),
+                'reference_basis': 'Failed 5m ORL',
+                'trigger_break_time': one_assessment['trigger_break_time'],
+                'framework_fail_day': 0,
+                'failed_framework': '5m ORL',
+            }
         return {
             'trigger_type': '1m ORH',
             'trigger_level': one_assessment['trigger_level'],
@@ -325,6 +363,8 @@ def opening_range_width_notes(or_1m: str, or_5m: str, atr14) -> dict:
 def opening_range_result(or_json: str, minutes: int, trigger_type: str, intraday: pd.DataFrame | None = None, daily: pd.DataFrame | None = None) -> str:
     data = _loads(or_json)
     if trigger_type == 'Alt Required' and minutes in {1, 5}:
+        return 'failed'
+    if trigger_type == 'Failed OR Trigger' and minutes == 5 and orl_break_after_opening_range(or_json, 5) is not None:
         return 'failed'
     clean_type = f'{minutes}m ORH'
     assessment = orh_trigger_assessment(or_json, minutes, intraday, daily)

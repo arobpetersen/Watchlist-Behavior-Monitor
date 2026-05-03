@@ -419,17 +419,57 @@ def test_failed_or_trigger_uses_daily_fail_from_primary_framework():
     assert out['framework_fail_day'] == 1
 
 
-def test_clean_1m_still_takes_priority_over_alt_required():
+def test_5m_orl_break_invalidates_selected_1m_orh_without_alt_required():
     intraday = _flush_then_trigger_intraday(after_low=9.6)
     out = derive_trigger_reference(
         _or(broke_orh=True, broke_orl=False, orh_then_orl=False, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:32'),
         _or(broke_orh=True, broke_orl=True, orh_then_orl=True, orh=11.0, orl=9.6, orh_break_time='2026-05-01 09:35', orl_break_time='2026-05-01 09:36'),
-        _or(broke_orh=True, broke_orl=False, orh=12.0, orl=9.0, orh_break_time='2026-05-01 09:46'),
-        0.90,
+        _or(broke_orh=False, broke_orl=False, orh=12.0, orl=9.0),
+        0.50,
         intraday,
     )
 
-    assert out['trigger_type'] == '1m ORH'
+    assert out['trigger_type'] == 'Failed OR Trigger'
+    assert out['failed_framework'] == '5m ORL'
+    assert out['framework_fail_day'] == 0
+    assert out['trigger_level'] == 10.5
+    assert out['reference_low'] == 9.6
+
+
+def test_twlo_style_1m_trigger_5m_orl_break_no_alt_required_is_failed():
+    intraday = pd.DataFrame({
+        'ticker': ['TWLO'] * 7,
+        'trading_date': pd.to_datetime(['2026-05-01'] * 7),
+        'timestamp_et': pd.to_datetime([
+            '2026-05-01 09:30',
+            '2026-05-01 09:31',
+            '2026-05-01 09:32',
+            '2026-05-01 09:35',
+            '2026-05-01 10:16',
+            '2026-05-01 13:03',
+            '2026-05-01 15:59',
+        ]),
+        'high': [179.47, 178.67, 177.66, 175.36, 172.43, 179.86, 183.59],
+        'low': [177.28, 176.45, 173.33, 172.30, 171.01, 178.87, 182.91],
+        'close': [178.37, 177.81, 175.89, 172.31, 172.43, 179.86, 183.35],
+    })
+    out = derive_trigger_reference(
+        _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=179.47, orl=177.28, orh_break_time='2026-05-01 13:03', orl_break_time='2026-05-01 09:31'),
+        _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=179.47, orl=173.33, orh_break_time='2026-05-01 13:03', orl_break_time='2026-05-01 09:35'),
+        _or(broke_orh=True, broke_orl=True, orh=179.47, orl=172.30, orh_break_time='2026-05-01 13:03'),
+        0.75,
+        intraday,
+    )
+
+    assert out['trigger_type'] == 'Failed OR Trigger'
+    assert out['failed_framework'] == '5m ORL'
+    assert opening_range_result(
+        _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=179.47, orl=173.33, orh_break_time='2026-05-01 13:03', orl_break_time='2026-05-01 09:35'),
+        5,
+        out['trigger_type'],
+        intraday,
+    ) == 'failed'
+    assert status_for(out['trigger_type'], out['framework_fail_day']) == 'Failed'
 
 
 def test_clean_5m_still_takes_priority_over_alt_required_when_1m_fails():
