@@ -15,9 +15,11 @@ from src.setup_behavior_overview import (
     factual_read,
     mix_tables,
     monitor_history,
+    opening_behavior_table,
     overview_windows,
     selected_window_metrics,
     selected_window_snapshot,
+    snapshot_cards_html,
     setup_behavior_overview,
     summarize_window,
     trigger_quality_table,
@@ -287,7 +289,7 @@ def test_overview_5m_counts_exclude_selected_1m_rows_with_5m_display_hidden():
 
 def test_factual_read_is_objective_and_contains_key_metrics():
     summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
-    text = factual_read(summary)
+    text = factual_read(summary, opening_behavior_table(_history().iloc[:4]))
 
     assert 'Last 10 Setup Dates includes 4 setups across 3 setup dates.' in text
     assert '3 (75%) succeeded on trigger day' in text
@@ -295,6 +297,7 @@ def test_factual_read_is_objective_and_contains_key_metrics():
     assert '2 (50%) failed later' in text
     assert 'Median current return is 1.5%' in text
     assert 'median max return is 7.0%' in text
+    assert 'Opening behavior is choppy but constructive' in text
     lowered = text.lower()
     assert 'trade more aggressively' not in lowered
     assert 'avoid' not in lowered
@@ -315,6 +318,19 @@ def test_selected_window_snapshot_contains_key_metrics():
     assert 'Median Max 7.0%' in text
 
 
+def test_snapshot_cards_html_prioritizes_key_metrics():
+    summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
+    html = snapshot_cards_html(summary)
+
+    assert 'Scope' in html
+    assert 'Trigger Day' in html
+    assert 'Current Outcome' in html
+    assert 'Follow-Through' in html
+    assert '75%' in html
+    assert '1.5%' in html
+    assert '7.0%' in html
+
+
 def test_mix_tables_include_objective_selected_window_mixes():
     summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
     mixes = mix_tables(summary)
@@ -330,14 +346,125 @@ def test_trigger_quality_table_groups_by_selected_trigger():
     by_trigger = quality.set_index('Trigger')
 
     assert by_trigger.loc['1m ORH', 'Count'] == 1
+    assert by_trigger.loc['1m ORH', 'Failed Count'] == 0
+    assert by_trigger.loc['1m ORH', 'Failed %'] == '0%'
     assert by_trigger.loc['1m ORH', 'Day Success %'] == '100%'
     assert by_trigger.loc['1m ORH', 'Active %'] == '100%'
     assert by_trigger.loc['1m ORH', 'Later Failed %'] == '0%'
     assert by_trigger.loc['5m ORH', 'Count'] == 1
+    assert by_trigger.loc['5m ORH', 'Failed Count'] == 1
+    assert by_trigger.loc['5m ORH', 'Failed %'] == '100%'
     assert by_trigger.loc['5m ORH', 'Active %'] == '0%'
     assert by_trigger.loc['5m ORH', 'Later Failed %'] == '100%'
     assert by_trigger.loc['No Trigger', 'Day Success %'] == '0%'
     assert by_trigger.loc['PDH', 'Count'] == 0
+
+
+def _opening_behavior_history() -> pd.DataFrame:
+    return pd.DataFrame([
+        {
+            'Ticker': 'CLN',
+            'Current Status': 'Active',
+            'Trigger Day': 'Success',
+            'Trigger': '1m ORH',
+            'PDH': 'Gap',
+            '1m ORH': 'success',
+            '5m ORH': '-',
+            'current_pct_raw': 0.04,
+            'max_pct_raw': 0.10,
+        },
+        {
+            'Ticker': 'REC',
+            'Current Status': 'Active',
+            'Trigger Day': 'Success',
+            'Trigger': '5m ORH',
+            'PDH': 'Gap',
+            '1m ORH': 'failed',
+            '5m ORH': 'success',
+            'current_pct_raw': 0.03,
+            'max_pct_raw': 0.08,
+        },
+        {
+            'Ticker': 'NRV',
+            'Current Status': 'â€”',
+            'Trigger Day': 'Fail',
+            'Trigger': 'Failed OR Trigger',
+            'PDH': '-',
+            '1m ORH': 'failed',
+            '5m ORH': 'failed',
+            'current_pct_raw': -0.02,
+            'max_pct_raw': 0.01,
+        },
+        {
+            'Ticker': 'PDH',
+            'Current Status': 'Failed D1',
+            'Trigger Day': 'Success',
+            'Trigger': 'PDH',
+            'PDH': 'success',
+            '1m ORH': 'failed',
+            '5m ORH': '-',
+            'current_pct_raw': 0.01,
+            'max_pct_raw': 0.05,
+        },
+        {
+            'Ticker': 'ALL',
+            'Current Status': 'â€”',
+            'Trigger Day': 'Fail',
+            'Trigger': 'Failed PDH Trigger',
+            'PDH': 'failed',
+            '1m ORH': 'failed',
+            '5m ORH': '-',
+            'current_pct_raw': -0.03,
+            'max_pct_raw': 0.00,
+        },
+    ])
+
+
+def test_opening_behavior_classifies_clean_1m_success():
+    table = opening_behavior_table(_opening_behavior_history()).set_index('Path')
+
+    assert table.loc['Clean 1m ORH Success', 'Count'] == 1
+    assert table.loc['Clean 1m ORH Success', '% of Setups'] == '20%'
+    assert table.loc['Clean 1m ORH Success', 'Active %'] == '100%'
+    assert table.loc['Clean 1m ORH Success', 'Median Max'] == '10.0%'
+
+
+def test_opening_behavior_classifies_failed_1m_later_reclaimed():
+    table = opening_behavior_table(_opening_behavior_history()).set_index('Path')
+
+    assert table.loc['1m ORH Failed, Later Reclaimed', 'Count'] == 2
+    assert table.loc['1m ORH Failed, Later Reclaimed', '% of Setups'] == '40%'
+    assert table.loc['1m ORH Failed, Later Reclaimed', 'Active %'] == '50%'
+    assert table.loc['1m ORH Failed, Later Reclaimed', 'Later Failed %'] == '50%'
+
+
+def test_opening_behavior_classifies_failed_1m_never_recovered():
+    table = opening_behavior_table(_opening_behavior_history()).set_index('Path')
+
+    assert table.loc['1m ORH Failed, Never Recovered', 'Count'] == 2
+    assert table.loc['1m ORH Failed, Never Recovered', '% of Setups'] == '40%'
+
+
+def test_opening_behavior_classifies_5m_success_after_1m_failure():
+    table = opening_behavior_table(_opening_behavior_history()).set_index('Path')
+
+    assert table.loc['5m ORH Success After 1m Failure', 'Count'] == 1
+    assert table.loc['5m ORH Success After 1m Failure', 'Median Current'] == '3.0%'
+
+
+def test_opening_behavior_classifies_pdh_success_after_early_noise():
+    table = opening_behavior_table(_opening_behavior_history()).set_index('Path')
+
+    assert table.loc['PDH Success After Early Noise', 'Count'] == 1
+    assert table.loc['PDH Success After Early Noise', 'Later Failed %'] == '100%'
+
+
+def test_opening_behavior_classifies_failed_all_opening_triggers():
+    table = opening_behavior_table(_opening_behavior_history()).set_index('Path')
+
+    assert table.loc['Failed All Opening Triggers', 'Count'] == 2
+    assert table.loc['Failed All Opening Triggers', '% of Setups'] == '40%'
+    assert table.loc['Failed All Opening Triggers', 'Active %'] == '0%'
 
 
 def test_monitor_history_uses_rolling_setup_monitor_derived_rows(monkeypatch):
@@ -387,5 +514,7 @@ def test_setup_behavior_overview_handles_zero_setup_dates():
     assert out['window_summaries'].columns.tolist() == FULL_SUMMARY_COLUMNS
     assert out['breakdowns'] == {}
     assert out['reads'] == {}
+    assert out['snapshot_cards'] == {}
+    assert out['opening_behavior'] == {}
     assert out['details'] == {}
     assert out['windows'] == []

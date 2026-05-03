@@ -40,7 +40,7 @@ else:
     selected_window = st.selectbox('Selected Window', labels, index=0)
 
     st.subheader('Selected Window Snapshot')
-    st.markdown(f"**{overview['snapshots'][selected_window]}**")
+    st.markdown(overview['snapshot_cards'][selected_window], unsafe_allow_html=True)
 
     st.subheader('Selected Window Breakdown')
     st.markdown(metric_cards_html(overview['breakdowns'][selected_window]), unsafe_allow_html=True)
@@ -51,6 +51,17 @@ else:
         with column:
             st.markdown(f'**{title}**')
             st.dataframe(table, width='stretch', hide_index=True)
+
+    st.subheader('Opening Behavior / Trigger Path')
+    st.dataframe(overview['opening_behavior'][selected_window], width='stretch', hide_index=True)
+    st.caption(
+        'Opening behavior separates clean early follow-through from early trigger failure followed by later reclaim. '
+        'This helps distinguish an aggressive market from a choppy but still constructive market.'
+    )
+    st.caption(
+        'Path rows use the displayed/applicable PDH, 1m ORH, and 5m ORH results from Rolling Setup Monitor; '
+        'hidden raw diagnostics remain in the detail/audit views.'
+    )
 
     st.subheader('Trigger Quality')
     st.dataframe(overview['trigger_quality'][selected_window], width='stretch', hide_index=True)

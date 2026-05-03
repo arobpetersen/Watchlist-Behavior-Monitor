@@ -326,7 +326,103 @@ def selected_window_metrics(window_summary: dict) -> list[dict]:
     ]
 
 
-def factual_read(window_summary: dict) -> str:
+OPENING_BEHAVIOR_COLUMNS = [
+    'Path',
+    'Count',
+    '% of Setups',
+    'Active %',
+    'Later Failed %',
+    'Median Current',
+    'Median Max',
+]
+
+
+def _count_int(value: Any) -> int:
+    if isinstance(value, str):
+        try:
+            return int(value.split(' ', 1)[0])
+        except (IndexError, ValueError):
+            return 0
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_later_failed(series: pd.Series) -> pd.Series:
+    return series.isin({'Failed D1', 'Failed D2', 'Failed D3'})
+
+
+def _is_blank_or_dash(series: pd.Series) -> pd.Series:
+    normalized = series.fillna('').astype(str).str.strip()
+    return normalized.isin({'', '-', '—', 'â€”'})
+
+
+def _pct_of_rows(count: int, denominator: int) -> str:
+    if denominator <= 0:
+        return '-'
+    return f'{round((count / denominator) * 100)}%'
+
+
+def _opening_path_row(path: str, rows: pd.DataFrame, total_setups: int) -> dict:
+    count = len(rows)
+    return {
+        'Path': path,
+        'Count': count,
+        '% of Setups': _pct_of_rows(count, total_setups),
+        'Active %': _pct_of_rows(int(rows['Current Status'].eq('Active').sum()) if 'Current Status' in rows else 0, count),
+        'Later Failed %': _pct_of_rows(int(_is_later_failed(rows['Current Status']).sum()) if 'Current Status' in rows else 0, count),
+        'Median Current': _fmt_pct(rows['current_pct_raw'].median() if 'current_pct_raw' in rows and count else None),
+        'Median Max': _fmt_pct(rows['max_pct_raw'].median() if 'max_pct_raw' in rows and count else None),
+    }
+
+
+def opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
+    """Summarize displayed opening behavior paths.
+
+    The Rolling Setup Monitor exposes applicable/displayed PDH, 1m ORH, and 5m ORH
+    results. It does not expose every hidden intraday sequence flag here, so these
+    paths use the deterministic displayed results rather than reclassifying raw bars.
+    """
+    columns = OPENING_BEHAVIOR_COLUMNS
+    if rows.empty:
+        return pd.DataFrame(columns=columns)
+
+    total = len(rows)
+    one = rows['1m ORH'] if '1m ORH' in rows else pd.Series('', index=rows.index)
+    five = rows['5m ORH'] if '5m ORH' in rows else pd.Series('', index=rows.index)
+    pdh = rows['PDH'] if 'PDH' in rows else pd.Series('', index=rows.index)
+    trigger = rows['Trigger'] if 'Trigger' in rows else pd.Series('', index=rows.index)
+
+    one_success = one.eq('success')
+    one_failed = one.eq('failed')
+    five_success = five.eq('success')
+    five_failed_or_blank = five.eq('failed') | _is_blank_or_dash(five)
+    pdh_success = pdh.eq('success')
+    pdh_failed_or_blank = pdh.eq('failed') | _is_blank_or_dash(pdh)
+    successful_trigger = trigger.isin({'PDH', '1m ORH', '5m ORH', 'Alt Required'})
+
+    masks = [
+        ('Clean 1m ORH Success', one_success),
+        ('1m ORH Failed, Later Reclaimed', one_failed & (five_success | pdh_success)),
+        ('1m ORH Failed, Never Recovered', one_failed & ~five_success & ~pdh_success),
+        ('5m ORH Success After 1m Failure', one_failed & five_success),
+        ('PDH Success After Early Noise', pdh_success & (one.eq('failed') | five.eq('failed'))),
+        ('Failed All Opening Triggers', one_failed & five_failed_or_blank & pdh_failed_or_blank & ~successful_trigger),
+    ]
+    return pd.DataFrame([_opening_path_row(label, rows[mask], total) for label, mask in masks], columns=columns)
+
+
+def _opening_count(opening_behavior: pd.DataFrame | None, path: str) -> int:
+    if opening_behavior is None or opening_behavior.empty:
+        return 0
+    match = opening_behavior[opening_behavior['Path'] == path]
+    if match.empty:
+        return 0
+    return _count_int(match.iloc[0]['Count'])
+
+
+def factual_read(window_summary: dict, opening_behavior: pd.DataFrame | None = None) -> str:
     window = window_summary.get('Window', 'Selected window')
     setups = window_summary.get('Setups', 0)
     setup_dates_count = window_summary.get('Setup Dates', 0)
@@ -335,10 +431,35 @@ def factual_read(window_summary: dict) -> str:
     later_failed = window_summary.get('Later Failed', '-')
     median_current = window_summary.get('Median Current', '-')
     median_max = window_summary.get('Median Max', '-')
+    clean_1m = _opening_count(opening_behavior, 'Clean 1m ORH Success')
+    reclaimed = _opening_count(opening_behavior, '1m ORH Failed, Later Reclaimed')
+    failed_all = _opening_count(opening_behavior, 'Failed All Opening Triggers')
+    median_max_raw = window_summary.get('Median Max', '-')
+    positive_max = median_max_raw != '-' and not str(median_max_raw).startswith('-')
+
+    if reclaimed > 0 and positive_max:
+        behavior = (
+            f'Opening behavior is choppy but constructive: {reclaimed} setup'
+            f'{"s" if reclaimed != 1 else ""} had an early 1m ORH failure followed by a later 5m ORH/PDH reclaim.'
+        )
+    elif clean_1m > 0 and reclaimed == 0 and failed_all == 0:
+        behavior = (
+            f'Opening behavior is clean early: {clean_1m} setup'
+            f'{"s" if clean_1m != 1 else ""} followed the 1m ORH path.'
+        )
+    elif failed_all > 0 and failed_all >= clean_1m + reclaimed:
+        behavior = (
+            f'Opening behavior is failure-heavy: {failed_all} setup'
+            f'{"s" if failed_all != 1 else ""} failed opening triggers without a later displayed reclaim.'
+        )
+    else:
+        behavior = 'Opening behavior is mixed across clean triggers, later reclaims, and unresolved or failed paths.'
+
     return (
         f'{window} includes {setups} setups across {setup_dates_count} setup dates. '
         f'{day_success} succeeded on trigger day, {active} remain active, and {later_failed} failed later. '
-        f'Median current return is {median_current} and median max return is {median_max}.'
+        f'Median current return is {median_current} and median max return is {median_max}. '
+        f'{behavior}'
     )
 
 
@@ -355,6 +476,54 @@ def selected_window_snapshot(window_summary: dict) -> str:
         f'{day_success_pct} Day Success | {active_pct} Active | {later_failed_pct} Later Failed | '
         f'Median Current {median_current} | Median Max {median_max}'
     )
+
+
+def snapshot_cards_html(window_summary: dict) -> str:
+    setups = escape(str(window_summary.get('Setups', 0)))
+    setup_dates_count = escape(str(window_summary.get('Setup Dates', 0)))
+    day_success_pct = escape(_pct_from_count_text(window_summary.get('Day Success', '-')))
+    active_pct = escape(_pct_from_count_text(window_summary.get('Active', '-')))
+    later_failed_pct = escape(_pct_from_count_text(window_summary.get('Later Failed', '-')))
+    median_current = escape(str(window_summary.get('Median Current', '-')))
+    median_max = escape(str(window_summary.get('Median Max', '-')))
+    return f'''
+<style>
+.snapshot-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.85rem;
+  margin: 0.35rem 0 1rem 0;
+}}
+.snapshot-card {{
+  border: 1px solid rgba(250, 250, 250, 0.13);
+  border-radius: 8px;
+  padding: 0.95rem 1rem;
+  background: rgba(250, 250, 250, 0.04);
+}}
+.snapshot-label {{
+  color: rgba(250, 250, 250, 0.66);
+  font-size: 0.82rem;
+  margin-bottom: 0.32rem;
+}}
+.snapshot-value {{
+  color: rgba(250, 250, 250, 0.97);
+  font-size: 1.42rem;
+  line-height: 1.15;
+  font-weight: 760;
+}}
+.snapshot-sub {{
+  color: rgba(250, 250, 250, 0.68);
+  font-size: 0.86rem;
+  margin-top: 0.28rem;
+}}
+</style>
+<div class="snapshot-grid">
+  <section class="snapshot-card"><div class="snapshot-label">Scope</div><div class="snapshot-value">{setups}</div><div class="snapshot-sub">{setup_dates_count} setup dates</div></section>
+  <section class="snapshot-card"><div class="snapshot-label">Trigger Day</div><div class="snapshot-value">{day_success_pct}</div><div class="snapshot-sub">Day Success</div></section>
+  <section class="snapshot-card"><div class="snapshot-label">Current Outcome</div><div class="snapshot-value">{active_pct}</div><div class="snapshot-sub">{later_failed_pct} later failed</div></section>
+  <section class="snapshot-card"><div class="snapshot-label">Follow-Through</div><div class="snapshot-value">{median_max}</div><div class="snapshot-sub">Median Max; current {median_current}</div></section>
+</div>
+'''
 
 
 def _summary_count(summary: dict, key: str) -> int:
@@ -397,7 +566,7 @@ TRIGGER_ORDER = ['PDH', '1m ORH', '5m ORH', 'Alt Required', 'Failed PDH Trigger'
 
 
 def trigger_quality_table(rows: pd.DataFrame) -> pd.DataFrame:
-    columns = ['Trigger', 'Count', 'Day Success %', 'Active %', 'Later Failed %', 'Median Current', 'Median Max']
+    columns = ['Trigger', 'Count', 'Failed Count', 'Failed %', 'Day Success %', 'Active %', 'Later Failed %', 'Median Current', 'Median Max']
     if rows.empty or 'Trigger' not in rows:
         return pd.DataFrame(columns=columns)
     out = []
@@ -405,14 +574,19 @@ def trigger_quality_table(rows: pd.DataFrame) -> pd.DataFrame:
         group = rows[rows['Trigger'] == trigger]
         count = len(group)
         if count == 0:
-            out.append({'Trigger': trigger, 'Count': 0, 'Day Success %': '-', 'Active %': '-', 'Later Failed %': '-', 'Median Current': '-', 'Median Max': '-'})
+            out.append({'Trigger': trigger, 'Count': 0, 'Failed Count': 0, 'Failed %': '-', 'Day Success %': '-', 'Active %': '-', 'Later Failed %': '-', 'Median Current': '-', 'Median Max': '-'})
             continue
+        later_failed = int(group["Current Status"].isin({"Failed D1", "Failed D2", "Failed D3"}).sum())
+        day_failed = int(group["Trigger Day"].eq("Fail").sum())
+        failed_count = day_failed + later_failed
         out.append({
             'Trigger': trigger,
             'Count': count,
+            'Failed Count': failed_count,
+            'Failed %': f'{round((failed_count / count) * 100)}%',
             'Day Success %': f'{round((group["Trigger Day"].eq("Success").sum() / count) * 100)}%',
             'Active %': f'{round((group["Current Status"].eq("Active").sum() / count) * 100)}%',
-            'Later Failed %': f'{round((group["Current Status"].isin({"Failed D1", "Failed D2", "Failed D3"}).sum() / count) * 100)}%',
+            'Later Failed %': f'{round((later_failed / count) * 100)}%',
             'Median Current': _fmt_pct(group['current_pct_raw'].median() if 'current_pct_raw' in group else None),
             'Median Max': _fmt_pct(group['max_pct_raw'].median() if 'max_pct_raw' in group else None),
         })
@@ -474,7 +648,9 @@ def setup_behavior_overview(con) -> dict:
             'breakdowns': {},
             'reads': {},
             'snapshots': {},
+            'snapshot_cards': {},
             'mixes': {},
+            'opening_behavior': {},
             'trigger_quality': {},
             'details': {},
             'windows': [],
@@ -490,13 +666,16 @@ def setup_behavior_overview(con) -> dict:
     for window in windows:
         included = {date.date() for date in window.setup_dates}
         history_by_window[window.label] = history[pd.to_datetime(history['Setup Date']).dt.date.isin(included)].copy() if not history.empty else pd.DataFrame()
+    opening_behavior = {label: opening_behavior_table(history_by_window[label]) for label in summary_by_window}
     return {
         'summary': summary,
         'window_summaries': window_summaries,
         'breakdowns': {label: selected_window_metrics(row) for label, row in summary_by_window.items()},
-        'reads': {label: factual_read(row) for label, row in summary_by_window.items()},
+        'reads': {label: factual_read(row, opening_behavior[label]) for label, row in summary_by_window.items()},
         'snapshots': {label: selected_window_snapshot(row) for label, row in summary_by_window.items()},
+        'snapshot_cards': {label: snapshot_cards_html(row) for label, row in summary_by_window.items()},
         'mixes': {label: mix_tables(row) for label, row in summary_by_window.items()},
+        'opening_behavior': opening_behavior,
         'trigger_quality': {label: trigger_quality_table(history_by_window[label]) for label in summary_by_window},
         'details': details,
         'windows': windows,
