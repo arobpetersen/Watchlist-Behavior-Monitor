@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html import escape
 from typing import Any
 
 import pandas as pd
@@ -8,7 +9,7 @@ import pandas as pd
 from src.rolling_setup_monitor import rolling_setup_monitor
 
 
-SUMMARY_COLUMNS = [
+FULL_SUMMARY_COLUMNS = [
     'Window',
     'Dates',
     'Setup Dates',
@@ -33,6 +34,26 @@ SUMMARY_COLUMNS = [
     'Median D3 High',
 ]
 
+COMPARISON_COLUMNS = [
+    'Window',
+    'Dates',
+    'Setup Dates',
+    'Setups',
+    'Day Success',
+    'Day Fail',
+    'Unresolved',
+    'Active',
+    'Later Failed',
+    'Clean 1m',
+    'Clean 5m',
+    'Alt Required',
+    'Median Current',
+    'Median Max',
+    'Median D3 High',
+]
+
+SUMMARY_COLUMNS = COMPARISON_COLUMNS
+
 DETAIL_COLUMNS = [
     'Setup Date',
     'Ticker',
@@ -49,6 +70,8 @@ DETAIL_COLUMNS = [
     'Setup',
     'Rating',
 ]
+
+CURRENT_STATUS_PRIORITY = {'Active': 0, 'Failed D1': 1, 'Failed D2': 2, 'Failed D3': 3, '—': 4}
 
 
 @dataclass(frozen=True)
@@ -80,6 +103,18 @@ def _fmt_pct(value: Any) -> str:
         return f'{float(value) * 100:.1f}%'
     except (TypeError, ValueError):
         return '-'
+
+
+def _display(value: Any) -> str:
+    if value is None:
+        return '-'
+    try:
+        if pd.isna(value):
+            return '-'
+    except (TypeError, ValueError):
+        pass
+    text = str(value)
+    return '-' if text == '' or text.lower() == 'nan' else text
 
 
 def overview_windows(latest_setup_date) -> list[OverviewWindow]:
@@ -187,38 +222,161 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
 
     out = pd.DataFrame({
         'Setup Date': pd.to_datetime(rows['Setup Date']).dt.date.astype(str),
-        'Ticker': rows['Ticker'],
-        'Current Status': rows['Current Status'],
-        'Trigger Day': rows['Trigger Day'],
-        'Trigger': rows['Trigger'],
-        '1m ORH': rows['1m ORH'],
-        '5m ORH': rows['5m ORH'],
-        'Notes': rows['Notes'],
-        'Current': rows['Current %'],
-        'Max': rows['Max %'],
-        'D3 High': rows['D3 High %'],
-        'Retest': rows['Retest Day'],
-        'Setup': rows['Setup'],
-        'Rating': rows['Rating'],
+        'Ticker': rows['Ticker'].apply(_display),
+        'Current Status': rows['Current Status'].apply(_display),
+        'Trigger Day': rows['Trigger Day'].apply(_display),
+        'Trigger': rows['Trigger'].apply(_display),
+        '1m ORH': rows['1m ORH'].apply(_display),
+        '5m ORH': rows['5m ORH'].apply(_display),
+        'Notes': rows['Notes'].apply(_display),
+        'Current': rows['Current %'].apply(_display),
+        'Max': rows['Max %'].apply(_display),
+        'D3 High': rows['D3 High %'].apply(_display),
+        'Retest': rows['Retest Day'].apply(_display),
+        'Setup': rows['Setup'].apply(_display),
+        'Rating': rows['Rating'].apply(_display),
     })
-    return out.sort_values(['Setup Date', 'Ticker'], ascending=[False, True])[DETAIL_COLUMNS]
+    out['_status_priority'] = out['Current Status'].map(CURRENT_STATUS_PRIORITY).fillna(99)
+    out['_current_sort'] = pd.to_numeric(out['Current'].str.rstrip('%'), errors='coerce').fillna(float('-inf'))
+    out = out.sort_values(['Setup Date', '_status_priority', '_current_sort', 'Ticker'], ascending=[False, True, False, True])
+    return out[DETAIL_COLUMNS]
+
+
+def comparison_rows(window_summaries: pd.DataFrame) -> pd.DataFrame:
+    if window_summaries.empty:
+        return pd.DataFrame(columns=COMPARISON_COLUMNS)
+    return window_summaries[COMPARISON_COLUMNS].copy()
+
+
+def selected_window_metrics(window_summary: dict) -> list[dict]:
+    return [
+        {
+            'title': 'Trigger Day Quality',
+            'metrics': [
+                ('Setups', str(window_summary.get('Setups', 0))),
+                ('Day Success', window_summary.get('Day Success', '-')),
+                ('Day Fail', window_summary.get('Day Fail', '-')),
+                ('Unresolved', window_summary.get('Unresolved', '-')),
+            ],
+        },
+        {
+            'title': 'Current Outcome',
+            'metrics': [
+                ('Active', window_summary.get('Active', '-')),
+                ('Later Failed', window_summary.get('Later Failed', '-')),
+                ('Median Current', window_summary.get('Median Current', '-')),
+                ('Median Max', window_summary.get('Median Max', '-')),
+                ('Median D3 High', window_summary.get('Median D3 High', '-')),
+            ],
+        },
+        {
+            'title': 'Trigger Mix',
+            'metrics': [
+                ('Clean 1m', window_summary.get('Clean 1m', '-')),
+                ('Clean 5m', window_summary.get('Clean 5m', '-')),
+                ('Alt Required', window_summary.get('Alt Required', '-')),
+                ('Failed OR Trigger', window_summary.get('Failed OR Trigger', '-')),
+                ('No Trigger', window_summary.get('No Trigger', '-')),
+            ],
+        },
+        {
+            'title': 'Diagnostics',
+            'metrics': [
+                ('Failed 1m', window_summary.get('Failed 1m', '-')),
+                ('Failed 5m', window_summary.get('Failed 5m', '-')),
+                ('Retested', window_summary.get('Retested', '-')),
+                ('Wide 1m OR', window_summary.get('Wide 1m OR', '-')),
+                ('Wide 5m OR', window_summary.get('Wide 5m OR', '-')),
+            ],
+        },
+    ]
+
+
+def factual_read(window_summary: dict) -> str:
+    window = window_summary.get('Window', 'Selected window')
+    setups = window_summary.get('Setups', 0)
+    setup_dates_count = window_summary.get('Setup Dates', 0)
+    day_success = window_summary.get('Day Success', '-')
+    active = window_summary.get('Active', '-')
+    later_failed = window_summary.get('Later Failed', '-')
+    median_current = window_summary.get('Median Current', '-')
+    median_max = window_summary.get('Median Max', '-')
+    return (
+        f'{window} includes {setups} setups across {setup_dates_count} setup dates. '
+        f'{day_success} succeeded on trigger day, {active} remain active, and {later_failed} failed later. '
+        f'Median current return is {median_current} and median max return is {median_max}.'
+    )
+
+
+def metric_cards_html(groups: list[dict]) -> str:
+    cards = []
+    for group in groups:
+        items = ''.join(
+            f'<div class="overview-metric"><span>{escape(label)}</span><strong>{escape(str(value))}</strong></div>'
+            for label, value in group['metrics']
+        )
+        cards.append(f'<section class="overview-card"><h4>{escape(group["title"])}</h4>{items}</section>')
+    return f'''
+<style>
+.overview-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.65rem;
+  margin: 0.35rem 0 0.85rem 0;
+}}
+.overview-card {{
+  border: 1px solid rgba(250, 250, 250, 0.12);
+  border-radius: 8px;
+  padding: 0.72rem 0.78rem;
+  background: rgba(250, 250, 250, 0.035);
+}}
+.overview-card h4 {{
+  margin: 0 0 0.55rem 0;
+  color: rgba(250, 250, 250, 0.92);
+  font-size: 0.95rem;
+  font-weight: 750;
+}}
+.overview-metric {{
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.18rem 0;
+  color: rgba(250, 250, 250, 0.70);
+  font-size: 0.87rem;
+}}
+.overview-metric strong {{
+  color: rgba(250, 250, 250, 0.96);
+  font-weight: 750;
+  white-space: nowrap;
+}}
+</style>
+<div class="overview-grid">{''.join(cards)}</div>
+'''
 
 
 def setup_behavior_overview(con) -> dict:
     dates = setup_dates(con)
     if not dates:
         return {
-            'summary': pd.DataFrame(columns=SUMMARY_COLUMNS),
+            'summary': pd.DataFrame(columns=COMPARISON_COLUMNS),
+            'window_summaries': pd.DataFrame(columns=FULL_SUMMARY_COLUMNS),
+            'breakdowns': {},
+            'reads': {},
             'details': {},
             'windows': [],
         }
 
     windows = overview_windows(max(dates))
     history = monitor_history(con)
-    summary = pd.DataFrame([summarize_window(history, window) for window in windows], columns=SUMMARY_COLUMNS)
+    window_summaries = pd.DataFrame([summarize_window(history, window) for window in windows], columns=FULL_SUMMARY_COLUMNS)
+    summary = comparison_rows(window_summaries)
+    summary_by_window = {row['Window']: row.to_dict() for _, row in window_summaries.iterrows()}
     details = {window.label: detail_rows(history, window) for window in windows}
     return {
         'summary': summary,
+        'window_summaries': window_summaries,
+        'breakdowns': {label: selected_window_metrics(row) for label, row in summary_by_window.items()},
+        'reads': {label: factual_read(row) for label, row in summary_by_window.items()},
         'details': details,
         'windows': windows,
     }
