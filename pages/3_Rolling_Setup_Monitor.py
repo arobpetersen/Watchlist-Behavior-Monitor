@@ -7,6 +7,7 @@ from src.rolling_setup_monitor import (
     apply_setup_rating_updates,
     detail_table,
     format_monitor_table_html,
+    format_summary_blocks_html,
     main_table,
     rating_dropdown_options,
     rolling_setup_monitor,
@@ -49,25 +50,7 @@ else:
     for section in sections:
         st.subheader(f"Setup Date: {section['setup_date']}")
 
-        summary = section['summary']
-        cards = [
-            'Setups',
-            'Clean 1m',
-            'Clean 5m',
-            '1m Failed',
-            '5m Failed',
-            'Alt Required',
-            'No Trigger',
-            'Active',
-            'Failed',
-            'Retested',
-            'Median Current %',
-            'Median Max %',
-        ]
-        for start in range(0, len(cards), 6):
-            cols = st.columns(6)
-            for col, label in zip(cols, cards[start:start + 6]):
-                col.metric(label, summary[label])
+        st.markdown(format_summary_blocks_html(section['summary']), unsafe_allow_html=True)
 
         table = section['table']
         display = main_table(table)

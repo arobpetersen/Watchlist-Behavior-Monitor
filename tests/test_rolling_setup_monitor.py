@@ -13,6 +13,7 @@ from src.rolling_setup_monitor import (
     detail_table,
     fail_day,
     format_monitor_table_html,
+    format_summary_blocks_html,
     main_table,
     opening_range_result,
     opening_range_width_notes,
@@ -613,23 +614,59 @@ def test_main_and_detail_table_columns_and_blank_handling():
     assert main_table(df).loc[0, 'Rating'] == ''
 
 
-def test_format_monitor_table_html_escapes_and_blanks_values():
+def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
     df = pd.DataFrame([{
         'Ticker': '<ABC>',
         'Status': 'Active',
-        'Trigger': None,
+        'Trigger': 'Alt Required',
+        '1m ORH': 'success',
+        '5m ORH': 'failed',
         'Current %': float('nan'),
+        'Retest Day': '',
     }])
 
     html = format_monitor_table_html(df)
 
     assert '<th>Ticker</th>' in html
-    assert '<th>Current %</th>' in html
+    assert '<th>Current</th>' in html
+    assert '<th>Retest</th>' in html
     assert '&lt;ABC&gt;' in html
+    assert 'status-active' in html
+    assert 'trigger-alt-required' in html
+    assert 'result-success' in html
+    assert 'result-failed' in html
     assert '<td>nan</td>' not in html
     assert 'height:' not in html
     assert 'overflow-y: scroll' not in html
     assert 'overflow-y: auto' not in html
+
+
+def test_format_summary_blocks_html_includes_group_titles():
+    summary = {
+        'Setups': 3,
+        'Active': 1,
+        'Failed': 1,
+        'Unresolved': 1,
+        'Clean 1m': 1,
+        '1m Failed': 1,
+        'Clean 5m': 0,
+        '5m Failed': 1,
+        'Alt Required': 1,
+        'No Trigger': 1,
+        'Retested': 1,
+        'Median Current %': '5.0%',
+        'Median Max %': '15.0%',
+        'Median D3 High %': '20.0%',
+    }
+
+    html = format_summary_blocks_html(summary)
+
+    assert 'Overall' in html
+    assert '1m OR' in html
+    assert '5m OR' in html
+    assert 'Alternate / Other' in html
+    assert 'Follow-Through' in html
+    assert 'Median D3 High' in html
 
 
 def test_format_section_table_formats_nan_day_values_as_blank():
@@ -673,9 +710,9 @@ def test_format_section_table_formats_nan_day_values_as_blank():
 
 def test_day_summary_metrics():
     df = pd.DataFrame([
-        {'Trigger': '1m ORH', '1m ORH': 'success', '5m ORH': '', 'Status': 'Active', 'Retest Day': 'Day 1', 'current_pct_raw': 0.10, 'max_pct_raw': 0.20},
-        {'Trigger': 'Alt Required', '1m ORH': 'failed', '5m ORH': 'failed', 'Status': 'Failed', 'Retest Day': '', 'current_pct_raw': 0.00, 'max_pct_raw': 0.10},
-        {'Trigger': 'No Trigger', '1m ORH': '', '5m ORH': '', 'Status': 'Unresolved', 'Retest Day': '', 'current_pct_raw': None, 'max_pct_raw': None},
+        {'Trigger': '1m ORH', '1m ORH': 'success', '5m ORH': '', 'Status': 'Active', 'Retest Day': 'Day 1', 'current_pct_raw': 0.10, 'max_pct_raw': 0.20, 'd3_high_pct_raw': 0.25},
+        {'Trigger': 'Alt Required', '1m ORH': 'failed', '5m ORH': 'failed', 'Status': 'Failed', 'Retest Day': '', 'current_pct_raw': 0.00, 'max_pct_raw': 0.10, 'd3_high_pct_raw': 0.15},
+        {'Trigger': 'No Trigger', '1m ORH': '', '5m ORH': '', 'Status': 'Unresolved', 'Retest Day': '', 'current_pct_raw': None, 'max_pct_raw': None, 'd3_high_pct_raw': None},
     ])
 
     summary = day_summary(df)
@@ -691,6 +728,7 @@ def test_day_summary_metrics():
     assert summary['Retested'] == 1
     assert summary['Median Current %'] == '5.0%'
     assert summary['Median Max %'] == '15.0%'
+    assert summary['Median D3 High %'] == '20.0%'
 
 
 def test_sort_monitor_rows_status_then_current_pct():

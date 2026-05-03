@@ -45,6 +45,16 @@ MAIN_COLUMNS = [
     'Rating',
 ]
 
+MAIN_COLUMN_LABELS = {
+    '1m ORH': '1m',
+    '5m ORH': '5m',
+    'Current %': 'Current',
+    'Max %': 'Max',
+    'D3 High %': 'D3 High',
+    'Retest Day': 'Retest',
+    'Fail Day': 'Fail',
+}
+
 DETAIL_COLUMNS = [
     'Ticker',
     'Trigger Level',
@@ -461,12 +471,33 @@ def main_table(table: pd.DataFrame) -> pd.DataFrame:
     return _clean_display_df(sort_monitor_rows(table)[MAIN_COLUMNS])
 
 
+def _badge_class(column: str, value: str) -> str:
+    normalized = value.lower().replace(' ', '-').replace('/', '-')
+    if column == 'Status':
+        return f'monitor-badge status-{normalized}'
+    if column == 'Trigger':
+        return f'monitor-badge trigger-{normalized}'
+    if column in {'1m ORH', '5m ORH'} and value in {'success', 'failed'}:
+        return f'monitor-badge result-{value}'
+    return ''
+
+
+def _table_cell(column: str, value: Any) -> str:
+    text = '' if pd.isna(value) else str(value)
+    if text == '':
+        return '<td class="is-muted"></td>'
+    badge_class = _badge_class(column, text)
+    if badge_class:
+        return f'<td><span class="{badge_class}">{escape(text)}</span></td>'
+    return f'<td>{escape(text)}</td>'
+
+
 def format_monitor_table_html(df: pd.DataFrame) -> str:
     display = _clean_display_df(df).fillna('')
-    header = ''.join(f'<th>{escape(str(column))}</th>' for column in display.columns)
+    header = ''.join(f'<th>{escape(MAIN_COLUMN_LABELS.get(str(column), str(column)))}</th>' for column in display.columns)
     body_rows = []
     for _, row in display.iterrows():
-        cells = ''.join(f'<td>{escape("" if pd.isna(value) else str(value))}</td>' for value in row)
+        cells = ''.join(_table_cell(str(column), value) for column, value in row.items())
         body_rows.append(f'<tr>{cells}</tr>')
     body = ''.join(body_rows)
     return f'''
@@ -475,29 +506,69 @@ def format_monitor_table_html(df: pd.DataFrame) -> str:
   width: 100%;
   overflow-x: auto;
   overflow-y: visible;
-  margin: 0.25rem 0 0.75rem 0;
+  margin: 0.45rem 0 0.85rem 0;
+  border: 1px solid rgba(250, 250, 250, 0.12);
+  border-radius: 8px;
 }}
 .monitor-table {{
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.86rem;
+  font-size: 0.9rem;
 }}
 .monitor-table th {{
   text-align: left;
-  padding: 0.42rem 0.5rem;
+  padding: 0.58rem 0.62rem;
   border-bottom: 1px solid rgba(250, 250, 250, 0.22);
-  color: rgba(250, 250, 250, 0.78);
-  font-weight: 600;
+  background: rgba(250, 250, 250, 0.11);
+  color: rgba(250, 250, 250, 0.96);
+  font-size: 0.93rem;
+  font-weight: 750;
   white-space: nowrap;
 }}
 .monitor-table td {{
-  padding: 0.38rem 0.5rem;
-  border-bottom: 1px solid rgba(250, 250, 250, 0.10);
+  padding: 0.5rem 0.62rem;
+  border-bottom: 1px solid rgba(250, 250, 250, 0.13);
   color: rgba(250, 250, 250, 0.92);
   white-space: nowrap;
 }}
 .monitor-table tbody tr:nth-child(even) {{
-  background: rgba(250, 250, 250, 0.025);
+  background: rgba(250, 250, 250, 0.035);
+}}
+.monitor-table tbody tr:hover {{
+  background: rgba(250, 250, 250, 0.06);
+}}
+.monitor-table tbody tr:last-child td {{
+  border-bottom: none;
+}}
+.is-muted {{
+  color: rgba(250, 250, 250, 0.38);
+}}
+.monitor-badge {{
+  display: inline-block;
+  padding: 0.16rem 0.42rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 650;
+}}
+.status-active, .result-success {{
+  color: #baf7d0;
+  background: rgba(46, 160, 91, 0.24);
+  border: 1px solid rgba(94, 218, 138, 0.36);
+}}
+.status-failed, .result-failed {{
+  color: #ffc7c7;
+  background: rgba(196, 61, 61, 0.24);
+  border: 1px solid rgba(240, 112, 112, 0.35);
+}}
+.status-unresolved {{
+  color: rgba(250, 250, 250, 0.78);
+  background: rgba(148, 163, 184, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.30);
+}}
+.trigger-1m-orh, .trigger-5m-orh, .trigger-alt-required, .trigger-failed-or-trigger, .trigger-no-trigger {{
+  color: rgba(236, 244, 255, 0.92);
+  background: rgba(59, 130, 246, 0.16);
+  border: 1px solid rgba(96, 165, 250, 0.28);
 }}
 </style>
 <div class="monitor-table-wrap">
@@ -506,6 +577,58 @@ def format_monitor_table_html(df: pd.DataFrame) -> str:
     <tbody>{body}</tbody>
   </table>
 </div>
+'''
+
+
+def format_summary_blocks_html(summary: dict) -> str:
+    groups = [
+        ('Overall', [('Setups', 'Setups'), ('Active', 'Active'), ('Failed', 'Failed'), ('Unresolved', 'Unresolved')]),
+        ('1m OR', [('Clean 1m', 'Clean 1m'), ('Failed 1m', '1m Failed')]),
+        ('5m OR', [('Clean 5m', 'Clean 5m'), ('Failed 5m', '5m Failed')]),
+        ('Alternate / Other', [('Alt Required', 'Alt Required'), ('No Trigger', 'No Trigger'), ('Retested', 'Retested')]),
+        ('Follow-Through', [('Median Current', 'Median Current %'), ('Median Max', 'Median Max %'), ('Median D3 High', 'Median D3 High %')]),
+    ]
+    cards = []
+    for title, metrics in groups:
+        items = ''.join(
+            f'<div class="summary-item"><span>{escape(label)}</span><strong>{escape(str(summary.get(key, "")))}</strong></div>'
+            for label, key in metrics
+        )
+        cards.append(f'<section class="summary-card"><h4>{escape(title)}</h4>{items}</section>')
+    return f'''
+<style>
+.summary-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.65rem;
+  margin: 0.2rem 0 0.85rem 0;
+}}
+.summary-card {{
+  border: 1px solid rgba(250, 250, 250, 0.12);
+  border-radius: 8px;
+  padding: 0.7rem 0.75rem;
+  background: rgba(250, 250, 250, 0.035);
+}}
+.summary-card h4 {{
+  margin: 0 0 0.5rem 0;
+  color: rgba(250, 250, 250, 0.92);
+  font-size: 0.94rem;
+  font-weight: 750;
+}}
+.summary-item {{
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.18rem 0;
+  color: rgba(250, 250, 250, 0.68);
+  font-size: 0.86rem;
+}}
+.summary-item strong {{
+  color: rgba(250, 250, 250, 0.95);
+  font-weight: 750;
+}}
+</style>
+<div class="summary-grid">{''.join(cards)}</div>
 '''
 
 
@@ -529,6 +652,7 @@ def day_summary(df: pd.DataFrame) -> dict:
         'Retested': int((df['Retest Day'] != '').sum()) if not df.empty else 0,
         'Median Current %': _fmt_pct(df['current_pct_raw'].median()) if not df.empty else '',
         'Median Max %': _fmt_pct(df['max_pct_raw'].median()) if not df.empty else '',
+        'Median D3 High %': _fmt_pct(df['d3_high_pct_raw'].median()) if not df.empty and 'd3_high_pct_raw' in df else '',
     }
 
 
