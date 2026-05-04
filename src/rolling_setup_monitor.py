@@ -36,6 +36,7 @@ MAIN_COLUMNS = [
     'Notes',
     'Current %',
     'Max %',
+    'Close < BE',
     'D3 High %',
     'Retest Day',
     'Setup',
@@ -744,12 +745,12 @@ def apply_one_min_quality_notes(record: dict, intraday: pd.DataFrame | None = No
 ACTIONABLE_TRIGGERS = {'VWAP Reclaim', '1m ORH', '5m ORH', 'PDH', 'Alt Required'}
 
 
-def apply_weak_close_note(record: dict) -> dict:
+def weak_close_assessment(record: dict) -> dict:
     trigger_type = _blank(record.get('trigger_type'))
     if trigger_type not in ACTIONABLE_TRIGGERS:
-        return {'notes': _blank(record.get('notes'))}
+        return {'close_below_be': None, 'weak_close_note': ''}
     if trigger_day_status(trigger_type, record.get('fail_day')) != 'Success':
-        return {'notes': _blank(record.get('notes'))}
+        return {'close_below_be': None, 'weak_close_note': ''}
 
     close = _num(record.get('close_price'))
     breakeven = _num(record.get('trigger_level'))
@@ -762,14 +763,28 @@ def apply_weak_close_note(record: dict) -> dict:
     below_breakeven = close is not None and breakeven is not None and close < breakeven
     if close is None or breakeven is None:
         current_pct = _num(record.get('current_pct'))
-        below_breakeven = current_pct is not None and current_pct < 0
-    if not below_breakeven:
-        return {'notes': _blank(record.get('notes'))}
-
+        if current_pct is None:
+            return {'close_below_be': None, 'weak_close_note': ''}
+        below_breakeven = current_pct < 0
     note = 'VWAP reclaim, weak close below BE' if trigger_type == 'VWAP Reclaim' else 'Weak close below BE'
+    return {
+        'close_below_be': bool(below_breakeven),
+        'weak_close_note': note if below_breakeven else '',
+    }
+
+
+def apply_weak_close_note(record: dict) -> dict:
+    assessment = weak_close_assessment(record)
+    note = assessment['weak_close_note']
+    if not note:
+        return {'notes': _blank(record.get('notes')), 'close_below_be': assessment['close_below_be']}
+
     notes = [existing for existing in _blank(record.get('notes')).split('; ') if existing]
     notes.append(note)
-    return {'notes': '; '.join(dict.fromkeys(notes))}
+    return {
+        'notes': '; '.join(dict.fromkeys(notes)),
+        'close_below_be': assessment['close_below_be'],
+    }
 
 
 def opening_range_result(or_json: str, minutes: int, trigger_type: str, intraday: pd.DataFrame | None = None, daily: pd.DataFrame | None = None) -> str:
@@ -1229,6 +1244,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Notes': raw.get('notes', blank_series).apply(_blank),
         'Current %': raw['current_pct'].apply(_fmt_pct),
         'Max %': raw['max_pct'].apply(_fmt_pct),
+        'Close < BE': raw.get('close_below_be', blank_series).apply(_fmt_bool_available),
         'D3 High %': raw['d3_high_pct'].apply(_fmt_d3_pct),
         'Retest Day': raw['retest_day'].apply(_fmt_compact_day),
         'Fail Day': raw['fail_day'].apply(_fmt_day),

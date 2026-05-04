@@ -573,6 +573,7 @@ def test_weak_close_note_for_vwap_reclaim_below_trigger_price():
     })
 
     assert out['notes'] == 'VWAP reclaim, weak close below BE'
+    assert out['close_below_be'] is True
 
 
 def test_weak_close_note_for_non_vwap_trigger_below_breakeven():
@@ -585,6 +586,7 @@ def test_weak_close_note_for_non_vwap_trigger_below_breakeven():
     })
 
     assert out['notes'] == 'Weak close below BE'
+    assert out['close_below_be'] is True
 
 
 def test_weak_close_note_skips_strong_close_failures_and_missing_inputs():
@@ -609,8 +611,11 @@ def test_weak_close_note_skips_strong_close_failures_and_missing_inputs():
     })
 
     assert strong['notes'] == ''
+    assert strong['close_below_be'] is False
     assert failed['notes'] == ''
+    assert failed['close_below_be'] is None
     assert missing['notes'] == ''
+    assert missing['close_below_be'] is None
 
 
 def test_weak_close_note_appends_without_duplicates_and_uses_current_return_fallback():
@@ -628,7 +633,78 @@ def test_weak_close_note_appends_without_duplicates_and_uses_current_return_fall
     })
 
     assert out['notes'] == 'Wide 5m OR; Weak close below BE'
+    assert out['close_below_be'] is True
     assert duplicate['notes'] == out['notes']
+
+
+def test_weak_close_column_displays_no_and_dash_states():
+    no = _format_section_table(pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'STRONG',
+        'status': 'Active',
+        'trigger_type': '1m ORH',
+        'one_min_result': 'success',
+        'five_min_result': '-',
+        'notes': '',
+        'close_below_be': False,
+        'current_pct': 0.02,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.0,
+        'reference_low': 9.8,
+        'reference_basis': '1m ORH',
+        'trigger_break_time': pd.Timestamp('2026-05-01 09:31'),
+        'latest_close': 10.2,
+        'close_price': 10.2,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.02,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }]))
+    dash = _format_section_table(pd.DataFrame([{
+        'candidate_id': 2,
+        'ticker': 'FAIL',
+        'status': 'Failed',
+        'trigger_type': 'Failed OR Trigger',
+        'one_min_result': 'failed',
+        'five_min_result': 'failed',
+        'notes': '',
+        'close_below_be': None,
+        'current_pct': None,
+        'max_pct': None,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': 0,
+        'setup': None,
+        'rating': None,
+        'trigger_level': None,
+        'reference_low': None,
+        'reference_basis': '',
+        'trigger_break_time': None,
+        'latest_close': None,
+        'close_price': None,
+        'high_price': None,
+        'low_price': None,
+        'current_pct_from_setup_close': None,
+        'max_gain_from_setup_close': None,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }]))
+
+    assert no.loc[0, 'Close < BE'] == 'No'
+    assert dash.loc[0, 'Close < BE'] == ''
 
 
 def test_format_section_table_displays_weak_close_note():
@@ -641,6 +717,7 @@ def test_format_section_table_displays_weak_close_note():
         'five_min_result': 'failed',
         'vwap_qualified_trigger_result': 'success',
         'notes': 'VWAP reclaim, weak close below BE',
+        'close_below_be': True,
         'current_pct': -0.01,
         'max_pct': 0.03,
         'd3_high_pct': None,
@@ -668,7 +745,9 @@ def test_format_section_table_displays_weak_close_note():
     table = _format_section_table(raw)
 
     assert table.loc[0, 'Notes'] == 'VWAP reclaim, weak close below BE'
+    assert table.loc[0, 'Close < BE'] == 'Yes'
     assert main_table(table).loc[0, 'Notes'] == 'VWAP reclaim, weak close below BE'
+    assert main_table(table).loc[0, 'Close < BE'] == 'Yes'
 
 
 def test_one_min_follow_through_atr_formula():
@@ -1479,7 +1558,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
 
     assert main_table(df).columns.tolist() == [
         'Ticker', 'Current Status', 'Trigger Day', 'Trigger', 'PDH', '1m ORH', 'VWAP Reclaim', '5m ORH', 'Notes',
-        'Current %', 'Max %', 'D3 High %', 'Retest Day', 'Setup', 'Rating',
+        'Current %', 'Max %', 'Close < BE', 'D3 High %', 'Retest Day', 'Setup', 'Rating',
     ]
     assert 'VWAP Trigger' not in main_table(df).columns
     assert detail_table(df).columns.tolist() == [

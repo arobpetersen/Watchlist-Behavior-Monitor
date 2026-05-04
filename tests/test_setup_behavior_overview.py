@@ -238,6 +238,7 @@ def test_detail_rows_match_expected_columns_and_window_filter():
     assert detail.columns.tolist() == DETAIL_COLUMNS
     assert detail.columns.tolist()[5:9] == ['PDH', '1m ORH', 'VWAP Reclaim', '5m ORH']
     assert 'VWAP Trigger' not in detail.columns
+    assert 'Close < BE' in detail.columns
     assert detail['Ticker'].tolist() == ['AAA', 'EEE', 'BBB']
     assert detail.loc[0, 'D3 High'] == '-'
     assert detail.loc[1, 'Setup'] == '-'
@@ -549,6 +550,7 @@ def test_detail_rows_hides_superseded_orh_when_vwap_is_resolved_trigger():
         'vwap_qualified_trigger_reason': 'VWAP trigger price lower than 5m ORH',
         'PDH': '-',
         'Notes': '',
+        'Close < BE': 'Yes',
         'Current %': '4.0%',
         'Max %': '11.0%',
         'D3 High %': '-',
@@ -564,6 +566,7 @@ def test_detail_rows_hides_superseded_orh_when_vwap_is_resolved_trigger():
     assert detail.loc[0, 'Trigger'] == 'VWAP Reclaim'
     assert detail.loc[0, '5m ORH'] == '-'
     assert detail.loc[0, 'VWAP Reclaim'] == 'success'
+    assert detail.loc[0, 'Close < BE'] == 'Yes'
 
 
 def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
