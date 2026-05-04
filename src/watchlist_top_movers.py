@@ -192,14 +192,38 @@ def top_movers_from_history(
             pd.DataFrame(columns=AUDIT_COLUMNS),
         )
 
+    all_rows = _mapped_top_mover_rows(history, latest_date)
+    active_table = _active_top_movers_table(all_rows)
+
     rows = filter_setup_window(history, setup_window).copy()
     if rows.empty:
         return TopMoverResult(
-            pd.DataFrame(columns=ACTIVE_VISIBLE_COLUMNS),
+            active_table.reset_index(drop=True),
             pd.DataFrame(columns=VISIBLE_COLUMNS),
             pd.DataFrame(columns=AUDIT_COLUMNS),
         )
 
+    rows = _mapped_top_mover_rows(rows, latest_date)
+
+    if sort_by == 'Current %':
+        sort_cols = ['_current_sort', '_max_sort', 'Setup Date', 'Ticker']
+        ascending = [False, False, False, True]
+    elif sort_by == 'Days Since Setup':
+        sort_cols = ['_days_sort', '_max_sort', 'Setup Date', 'Ticker']
+        ascending = [False, False, False, True]
+    else:
+        sort_cols = ['_max_sort', '_current_sort', 'Setup Date', 'Ticker']
+        ascending = [False, False, False, True]
+    rows = rows.sort_values(sort_cols, ascending=ascending, na_position='last').head(int(top_n)).copy()
+    rows.insert(0, 'Rank', range(1, len(rows) + 1))
+
+    table = rows[VISIBLE_COLUMNS].copy()
+    audit = _audit_table(rows)
+    return TopMoverResult(active_table.reset_index(drop=True), table.reset_index(drop=True), audit.reset_index(drop=True))
+
+
+def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str | None) -> pd.DataFrame:
+    rows = rows.copy()
     rows['Setup Date'] = pd.to_datetime(rows['Setup Date'])
     rows['_setup_date_display'] = _format_setup_date(rows['Setup Date'])
     rows['_current_sort'] = _numeric(rows, ['current_pct_raw', 'Current %'])
@@ -217,7 +241,10 @@ def top_movers_from_history(
     rows['Breakeven / D1 Eligible'] = _breakeven_or_d1(rows).apply(_display)
     rows['Notes'] = _first_existing(rows, ['Notes', 'notes']).apply(_display)
     rows['Setup Date'] = rows['_setup_date_display']
+    return rows
 
+
+def _active_top_movers_table(rows: pd.DataFrame) -> pd.DataFrame:
     active_rows = rows[rows['Current Status'].eq('Active')].copy()
     active_rows = active_rows.sort_values(
         ['_max_sort', '_current_sort', 'Setup Date', 'Ticker'],
@@ -225,22 +252,11 @@ def top_movers_from_history(
         na_position='last',
     ).head(10).copy()
     active_rows.insert(0, 'Rank', range(1, len(active_rows) + 1))
-    active_table = active_rows[ACTIVE_VISIBLE_COLUMNS].copy()
+    return active_rows[ACTIVE_VISIBLE_COLUMNS].copy()
 
-    if sort_by == 'Current %':
-        sort_cols = ['_current_sort', '_max_sort', 'Setup Date', 'Ticker']
-        ascending = [False, False, False, True]
-    elif sort_by == 'Days Since Setup':
-        sort_cols = ['_days_sort', '_max_sort', 'Setup Date', 'Ticker']
-        ascending = [False, False, False, True]
-    else:
-        sort_cols = ['_max_sort', '_current_sort', 'Setup Date', 'Ticker']
-        ascending = [False, False, False, True]
-    rows = rows.sort_values(sort_cols, ascending=ascending, na_position='last').head(int(top_n)).copy()
-    rows.insert(0, 'Rank', range(1, len(rows) + 1))
 
-    table = rows[VISIBLE_COLUMNS].copy()
-
+def _audit_table(rows: pd.DataFrame) -> pd.DataFrame:
+    rows = rows.copy()
     rows['Reference Price'] = _first_existing(rows, ['Trigger Level', 'Reference Price', 'base_price']).apply(_display)
     rows['Latest Close'] = _first_existing(rows, ['Latest Close', 'latest_close']).apply(_display)
     rows['Max Date'] = _first_existing(rows, ['Max Date', 'max_date']).apply(_display)
@@ -249,8 +265,7 @@ def top_movers_from_history(
     rows['Rating'] = _first_existing(rows, ['Rating', 'rating']).apply(_display)
     rows['Source'] = _first_existing(rows, ['Source', 'source_file', 'Source File']).apply(_display)
     rows['Missing Data Notes'] = _missing_notes(rows)
-    audit = rows[AUDIT_COLUMNS].copy()
-    return TopMoverResult(active_table.reset_index(drop=True), table.reset_index(drop=True), audit.reset_index(drop=True))
+    return rows[AUDIT_COLUMNS].copy()
 
 
 def load_top_movers(con) -> tuple[pd.DataFrame, pd.Timestamp | None]:

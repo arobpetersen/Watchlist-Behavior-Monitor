@@ -167,6 +167,13 @@ def test_active_table_filters_active_only_and_omits_current_status():
     assert result.active_table['Ticker'].tolist() == ['T11', 'T09', 'T07', 'T05', 'T03', 'T01']
 
 
+def test_active_table_ignores_selected_setup_window():
+    result = top_movers_from_history(_history(), latest_date='2026-04-30', setup_window='Last 5 setup dates')
+
+    assert result.active_table['Ticker'].tolist() == ['T11', 'T09', 'T07', 'T05', 'T03', 'T01']
+    assert result.table['Ticker'].tolist() == ['T12', 'T11', 'T10', 'T09', 'T08']
+
+
 def test_active_table_limits_to_10_rows():
     history = _history()
     history['Current Status'] = 'Active'
