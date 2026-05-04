@@ -1,0 +1,138 @@
+from __future__ import annotations
+
+import pandas as pd
+
+from src.watchlist_top_movers import VISIBLE_COLUMNS, filter_setup_window, top_movers_from_history
+
+
+def _history() -> pd.DataFrame:
+    rows = []
+    for index in range(1, 13):
+        rows.append({
+            'Ticker': f'T{index:02d}',
+            'Setup Date': f'2026-04-{index:02d}',
+            'Trigger': '1m ORH' if index % 3 == 0 else '5m ORH' if index % 3 == 1 else 'PDH',
+            'Current Status': 'Active' if index % 2 else 'Failed D1',
+            'Current %': f'{index:.1f}%',
+            'Max %': f'{index + 5:.1f}%',
+            'current_pct_raw': float(index) / 100,
+            'max_pct_raw': float(index + 5) / 100,
+            'Max High': 20 + index,
+            'Retest Day': 'D1' if index % 4 == 0 else '',
+            'Breakeven / D1 Eligible': 'Yes' if index % 5 == 0 else '',
+            'Notes': 'Wide 5m OR' if index % 6 == 0 else '',
+            'Trigger Level': 10 + index,
+            'Latest Close': 15 + index,
+            'D3 High %': f'{index + 3:.1f}%',
+            'Setup': 'Flag',
+            'Rating': 3,
+        })
+    return pd.DataFrame(rows)
+
+
+def test_setup_window_filtering_by_last_5_setup_dates():
+    out = filter_setup_window(_history(), 'Last 5 setup dates')
+
+    assert out['Setup Date'].dt.strftime('%Y-%m-%d').tolist() == [
+        '2026-04-08',
+        '2026-04-09',
+        '2026-04-10',
+        '2026-04-11',
+        '2026-04-12',
+    ]
+
+
+def test_setup_window_filtering_by_last_10_setup_dates():
+    out = filter_setup_window(_history(), 'Last 10 setup dates')
+
+    assert len(out) == 10
+    assert out['Setup Date'].dt.strftime('%Y-%m-%d').min() == '2026-04-03'
+
+
+def test_setup_window_filtering_by_last_20_setup_dates_includes_all_available():
+    out = filter_setup_window(_history(), 'Last 20 setup dates')
+
+    assert len(out) == 12
+
+
+def test_setup_window_all_includes_all_setup_dates():
+    out = filter_setup_window(_history(), 'All')
+
+    assert len(out) == 12
+
+
+def test_top_n_filtering_and_deterministic_rank_assignment():
+    result = top_movers_from_history(_history(), latest_date='2026-04-30', top_n=3, sort_by='Max %')
+
+    assert result.table['Rank'].tolist() == [1, 2, 3]
+    assert result.table['Ticker'].tolist() == ['T12', 'T11', 'T10']
+
+
+def test_max_pct_sort_behavior_uses_current_pct_tiebreaker():
+    history = pd.DataFrame([
+        {'Ticker': 'A', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
+        {'Ticker': 'B', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.04, 'max_pct_raw': 0.10},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30', top_n=10, sort_by='Max %')
+
+    assert result.table['Ticker'].tolist() == ['B', 'A']
+
+
+def test_current_pct_sort_behavior_uses_max_pct_tiebreaker():
+    history = pd.DataFrame([
+        {'Ticker': 'A', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.05, 'max_pct_raw': 0.08},
+        {'Ticker': 'B', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.05, 'max_pct_raw': 0.12},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30', top_n=10, sort_by='Current %')
+
+    assert result.table['Ticker'].tolist() == ['B', 'A']
+
+
+def test_days_since_setup_calculation_and_sort_behavior():
+    history = pd.DataFrame([
+        {'Ticker': 'OLD', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.01, 'max_pct_raw': 0.03},
+        {'Ticker': 'NEW', 'Setup Date': '2026-04-10', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.02, 'max_pct_raw': 0.08},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30', top_n=10, sort_by='Days Since Setup')
+
+    assert result.table['Ticker'].tolist() == ['OLD', 'NEW']
+    assert result.table['Days Since Setup'].tolist() == [29, 20]
+
+
+def test_field_mapping_for_trigger_status_max_high_retest_and_breakeven():
+    result = top_movers_from_history(_history().iloc[[4]], latest_date='2026-04-30')
+    row = result.table.iloc[0]
+
+    assert row['Trigger'] == 'PDH'
+    assert row['Current Status'] == 'Active'
+    assert row['Max High'] == '25.00'
+    assert row['Retested'] == '-'
+    assert row['Breakeven / D1 Eligible'] == 'Yes'
+
+
+def test_missing_optional_field_behavior_keeps_row_with_dashes():
+    history = pd.DataFrame([{
+        'Ticker': 'MISS',
+        'Setup Date': '2026-04-01',
+        'Trigger': 'Alt Required',
+        'Current Status': 'Active',
+        'current_pct_raw': 0.012,
+        'max_pct_raw': 0.044,
+    }])
+
+    result = top_movers_from_history(history, latest_date='2026-04-05')
+    row = result.table.iloc[0]
+
+    assert row['Max High'] == '-'
+    assert row['Retested'] == '-'
+    assert row['Breakeven / D1 Eligible'] == '-'
+    assert row['Notes'] == '-'
+
+
+def test_visible_column_contract():
+    result = top_movers_from_history(_history(), latest_date='2026-04-30')
+
+    assert result.table.columns.tolist() == VISIBLE_COLUMNS
