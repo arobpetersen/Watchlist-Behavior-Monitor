@@ -16,8 +16,11 @@ from src.watchlist_top_movers import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
+TOP_MOVERS_CACHE_VERSION = 'top-movers-vwap-trigger-v1'
+
+
 @st.cache_data(show_spinner=False)
-def load_watchlist_top_movers(db_path: str):
+def load_watchlist_top_movers(db_path: str, cache_version: str):
     con = get_connection(db_path)
     return load_top_movers(con)
 
@@ -28,7 +31,7 @@ st.title('Watchlist Top Movers')
 st.caption('Top-performing ticker/setup instances from uploaded Back-Watch setup data.')
 render_data_health_indicator(load_data_health_summary(db_path))
 
-history, latest_date = load_watchlist_top_movers(db_path)
+history, latest_date = load_watchlist_top_movers(db_path, TOP_MOVERS_CACHE_VERSION)
 
 if history.empty:
     st.info('No setup candidates yet. Process Back-Watch files to populate watchlist movers.')

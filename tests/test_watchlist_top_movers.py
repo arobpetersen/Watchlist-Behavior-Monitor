@@ -136,6 +136,27 @@ def test_field_mapping_for_trigger_status_max_high_retest_and_breakeven():
     assert row['Breakeven / D1 Eligible'] == 'Yes'
 
 
+def test_vwap_reclaim_can_display_as_top_mover_trigger():
+    history = pd.DataFrame([{
+        'Ticker': 'VWAP',
+        'Setup Date': '2026-04-01',
+        'Trigger': 'Alt Required',
+        'Trigger Day': 'Success',
+        'Current Status': 'Active',
+        '1m ORH': 'failed',
+        '5m ORH': 'failed',
+        'VWAP Reclaim': 'success',
+        'PDH': '-',
+        'current_pct_raw': 0.06,
+        'max_pct_raw': 0.14,
+    }])
+
+    result = top_movers_from_history(history, latest_date='2026-04-05')
+
+    assert result.table.loc[0, 'Trigger'] == 'VWAP Reclaim'
+    assert result.active_table.loc[0, 'Trigger'] == 'VWAP Reclaim'
+
+
 def test_missing_optional_field_behavior_keeps_row_with_dashes():
     history = pd.DataFrame([{
         'Ticker': 'MISS',

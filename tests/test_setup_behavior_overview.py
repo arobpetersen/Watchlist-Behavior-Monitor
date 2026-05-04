@@ -24,6 +24,7 @@ from src.setup_behavior_overview import (
     monitor_history,
     opening_behavior_table,
     overview_windows,
+    resolve_display_triggers,
     selected_window_metrics,
     selected_window_snapshot,
     snapshot_cards_html,
@@ -63,6 +64,7 @@ def _history() -> pd.DataFrame:
             'Current Status': 'Failed D1',
             'Trigger Day': 'Success',
             'Trigger': 'Alt Required',
+            'VWAP Reclaim': '',
             '1m ORH': 'failed',
             '5m ORH': 'failed',
             'Notes': '',
@@ -82,6 +84,7 @@ def _history() -> pd.DataFrame:
             'Current Status': 'Failed D2',
             'Trigger Day': 'Success',
             'Trigger': '5m ORH',
+            'VWAP Reclaim': '',
             '1m ORH': 'failed',
             '5m ORH': 'success',
             'Notes': 'Wide 5m OR',
@@ -101,6 +104,7 @@ def _history() -> pd.DataFrame:
             'Current Status': '—',
             'Trigger Day': 'Fail',
             'Trigger': 'Failed OR Trigger',
+            'VWAP Reclaim': '',
             '1m ORH': 'failed',
             '5m ORH': 'failed',
             'Notes': 'Wide 1m OR; Wide 5m OR',
@@ -120,6 +124,7 @@ def _history() -> pd.DataFrame:
             'Current Status': '—',
             'Trigger Day': 'Unresolved',
             'Trigger': 'No Trigger',
+            'VWAP Reclaim': '',
             '1m ORH': '',
             '5m ORH': '',
             'Notes': '',
@@ -377,6 +382,80 @@ def test_trigger_quality_table_groups_by_selected_trigger():
     assert by_trigger.loc['5m ORH', 'Later Failed %'] == '100%'
     assert by_trigger.loc['No Trigger', 'Day Success %'] == '0%'
     assert by_trigger.loc['PDH', 'Count'] == 0
+
+
+def test_vwap_reclaim_resolves_as_display_trigger_after_orh_before_alt():
+    rows = pd.DataFrame([
+        {
+            'Ticker': 'VWAP',
+            'Trigger': 'Alt Required',
+            'Trigger Day': 'Success',
+            '1m ORH': 'failed',
+            '5m ORH': 'failed',
+            'VWAP Reclaim': 'success',
+            'PDH': '-',
+        },
+        {
+            'Ticker': 'ONE',
+            'Trigger': '1m ORH',
+            'Trigger Day': 'Success',
+            '1m ORH': 'success',
+            '5m ORH': '-',
+            'VWAP Reclaim': 'success',
+            'PDH': 'Gap',
+        },
+        {
+            'Ticker': 'PDH',
+            'Trigger': 'PDH',
+            'Trigger Day': 'Success',
+            '1m ORH': '-',
+            '5m ORH': '-',
+            'VWAP Reclaim': 'success',
+            'PDH': 'success',
+        },
+        {
+            'Ticker': 'ALT',
+            'Trigger': 'Alt Required',
+            'Trigger Day': 'Success',
+            '1m ORH': 'failed',
+            '5m ORH': 'failed',
+            'VWAP Reclaim': '',
+            'PDH': '-',
+        },
+    ])
+
+    out = resolve_display_triggers(rows)
+
+    assert out['Trigger'].tolist() == ['VWAP Reclaim', '1m ORH', 'PDH', 'Alt Required']
+
+
+def test_vwap_reclaim_display_trigger_appears_in_detail_rows():
+    history = pd.DataFrame([{
+        'Setup Date': '2026-05-08',
+        'Ticker': 'VWAP',
+        'Current Status': 'Active',
+        'Trigger Day': 'Success',
+        'Trigger': 'Alt Required',
+        'PDH': '-',
+        '1m ORH': 'failed',
+        '5m ORH': 'failed',
+        'VWAP Reclaim': 'success',
+        'Notes': '',
+        'Current %': '4.0%',
+        'Max %': '11.0%',
+        'D3 High %': '-',
+        'Retest Day': '',
+        'Setup': '',
+        'Rating': '',
+        'current_pct_raw': 0.04,
+        'max_pct_raw': 0.11,
+    }])
+    resolved = resolve_display_triggers(history)
+
+    detail = detail_rows(resolved, overview_windows(['2026-05-08'])[0])
+
+    assert detail.loc[0, 'Trigger'] == 'VWAP Reclaim'
+    assert detail.loc[0, 'VWAP Reclaim'] == 'success'
 
 
 def _trigger_comparison_history() -> dict[str, pd.DataFrame]:

@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 
-from src.setup_behavior_overview import monitor_history
+from src.setup_behavior_overview import monitor_history, resolve_display_triggers
 
 
 SETUP_WINDOW_OPTIONS = ['Last 5 setup dates', 'Last 10 setup dates', 'Last 20 setup dates', 'All']
@@ -223,7 +223,7 @@ def top_movers_from_history(
 
 
 def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str | None) -> pd.DataFrame:
-    rows = rows.copy()
+    rows = resolve_display_triggers(rows.copy())
     rows['Setup Date'] = pd.to_datetime(rows['Setup Date'])
     rows['_setup_date_display'] = _format_setup_date(rows['Setup Date'])
     rows['_current_sort'] = _numeric(rows, ['current_pct_raw', 'Current %'])

@@ -24,6 +24,7 @@ FULL_SUMMARY_COLUMNS = [
     'Failed 1m',
     'Clean 5m',
     'Failed 5m',
+    'VWAP Reclaim',
     'PDH',
     'Failed PDH Trigger',
     'Alt Required',
@@ -252,7 +253,34 @@ def _add_vwap_reclaim_events(con, history: pd.DataFrame) -> pd.DataFrame:
         history.at[idx, 'VWAP Reclaim Trigger Time'] = result.get('trigger_time') or ''
         history.at[idx, 'VWAP Reclaim Trigger Price'] = result.get('trigger_price')
         history.at[idx, 'VWAP Reclaim Reason'] = result.get('failure_reason') or ''
-    return history
+    return resolve_display_triggers(history)
+
+
+def resolve_display_triggers(history: pd.DataFrame) -> pd.DataFrame:
+    """Let successful VWAP Reclaim appear as the displayed trigger label.
+
+    Rolling Setup Monitor remains the source for the original ORH/PDH/Alt
+    classification. This display pass only promotes VWAP Reclaim when no
+    existing earlier explicit trigger already succeeded. Current PDH priority is
+    preserved because PDH is resolved inside the monitor before this overview
+    event layer runs.
+    """
+    if history.empty or 'VWAP Reclaim' not in history or 'Trigger' not in history:
+        return history
+    out = history.copy()
+    one = out['1m ORH'] if '1m ORH' in out else pd.Series('', index=out.index)
+    five = out['5m ORH'] if '5m ORH' in out else pd.Series('', index=out.index)
+    pdh = out['PDH'] if 'PDH' in out else pd.Series('', index=out.index)
+    vwap_success = _normalized_result(out['VWAP Reclaim']).eq('success')
+    earlier_display_success = (
+        _normalized_result(one).eq('success')
+        | _normalized_result(five).eq('success')
+        | _normalized_result(pdh).eq('success')
+        | out['Trigger'].isin({'1m ORH', '5m ORH', 'PDH'})
+    )
+    promote = vwap_success & ~earlier_display_success
+    out.loc[promote, 'Trigger'] = 'VWAP Reclaim'
+    return out
 
 
 def _count(series: pd.Series, value: str) -> int:
@@ -302,6 +330,7 @@ def summarize_window(history: pd.DataFrame, window: OverviewWindow) -> dict:
         'Failed 1m': count_fmt(_count(one, 'failed')),
         'Clean 5m': count_fmt(_count(five, 'success')),
         'Failed 5m': count_fmt(_count(five, 'failed')),
+        'VWAP Reclaim': count_fmt(_count(rows['VWAP Reclaim'], 'success') if 'VWAP Reclaim' in rows else 0),
         'PDH': count_fmt(_count(trigger, 'PDH')),
         'Failed PDH Trigger': count_fmt(_count(trigger, 'Failed PDH Trigger')),
         'Alt Required': count_fmt(_count(trigger, 'Alt Required')),
@@ -394,6 +423,7 @@ def selected_window_metrics(window_summary: dict) -> list[dict]:
             'metrics': [
                 ('Clean 1m', window_summary.get('Clean 1m', '-')),
                 ('Clean 5m', window_summary.get('Clean 5m', '-')),
+                ('VWAP Reclaim', window_summary.get('VWAP Reclaim', '-')),
                 ('PDH', window_summary.get('PDH', '-')),
                 ('Failed PDH Trigger', window_summary.get('Failed PDH Trigger', '-')),
                 ('Alt Required', window_summary.get('Alt Required', '-')),
@@ -712,6 +742,7 @@ def mix_tables(window_summary: dict) -> dict[str, pd.DataFrame]:
             {'Metric': 'PDH', 'Value': window_summary.get('PDH', '-')},
             {'Metric': '1m ORH', 'Value': window_summary.get('Clean 1m', '-')},
             {'Metric': '5m ORH', 'Value': window_summary.get('Clean 5m', '-')},
+            {'Metric': 'VWAP Reclaim', 'Value': window_summary.get('VWAP Reclaim', '-')},
             {'Metric': 'Alt Required', 'Value': window_summary.get('Alt Required', '-')},
             {'Metric': 'Failed PDH Trigger', 'Value': window_summary.get('Failed PDH Trigger', '-')},
             {'Metric': 'Failed OR Trigger', 'Value': window_summary.get('Failed OR Trigger', '-')},
@@ -720,7 +751,7 @@ def mix_tables(window_summary: dict) -> dict[str, pd.DataFrame]:
     }
 
 
-TRIGGER_ORDER = ['PDH', '1m ORH', '5m ORH', 'Alt Required', 'Failed PDH Trigger', 'Failed OR Trigger', 'No Trigger']
+TRIGGER_ORDER = ['1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH', 'Alt Required', 'Failed PDH Trigger', 'Failed OR Trigger', 'No Trigger']
 TRIGGER_COMPARISON_ORDER = ['1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH', 'Alt Required']
 TRIGGER_COMPARISON_COLUMNS = [
     'Trigger',
