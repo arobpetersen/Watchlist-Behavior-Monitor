@@ -20,10 +20,9 @@ VISIBLE_COLUMNS = [
     'Current Status',
     'Current %',
     'Max %',
-    'Max High',
+    'Close < BE',
     'Days Since Setup',
     'Retested',
-    'Breakeven / D1 Eligible',
     'Notes',
 ]
 ACTIVE_VISIBLE_COLUMNS = [
@@ -33,10 +32,9 @@ ACTIVE_VISIBLE_COLUMNS = [
     'Trigger',
     'Current %',
     'Max %',
-    'Max High',
+    'Close < BE',
     'Days Since Setup',
     'Retested',
-    'Breakeven / D1 Eligible',
     'Notes',
 ]
 AUDIT_COLUMNS = [
@@ -45,6 +43,8 @@ AUDIT_COLUMNS = [
     'Setup Date',
     'Reference Price',
     'Latest Close',
+    'Max High',
+    'Breakeven / D1 Eligible',
     'Latest Status Date',
     'Ticker Latest Bar Date',
     'Global Latest Bar Date',
@@ -297,6 +297,7 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
     rows['Current %'] = rows['_current_sort'].apply(_fmt_pct)
     rows['Max %'] = rows['_max_sort'].apply(_fmt_pct)
     rows['Max High'] = _first_existing(rows, ['Max High', 'max_high']).apply(_fmt_price)
+    rows['Close < BE'] = _first_existing(rows, ['Close < BE', 'close_below_be'], '-').apply(_display)
     rows['Days Since Setup'] = rows['_days_sort'].apply(lambda v: '-' if pd.isna(v) else int(v))
     rows['Retested'] = _first_existing(rows, ['Retested', 'Retest', 'Retest Day', 'retest_day']).apply(_display)
     rows['Breakeven / D1 Eligible'] = _breakeven_or_d1(rows).apply(_display)
@@ -320,6 +321,8 @@ def _audit_table(rows: pd.DataFrame) -> pd.DataFrame:
     rows = rows.copy()
     rows['Reference Price'] = _first_existing(rows, ['Trigger Level', 'Reference Price', 'base_price']).apply(_display)
     rows['Latest Close'] = _first_existing(rows, ['Latest Close', 'latest_close']).apply(_display)
+    rows['Max High'] = _first_existing(rows, ['Max High', 'max_high']).apply(_fmt_price)
+    rows['Breakeven / D1 Eligible'] = _breakeven_or_d1(rows).apply(_display)
     rows['Latest Status Date'] = _date_display(rows['_latest_status_date'])
     rows['Ticker Latest Bar Date'] = _date_display(rows['_ticker_latest_bar_date'])
     rows['Global Latest Bar Date'] = _date_display(rows['_global_latest_bar_date'])

@@ -27,6 +27,7 @@ def _history() -> pd.DataFrame:
             'current_pct_raw': float(index) / 100,
             'max_pct_raw': float(index + 5) / 100,
             'Max High': 20 + index,
+            'Close < BE': 'Yes' if index % 7 == 0 else 'No',
             'Retest Day': 'D1' if index % 4 == 0 else '',
             'Breakeven / D1 Eligible': 'Yes' if index % 5 == 0 else '',
             'Notes': 'Wide 5m OR' if index % 6 == 0 else '',
@@ -144,12 +145,15 @@ def test_days_since_setup_calculation_and_sort_behavior():
 def test_field_mapping_for_trigger_status_max_high_retest_and_breakeven():
     result = top_movers_from_history(_history().iloc[[4]], latest_date='2026-04-30')
     row = result.table.iloc[0]
+    audit = result.audit.iloc[0]
 
     assert row['Trigger'] == 'PDH'
     assert row['Current Status'] == 'Active'
-    assert row['Max High'] == '25.00'
+    assert 'Max High' not in row.index
+    assert audit['Max High'] == '25.00'
     assert row['Retested'] == '-'
-    assert row['Breakeven / D1 Eligible'] == 'Yes'
+    assert 'Breakeven / D1 Eligible' not in row.index
+    assert audit['Breakeven / D1 Eligible'] == 'Yes'
 
 
 def test_vwap_reclaim_can_display_as_top_mover_trigger():
@@ -216,10 +220,14 @@ def test_missing_optional_field_behavior_keeps_row_with_dashes():
 
     result = top_movers_from_history(history, latest_date='2026-04-05')
     row = result.table.iloc[0]
+    audit = result.audit.iloc[0]
 
-    assert row['Max High'] == '-'
+    assert 'Max High' not in row.index
+    assert audit['Max High'] == '-'
     assert row['Retested'] == '-'
-    assert row['Breakeven / D1 Eligible'] == '-'
+    assert 'Breakeven / D1 Eligible' not in row.index
+    assert audit['Breakeven / D1 Eligible'] == '-'
+    assert row['Close < BE'] == '-'
     assert row['Notes'] == '-'
     assert result.active_table['Ticker'].tolist() == ['MISS']
 
@@ -236,6 +244,22 @@ def test_visible_column_contract():
     result = top_movers_from_history(_history(), latest_date='2026-04-30')
 
     assert result.table.columns.tolist() == VISIBLE_COLUMNS
+    assert result.table.columns.tolist() == [
+        'Rank',
+        'Ticker',
+        'Setup Date',
+        'Trigger',
+        'Current Status',
+        'Current %',
+        'Max %',
+        'Close < BE',
+        'Days Since Setup',
+        'Retested',
+        'Notes',
+    ]
+    assert 'Max High' not in result.table.columns
+    assert 'Breakeven / D1 Eligible' not in result.table.columns
+    assert 'Close < BE' in result.table.columns
 
 
 def test_active_table_filters_active_only_and_omits_current_status():
@@ -243,7 +267,17 @@ def test_active_table_filters_active_only_and_omits_current_status():
 
     assert result.active_table.columns.tolist() == ACTIVE_VISIBLE_COLUMNS
     assert 'Current Status' not in result.active_table.columns
+    assert 'Max High' not in result.active_table.columns
+    assert 'Breakeven / D1 Eligible' not in result.active_table.columns
+    assert 'Close < BE' in result.active_table.columns
     assert result.active_table['Ticker'].tolist() == ['T11', 'T09', 'T07', 'T05', 'T03', 'T01']
+
+
+def test_audit_keeps_secondary_fields_removed_from_visible_tables():
+    result = top_movers_from_history(_history(), latest_date='2026-04-30')
+
+    assert 'Max High' in result.audit.columns
+    assert 'Breakeven / D1 Eligible' in result.audit.columns
 
 
 def test_active_table_ignores_selected_setup_window():
