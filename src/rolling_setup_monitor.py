@@ -106,7 +106,7 @@ DETAIL_COLUMNS = [
     '1m Follow-Through / ATR14',
 ]
 
-STATUS_PRIORITY = {'Active': 0, 'Failed D1': 1, 'Failed D2': 2, 'Failed D3': 3, '—': 4}
+STATUS_PRIORITY = {'Active': 0, 'Later Failed': 1, 'Failed D1': 2, 'Failed D2': 3, 'Failed D3': 4, '—': 5}
 
 
 def _loads(value: Any) -> dict:
@@ -289,6 +289,25 @@ def _fmt_bool_available(value) -> str:
     return 'Yes' if bool(value) else 'No'
 
 
+def _bool_or_none(value: Any) -> bool | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {'', '-', 'nan', 'none'}:
+            return None
+        if text in {'yes', 'true', '1'}:
+            return True
+        if text in {'no', 'false', '0'}:
+            return False
+    return bool(value)
+
+
 def trigger_day_status(trigger_type: str, fail_day_value: int | None) -> str:
     if trigger_type == 'No Trigger':
         return 'Unresolved'
@@ -297,9 +316,11 @@ def trigger_day_status(trigger_type: str, fail_day_value: int | None) -> str:
     return 'Success'
 
 
-def current_status_display(trigger_day: str, fail_day_value: int | None) -> str:
+def current_status_display(trigger_day: str, fail_day_value: int | None, close_below_be: bool | None = None) -> str:
     if trigger_day != 'Success':
         return '—'
+    if close_below_be is True:
+        return 'Later Failed'
     if fail_day_value in {1, 2, 3}:
         return f'Failed D{int(fail_day_value)}'
     return 'Active'
@@ -1194,7 +1215,7 @@ def format_monitor_table_html(df: pd.DataFrame) -> str:
   background: rgba(46, 160, 91, 0.24);
   border: 1px solid rgba(94, 218, 138, 0.36);
 }}
-.current-status-failed-d1, .current-status-failed-d2, .current-status-failed-d3, .trigger-day-fail, .result-failed {{
+.current-status-later-failed, .current-status-failed-d1, .current-status-failed-d2, .current-status-failed-d3, .trigger-day-fail, .result-failed {{
   color: #ffc7c7;
   background: rgba(196, 61, 61, 0.24);
   border: 1px solid rgba(240, 112, 112, 0.35);
@@ -1310,7 +1331,7 @@ def day_summary(df: pd.DataFrame) -> dict:
         'Day Fail': int((df['Trigger Day'] == 'Fail').sum()) if not df.empty else 0,
         'Unresolved': int((df['Trigger Day'] == 'Unresolved').sum()) if not df.empty else 0,
         'Active': int((df['Current Status'] == 'Active').sum()) if not df.empty else 0,
-        'Later Failed': int(df['Current Status'].isin({'Failed D1', 'Failed D2', 'Failed D3'}).sum()) if not df.empty else 0,
+        'Later Failed': int(df['Current Status'].isin({'Later Failed', 'Failed D1', 'Failed D2', 'Failed D3'}).sum()) if not df.empty else 0,
         'Retested': int((df['Retests'] != '').sum()) if not df.empty and 'Retests' in df else 0,
         'Median Current %': _fmt_pct(df['current_pct_raw'].median()) if not df.empty else '',
         'Median Max %': _fmt_pct(df['max_pct_raw'].median()) if not df.empty else '',
@@ -1357,13 +1378,14 @@ def apply_setup_rating_updates(con, original: pd.DataFrame, edited: pd.DataFrame
 
 def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
     blank_series = pd.Series([None] * len(raw), index=raw.index)
+    close_below_be = raw.get('close_below_be', blank_series).apply(_bool_or_none)
     trigger_days = [
         trigger_day_status(trigger_type, fail_day_value)
         for trigger_type, fail_day_value in zip(raw['trigger_type'], raw['fail_day'])
     ]
     current_statuses = [
-        current_status_display(trigger_day, fail_day_value)
-        for trigger_day, fail_day_value in zip(trigger_days, raw['fail_day'])
+        current_status_display(trigger_day, fail_day_value, close_flag)
+        for trigger_day, fail_day_value, close_flag in zip(trigger_days, raw['fail_day'], close_below_be)
     ]
     pdh_governed = raw.get('pdh_governed', blank_series).map(lambda v: bool(v) if not pd.isna(v) else False)
     raw_one_min_result = raw.get('raw_one_min_result', raw.get('one_min_result', blank_series)).apply(_blank)
@@ -1393,7 +1415,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Notes': raw.get('notes', blank_series).apply(_blank),
         'Current %': raw['current_pct'].apply(_fmt_pct),
         'Max %': raw['max_pct'].apply(_fmt_pct),
-        'Close < BE': raw.get('close_below_be', blank_series).apply(_fmt_bool_available),
+        'Close < BE': close_below_be.apply(_fmt_bool_available),
         'D3 High %': raw['d3_high_pct'].apply(_fmt_d3_pct),
         'Retests': [
             _fmt_retests(days, fallback)

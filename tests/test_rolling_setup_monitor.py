@@ -1552,11 +1552,99 @@ def test_trigger_day_display_values():
 
 def test_current_status_display_values():
     assert current_status_display('Success', None) == 'Active'
+    assert current_status_display('Success', None, True) == 'Later Failed'
+    assert current_status_display('Success', None, False) == 'Active'
     assert current_status_display('Success', 1) == 'Failed D1'
     assert current_status_display('Success', 2) == 'Failed D2'
     assert current_status_display('Success', 3) == 'Failed D3'
     assert current_status_display('Fail', 0) == '—'
     assert current_status_display('Unresolved', None) == '—'
+
+def test_successful_vwap_close_below_be_becomes_later_failed():
+    raw = pd.DataFrame([{
+        **_base_formatted_record(),
+        'trigger_type': 'VWAP Reclaim',
+        'vwap_qualified_trigger_result': 'success',
+        'close_below_be': True,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Trigger Day'] == 'Success'
+    assert table.loc[0, 'Current Status'] == 'Later Failed'
+    assert table.loc[0, 'Close < BE'] == 'Yes'
+
+
+def test_successful_non_vwap_close_below_be_becomes_later_failed():
+    raw = pd.DataFrame([{
+        **_base_formatted_record(),
+        'trigger_type': '1m ORH',
+        'close_below_be': True,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Current Status'] == 'Later Failed'
+
+
+def test_successful_trigger_close_above_be_remains_active():
+    raw = pd.DataFrame([{
+        **_base_formatted_record(),
+        'trigger_type': '5m ORH',
+        'close_below_be': False,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Current Status'] == 'Active'
+    assert table.loc[0, 'Close < BE'] == 'No'
+
+
+def test_no_trigger_close_below_be_blank_does_not_become_later_failed():
+    raw = pd.DataFrame([{
+        **_base_formatted_record(),
+        'trigger_type': 'No Trigger',
+        'one_min_result': '',
+        'close_below_be': None,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Trigger Day'] == 'Unresolved'
+    assert table.loc[0, 'Current Status'] == '—'
+
+
+def test_trigger_day_failure_status_unchanged_by_close_below_be():
+    raw = pd.DataFrame([{
+        **_base_formatted_record(),
+        'trigger_type': 'Failed OR Trigger',
+        'fail_day': 0,
+        'close_below_be': True,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Trigger Day'] == 'Fail'
+    assert table.loc[0, 'Current Status'] == '—'
+
+
+def test_hims_like_close_below_be_case_is_not_active():
+    raw = pd.DataFrame([{
+        **_base_formatted_record(),
+        'ticker': 'HIMS',
+        'trigger_type': 'VWAP Reclaim',
+        'vwap_qualified_trigger_result': 'success',
+        'current_pct': -0.049,
+        'max_pct': 0.005,
+        'close_below_be': True,
+        'retest_days': [0, 1, 2, 3, 4],
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Current Status'] != 'Active'
+    assert table.loc[0, 'Current Status'] == 'Later Failed'
+    assert table.loc[0, 'Retests'] == 'D0, D1, D2 +2'
 
 
 def test_opening_range_display_results():

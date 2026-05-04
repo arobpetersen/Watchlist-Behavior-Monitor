@@ -193,6 +193,17 @@ def test_summarize_window_counts_percentages_and_medians():
     assert out['Median D3 High'] == '7.0%'
 
 
+def test_summarize_window_counts_close_below_be_later_failed_status():
+    history = _history().copy()
+    history.loc[history['Ticker'].eq('AAA'), 'Current Status'] = 'Later Failed'
+    window = overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1]
+
+    out = summarize_window(history, window)
+
+    assert out['Active'] == '0 (0%)'
+    assert out['Later Failed'] == '3 (75%)'
+
+
 def test_comparison_rows_exclude_secondary_diagnostics():
     full = pd.DataFrame([summarize_window(_history(), window) for window in overview_windows(['2026-04-10', '2026-04-28', '2026-05-02', '2026-05-08'])], columns=FULL_SUMMARY_COLUMNS)
     comparison = comparison_rows(full)

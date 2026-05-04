@@ -74,7 +74,7 @@ DETAIL_COLUMNS = [
     'Rating',
 ]
 
-CURRENT_STATUS_PRIORITY = {'Active': 0, 'Failed D1': 1, 'Failed D2': 2, 'Failed D3': 3, '—': 4}
+CURRENT_STATUS_PRIORITY = {'Active': 0, 'Later Failed': 1, 'Failed D1': 2, 'Failed D2': 3, 'Failed D3': 4, '—': 5}
 OPENING_PATH_FILTER_OPTIONS = [
     'All',
     'Clean 1m ORH Success',
@@ -306,7 +306,7 @@ def summarize_window(history: pd.DataFrame, window: OverviewWindow) -> dict:
         'Day Fail': count_fmt(_count(trigger_day, 'Fail')),
         'Unresolved': count_fmt(_count(trigger_day, 'Unresolved')),
         'Active': count_fmt(_count(current_status, 'Active')),
-        'Later Failed': count_fmt(int(current_status.isin({'Failed D1', 'Failed D2', 'Failed D3'}).sum())),
+        'Later Failed': count_fmt(int(_is_later_failed(current_status).sum())),
         'Clean 1m': count_fmt(_count(one, 'success')),
         'Failed 1m': count_fmt(_count(one, 'failed')),
         'Clean 5m': count_fmt(_count(five, 'success')),
@@ -462,7 +462,7 @@ def _count_int(value: Any) -> int:
 
 
 def _is_later_failed(series: pd.Series) -> pd.Series:
-    return series.isin({'Failed D1', 'Failed D2', 'Failed D3'})
+    return series.isin({'Later Failed', 'Failed D1', 'Failed D2', 'Failed D3'})
 
 
 def _is_blank_or_dash(series: pd.Series) -> pd.Series:
@@ -959,7 +959,7 @@ def trigger_quality_table(rows: pd.DataFrame) -> pd.DataFrame:
         if count == 0:
             out.append({'Trigger': trigger, 'Count': 0, 'Failed Count': 0, 'Failed %': '-', 'Day Success %': '-', 'Active %': '-', 'Later Failed %': '-', 'Median Current': '-', 'Median Max': '-'})
             continue
-        later_failed = int(group["Current Status"].isin({"Failed D1", "Failed D2", "Failed D3"}).sum())
+        later_failed = int(_is_later_failed(group["Current Status"]).sum())
         day_failed = int(group["Trigger Day"].eq("Fail").sum())
         failed_count = day_failed + later_failed
         out.append({

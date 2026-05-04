@@ -94,7 +94,7 @@ def test_page_groups_active_table_outside_setup_window_filters():
 def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
     page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
 
-    assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-active-freshness-v2'" in page
+    assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-close-below-be-status-v1'" in page
     assert "top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_watchlist_top_movers(db_path, top_movers_cache_token)' in page
     assert "st.caption(f'Active rows: {len(all_active_result.active_table)}')" in page
@@ -291,6 +291,18 @@ def test_active_table_filters_active_only_and_omits_current_status():
     assert 'Breakeven / D1 Eligible' not in result.active_table.columns
     assert 'Close < BE' in result.active_table.columns
     assert result.active_table['Ticker'].tolist() == ['T11', 'T09', 'T07', 'T05', 'T03', 'T01']
+
+
+def test_active_table_excludes_close_below_be_later_failed_rows():
+    history = pd.DataFrame([
+        {'Ticker': 'HIMS', 'Setup Date': '2026-04-28', 'Trigger': 'VWAP Reclaim', 'Trigger Day': 'Success', 'Current Status': 'Later Failed', 'Close < BE': 'Yes', 'Latest Status Date': '2026-05-04', 'Ticker Latest Bar Date': '2026-05-04', 'Global Latest Bar Date': '2026-05-04', 'current_pct_raw': -0.049, 'max_pct_raw': 0.005},
+        {'Ticker': 'OK', 'Setup Date': '2026-04-28', 'Trigger': '1m ORH', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Close < BE': 'No', 'Latest Status Date': '2026-05-04', 'Ticker Latest Bar Date': '2026-05-04', 'Global Latest Bar Date': '2026-05-04', 'current_pct_raw': 0.02, 'max_pct_raw': 0.08},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-05-04')
+
+    assert result.active_table['Ticker'].tolist() == ['OK']
+    assert result.table['Ticker'].tolist() == ['OK', 'HIMS']
 
 
 def test_audit_keeps_secondary_fields_removed_from_visible_tables():

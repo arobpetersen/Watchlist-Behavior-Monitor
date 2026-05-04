@@ -16,7 +16,7 @@ from src.watchlist_top_movers import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-TOP_MOVERS_CACHE_VERSION = 'top-movers-active-freshness-v2'
+TOP_MOVERS_CACHE_VERSION = 'top-movers-close-below-be-status-v1'
 
 
 @st.cache_data(show_spinner=False)
