@@ -48,11 +48,11 @@ def _trigger_label(row: pd.Series) -> str:
 
 
 def _vwap_result(row: pd.Series) -> str:
-    return _text(_first_present(row, ['vwap_reclaim_result', 'VWAP Reclaim'])).casefold()
+    return _text(_first_present(row, ['vwap_reclaim_result', 'Raw VWAP Reclaim Result', 'VWAP Reclaim Result', 'VWAP Reclaim'])).casefold()
 
 
 def _vwap_price(row: pd.Series) -> float | None:
-    return _num(_first_present(row, ['vwap_reclaim_trigger_price', 'VWAP Reclaim Trigger Price']))
+    return _num(_first_present(row, ['vwap_reclaim_trigger_price', 'Raw VWAP Reclaim Trigger Price', 'VWAP Reclaim Trigger Price']))
 
 
 def _resolved_trigger_price(row: pd.Series) -> float | None:
@@ -60,7 +60,7 @@ def _resolved_trigger_price(row: pd.Series) -> float | None:
 
 
 def _vwap_stop_valid(row: pd.Series) -> bool:
-    value = _first_present(row, ['vwap_reclaim_stop_valid', 'VWAP Reclaim Stop Valid'])
+    value = _first_present(row, ['vwap_reclaim_stop_valid', 'Raw VWAP Reclaim Stop Valid', 'VWAP Reclaim Stop Valid'])
     if value is None or _text(value) == '':
         return True
     if isinstance(value, str):
@@ -69,15 +69,53 @@ def _vwap_stop_valid(row: pd.Series) -> bool:
 
 
 def should_promote_vwap_reclaim(row: pd.Series) -> bool:
-    if _vwap_result(row) != 'success' or _vwap_price(row) is None or not _vwap_stop_valid(row):
-        return False
+    return qualified_vwap_trigger_fields(row)['vwap_qualified_trigger_result'] == 'success'
+
+
+def qualified_vwap_trigger_fields(row: pd.Series) -> dict:
+    raw_result = _vwap_result(row)
+    vwap_price = _vwap_price(row)
     trigger = _trigger_label(row)
-    if trigger in FALLBACK_TRIGGER_LABELS:
-        return True
+    if raw_result != 'success':
+        return {
+            'vwap_qualified_trigger_result': '',
+            'vwap_qualified_trigger_reason': f'raw VWAP Reclaim is {raw_result or "blank"}',
+        }
+    if vwap_price is None:
+        return {
+            'vwap_qualified_trigger_result': '',
+            'vwap_qualified_trigger_reason': 'raw VWAP trigger price unavailable',
+        }
+    if not _vwap_stop_valid(row):
+        return {
+            'vwap_qualified_trigger_result': '',
+            'vwap_qualified_trigger_reason': 'post-VWAP stop/reference low breached',
+        }
+    if trigger in FALLBACK_TRIGGER_LABELS or trigger == '':
+        return {
+            'vwap_qualified_trigger_result': 'success',
+            'vwap_qualified_trigger_reason': 'VWAP selected over fallback trigger',
+        }
     if trigger in ORH_TRIGGER_LABELS:
         existing_price = _resolved_trigger_price(row)
-        return existing_price is not None and _vwap_price(row) < existing_price
-    return False
+        if existing_price is not None and vwap_price < existing_price:
+            return {
+                'vwap_qualified_trigger_result': 'success',
+                'vwap_qualified_trigger_reason': f'VWAP trigger price lower than {trigger}',
+            }
+        return {
+            'vwap_qualified_trigger_result': '',
+            'vwap_qualified_trigger_reason': f'{trigger} trigger price is lower or unavailable',
+        }
+    if trigger == 'PDH':
+        return {
+            'vwap_qualified_trigger_result': '',
+            'vwap_qualified_trigger_reason': 'PDH trigger preserved',
+        }
+    return {
+        'vwap_qualified_trigger_result': '',
+        'vwap_qualified_trigger_reason': f'{trigger or "current"} trigger preserved',
+    }
 
 
 def resolve_display_triggers(rows: pd.DataFrame) -> pd.DataFrame:
@@ -91,15 +129,28 @@ def resolve_display_triggers(rows: pd.DataFrame) -> pd.DataFrame:
     if rows.empty:
         return rows.copy()
     out = rows.copy()
+    for column in ['vwap_qualified_trigger_result', 'vwap_qualified_trigger_reason']:
+        if column not in out:
+            out[column] = ''
+    if 'VWAP Trigger' in out and 'VWAP Trigger Reason' not in out:
+        out['VWAP Trigger Reason'] = ''
     for idx, row in out.iterrows():
-        if not should_promote_vwap_reclaim(row):
+        qualified = qualified_vwap_trigger_fields(row)
+        for column, value in qualified.items():
+            if column in out:
+                out.at[idx, column] = value
+        if 'VWAP Trigger' in out:
+            out.at[idx, 'VWAP Trigger'] = qualified['vwap_qualified_trigger_result']
+        if 'VWAP Trigger Reason' in out:
+            out.at[idx, 'VWAP Trigger Reason'] = qualified['vwap_qualified_trigger_reason']
+        if qualified['vwap_qualified_trigger_result'] != 'success':
             continue
         if 'trigger_type' in out:
             out.at[idx, 'trigger_type'] = 'VWAP Reclaim'
         if 'Trigger' in out:
             out.at[idx, 'Trigger'] = 'VWAP Reclaim'
         vwap_price = _vwap_price(row)
-        vwap_time = _first_present(row, ['vwap_reclaim_trigger_time', 'VWAP Reclaim Trigger Time'])
+        vwap_time = _first_present(row, ['vwap_reclaim_trigger_time', 'Raw VWAP Reclaim Trigger Time', 'VWAP Reclaim Trigger Time'])
         if 'trigger_level' in out:
             out.at[idx, 'trigger_level'] = vwap_price
         if 'Trigger Level' in out and vwap_price is not None:

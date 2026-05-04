@@ -17,7 +17,7 @@ from src.setup_behavior_overview import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-OVERVIEW_CACHE_VERSION = 'setup-overview-display-v7'
+OVERVIEW_CACHE_VERSION = 'setup-overview-qualified-vwap-v1'
 
 
 @st.cache_data(show_spinner=False)
@@ -59,7 +59,7 @@ with st.expander('Definitions / Logic', expanded=False):
 - **Trigger Day**: setup-day outcome. Success means a selected trigger/reference held through day 0, Fail means it failed on day 0, and Unresolved means no trigger.
 - **PDH**: prior-day high diagnostic. Gap means the stock opened above prior-day high, so the ORH framework governs. Success means PDH broke and held day 0, failed means PDH broke and failed day 0, and dash means PDH did not trigger or is unavailable.
 - **1m ORH / 5m ORH**: diagnostic opening-range high results. Success requires a strict high break above ORH and the selected trigger-time reference low holding after trigger.
-- **VWAP Reclaim**: objective event where a 5-minute bar closes above intraday VWAP between 10:00 and 11:30, then price later takes out that reclaim-bar high.
+- **VWAP Trigger**: qualified VWAP reclaim trigger shown only when the shared trigger stack selects VWAP over fallback labels or a looser ORH trigger. Raw VWAP reclaim diagnostics remain in detail/audit fields.
 - **Alt Required**: alternate framework used only when failed/missing OR triggers repair under the existing 15m/close-location rule.
 - **Failed OR Trigger**: OR trigger framework failed and no alternate qualification repaired it.
 - **Retest**: first D0/D1/D2/D3 touch of the selected trigger level.

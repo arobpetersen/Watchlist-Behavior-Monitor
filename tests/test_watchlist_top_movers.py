@@ -158,6 +158,27 @@ def test_vwap_reclaim_can_display_as_top_mover_trigger():
     assert result.active_table.loc[0, 'Trigger'] == 'VWAP Reclaim'
 
 
+def test_raw_vwap_reclaim_does_not_display_as_top_mover_trigger_when_not_resolved():
+    history = pd.DataFrame([{
+        'Ticker': 'PDH',
+        'Setup Date': '2026-04-01',
+        'Trigger': 'PDH',
+        'Trigger Day': 'Success',
+        'Current Status': 'Active',
+        '1m ORH': '-',
+        '5m ORH': '-',
+        'VWAP Reclaim': 'success',
+        'VWAP Reclaim Trigger Price': 10.5,
+        'PDH': 'success',
+        'current_pct_raw': 0.06,
+        'max_pct_raw': 0.14,
+    }])
+
+    result = top_movers_from_history(history, latest_date='2026-04-05')
+
+    assert result.table.loc[0, 'Trigger'] == 'PDH'
+
+
 def test_missing_optional_field_behavior_keeps_row_with_dashes():
     history = pd.DataFrame([{
         'Ticker': 'MISS',

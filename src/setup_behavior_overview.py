@@ -63,7 +63,7 @@ DETAIL_COLUMNS = [
     'PDH',
     '1m ORH',
     '5m ORH',
-    'VWAP Reclaim',
+    'VWAP Trigger',
     'Notes',
     'Current',
     'Max',
@@ -189,12 +189,15 @@ def monitor_history(con) -> pd.DataFrame:
 def _vwap_reclaim_defaults(history: pd.DataFrame) -> pd.DataFrame:
     out = history.copy()
     for column, value in {
-        'VWAP Reclaim': 'Not Applicable',
-        'VWAP Reclaim Time': '',
-        'VWAP Reclaim Bar High': None,
-        'VWAP Reclaim Trigger Time': '',
-        'VWAP Reclaim Trigger Price': None,
-        'VWAP Reclaim Reason': 'intraday bars unavailable',
+        'VWAP Trigger': '',
+        'VWAP Trigger Reason': '',
+        'Raw VWAP Reclaim Result': 'Not Applicable',
+        'Raw VWAP Reclaim Prior Below VWAP': None,
+        'Raw VWAP Reclaim Time': '',
+        'Raw VWAP Reclaim Bar High': None,
+        'Raw VWAP Reclaim Trigger Time': '',
+        'Raw VWAP Reclaim Trigger Price': None,
+        'Raw VWAP Reclaim Result Reason': 'intraday bars unavailable',
     }.items():
         if column not in out:
             out[column] = value
@@ -202,11 +205,7 @@ def _vwap_reclaim_defaults(history: pd.DataFrame) -> pd.DataFrame:
 
 
 def _add_vwap_reclaim_events(con, history: pd.DataFrame) -> pd.DataFrame:
-    """Attach objective VWAP Reclaim diagnostics from cached 1-minute bars.
-
-    VWAP Reclaim is an independent trigger event for overview diagnostics. It is
-    not used here to rewrite the Rolling Setup Monitor final/primary trigger.
-    """
+    """Attach raw VWAP diagnostics and qualified VWAP trigger display fields."""
     history = _vwap_reclaim_defaults(history)
     if history.empty or 'Ticker' not in history or 'Setup Date' not in history:
         return history
@@ -248,12 +247,13 @@ def _add_vwap_reclaim_events(con, history: pd.DataFrame) -> pd.DataFrame:
         if not ticker or pd.isna(setup_date):
             continue
         result = assess_vwap_reclaim(grouped.get((ticker, setup_date.date().isoformat())))
-        history.at[idx, 'VWAP Reclaim'] = result.get('result') or ''
-        history.at[idx, 'VWAP Reclaim Time'] = result.get('reclaim_time') or ''
-        history.at[idx, 'VWAP Reclaim Bar High'] = result.get('reclaim_bar_high')
-        history.at[idx, 'VWAP Reclaim Trigger Time'] = result.get('trigger_time') or ''
-        history.at[idx, 'VWAP Reclaim Trigger Price'] = result.get('trigger_price')
-        history.at[idx, 'VWAP Reclaim Reason'] = result.get('failure_reason') or ''
+        history.at[idx, 'Raw VWAP Reclaim Result'] = result.get('result') or ''
+        history.at[idx, 'Raw VWAP Reclaim Prior Below VWAP'] = result.get('prior_below_vwap_observed')
+        history.at[idx, 'Raw VWAP Reclaim Time'] = result.get('reclaim_time') or ''
+        history.at[idx, 'Raw VWAP Reclaim Bar High'] = result.get('reclaim_bar_high')
+        history.at[idx, 'Raw VWAP Reclaim Trigger Time'] = result.get('trigger_time') or ''
+        history.at[idx, 'Raw VWAP Reclaim Trigger Price'] = result.get('trigger_price')
+        history.at[idx, 'Raw VWAP Reclaim Result Reason'] = result.get('result_reason') or result.get('failure_reason') or ''
     return resolve_display_triggers(history)
 
 
@@ -304,7 +304,7 @@ def summarize_window(history: pd.DataFrame, window: OverviewWindow) -> dict:
         'Failed 1m': count_fmt(_count(one, 'failed')),
         'Clean 5m': count_fmt(_count(five, 'success')),
         'Failed 5m': count_fmt(_count(five, 'failed')),
-        'VWAP Reclaim': count_fmt(_count(rows['VWAP Reclaim'], 'success') if 'VWAP Reclaim' in rows else 0),
+        'VWAP Reclaim': count_fmt(_count(rows['VWAP Trigger'], 'success') if 'VWAP Trigger' in rows else 0),
         'PDH': count_fmt(_count(trigger, 'PDH')),
         'Failed PDH Trigger': count_fmt(_count(trigger, 'Failed PDH Trigger')),
         'Alt Required': count_fmt(_count(trigger, 'Alt Required')),
@@ -329,6 +329,7 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
     if rows.empty:
         return pd.DataFrame(columns=DETAIL_COLUMNS)
 
+    vwap_trigger = rows['VWAP Trigger'] if 'VWAP Trigger' in rows else rows['vwap_qualified_trigger_result'] if 'vwap_qualified_trigger_result' in rows else pd.Series('', index=rows.index)
     out = pd.DataFrame({
         'Setup Date': pd.to_datetime(rows['Setup Date']).dt.date.astype(str),
         'Ticker': rows['Ticker'].apply(_display),
@@ -338,7 +339,7 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
         'PDH': rows['PDH'].apply(_display) if 'PDH' in rows else '-',
         '1m ORH': rows['1m ORH'].apply(_display),
         '5m ORH': rows['5m ORH'].apply(_display),
-        'VWAP Reclaim': rows['VWAP Reclaim'].apply(_display) if 'VWAP Reclaim' in rows else '-',
+        'VWAP Trigger': vwap_trigger.apply(_display),
         'Notes': rows['Notes'].apply(_display),
         'Current': rows['Current %'].apply(_display),
         'Max': rows['Max %'].apply(_display),
@@ -514,7 +515,7 @@ def opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
     one = rows['1m ORH'] if '1m ORH' in rows else pd.Series('', index=rows.index)
     five = rows['5m ORH'] if '5m ORH' in rows else pd.Series('', index=rows.index)
     pdh = rows['PDH'] if 'PDH' in rows else pd.Series('', index=rows.index)
-    vwap = rows['VWAP Reclaim'] if 'VWAP Reclaim' in rows else pd.Series('', index=rows.index)
+    vwap = rows['VWAP Trigger'] if 'VWAP Trigger' in rows else pd.Series('', index=rows.index)
     trigger = rows['Trigger'] if 'Trigger' in rows else pd.Series('', index=rows.index)
 
     one_success = one.eq('success')
@@ -564,7 +565,7 @@ def main_opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
     masks = {
         '1m ORH': rows['1m ORH'].eq('success') if '1m ORH' in rows else pd.Series(False, index=rows.index),
         '5m ORH': rows['5m ORH'].eq('success') if '5m ORH' in rows else pd.Series(False, index=rows.index),
-        'VWAP Reclaim': rows['VWAP Reclaim'].eq('success') if 'VWAP Reclaim' in rows else pd.Series(False, index=rows.index),
+        'VWAP Reclaim': rows['VWAP Trigger'].eq('success') if 'VWAP Trigger' in rows else pd.Series(False, index=rows.index),
         'PDH': rows['PDH'].eq('success') if 'PDH' in rows else pd.Series(False, index=rows.index),
         'Alt Required': (rows['Trigger'].eq('Alt Required') & trigger_day.eq('Success')) if 'Trigger' in rows else pd.Series(False, index=rows.index),
     }
@@ -578,7 +579,7 @@ def _opening_path_mask(rows: pd.DataFrame, path: str) -> pd.Series:
     one = rows['1m ORH'] if '1m ORH' in rows else pd.Series('', index=rows.index)
     five = rows['5m ORH'] if '5m ORH' in rows else pd.Series('', index=rows.index)
     pdh = rows['PDH'] if 'PDH' in rows else pd.Series('', index=rows.index)
-    vwap = rows['VWAP Reclaim'] if 'VWAP Reclaim' in rows else pd.Series('', index=rows.index)
+    vwap = rows['VWAP Trigger'] if 'VWAP Trigger' in rows else pd.Series('', index=rows.index)
     trigger = rows['Trigger'] if 'Trigger' in rows else pd.Series('', index=rows.index)
     one_success = one.eq('success')
     one_failed = one.eq('failed')
@@ -762,6 +763,10 @@ TRIGGER_EVENT_MAIN_COLUMNS = [
 def _trigger_event_values(rows: pd.DataFrame, trigger_name: str) -> pd.Series:
     if rows.empty:
         return pd.Series('', index=rows.index)
+    if trigger_name == 'VWAP Reclaim':
+        if 'VWAP Trigger' not in rows:
+            return pd.Series('', index=rows.index)
+        return _normalized_result(rows['VWAP Trigger'])
     if trigger_name in {'1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH'}:
         if trigger_name not in rows:
             return pd.Series('', index=rows.index)
@@ -778,7 +783,7 @@ def _trigger_event_values(rows: pd.DataFrame, trigger_name: str) -> pd.Series:
     trigger_day = rows['Trigger Day'] if 'Trigger Day' in rows else pd.Series('', index=rows.index)
     one = rows['1m ORH'] if '1m ORH' in rows else pd.Series('', index=rows.index)
     five = rows['5m ORH'] if '5m ORH' in rows else pd.Series('', index=rows.index)
-    vwap = rows['VWAP Reclaim'] if 'VWAP Reclaim' in rows else pd.Series('', index=rows.index)
+    vwap = rows['VWAP Trigger'] if 'VWAP Trigger' in rows else pd.Series('', index=rows.index)
     pdh = rows['PDH'] if 'PDH' in rows else pd.Series('', index=rows.index)
     lower_success = one.eq('success') | five.eq('success') | vwap.eq('success') | pdh.eq('success')
     alt_selected = trigger.eq('Alt Required')

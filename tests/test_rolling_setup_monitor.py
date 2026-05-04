@@ -1344,7 +1344,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
     }])
 
     assert main_table(df).columns.tolist() == [
-        'Ticker', 'Current Status', 'Trigger Day', 'Trigger', 'PDH', '1m ORH', '5m ORH', 'VWAP Reclaim', 'Notes',
+        'Ticker', 'Current Status', 'Trigger Day', 'Trigger', 'PDH', '1m ORH', '5m ORH', 'VWAP Trigger', 'Notes',
         'Current %', 'Max %', 'D3 High %', 'Retest Day', 'Setup', 'Rating',
     ]
     assert detail_table(df).columns.tolist() == [
@@ -1353,9 +1353,11 @@ def test_main_and_detail_table_columns_and_blank_handling():
         '1m Recovery Reference Low', '5m Recovery Qualified', '5m Recovery Break Time',
         '5m Recovery Reference Low', 'Alt Recovery Qualified',
         'PDH Trigger Break Time', 'PDH Trigger Level', 'PDH Reference Low', 'PDH Reference Basis',
-        'VWAP Reclaim Result', 'VWAP Reclaim Time', 'VWAP Reclaim Bar High',
-        'VWAP Reclaim Trigger Time', 'VWAP Reclaim Trigger Price', 'VWAP Reclaim Stop Valid',
-        'VWAP Reclaim Prior Below VWAP', 'VWAP Reclaim Reason', 'VWAP Reclaim Result Reason',
+        'Raw VWAP Reclaim Result', 'Raw VWAP Reclaim Prior Below VWAP',
+        'Raw VWAP Reclaim Time', 'Raw VWAP Reclaim Bar High',
+        'Raw VWAP Reclaim Trigger Time', 'Raw VWAP Reclaim Trigger Price',
+        'Raw VWAP Reclaim Stop Valid', 'Raw VWAP Reclaim Result Reason',
+        'Qualified VWAP Trigger Result', 'Qualified VWAP Trigger Reason',
         'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
         'Fail Day', 'Latest Close', 'Setup Close', 'Setup High', 'Setup Low',
         'Current vs Setup Close', 'Max Gain from Setup Close', 'RVOL', 'Range / ATR14', '1m OR Width / ATR14',
@@ -1555,10 +1557,62 @@ def test_format_section_table_exposes_vwap_reclaim_result_and_detail():
     table = _format_section_table(raw)
 
     assert table.loc[0, 'Trigger'] == 'VWAP Reclaim'
-    assert table.loc[0, 'VWAP Reclaim'] == 'success'
-    assert table.loc[0, 'VWAP Reclaim Trigger Price'] == '10.40'
-    assert table.loc[0, 'VWAP Reclaim Stop Valid'] == 'Yes'
-    assert table.loc[0, 'VWAP Reclaim Prior Below VWAP'] == 'Yes'
+    assert table.loc[0, 'VWAP Trigger'] == 'success'
+    assert table.loc[0, 'Raw VWAP Reclaim Result'] == 'success'
+    assert table.loc[0, 'Raw VWAP Reclaim Trigger Price'] == '10.40'
+    assert table.loc[0, 'Raw VWAP Reclaim Stop Valid'] == 'Yes'
+    assert table.loc[0, 'Raw VWAP Reclaim Prior Below VWAP'] == 'Yes'
+
+
+def test_format_section_table_keeps_raw_vwap_success_out_of_main_when_not_qualified():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'AAPL',
+        'status': 'Active',
+        'trigger_type': 'PDH',
+        'one_min_result': '-',
+        'five_min_result': '-',
+        'vwap_reclaim_result': 'success',
+        'vwap_reclaim_time': pd.Timestamp('2026-05-01 10:05'),
+        'vwap_reclaim_reclaim_bar_high': 10.4,
+        'vwap_reclaim_trigger_time': pd.Timestamp('2026-05-01 10:10'),
+        'vwap_reclaim_trigger_price': 10.4,
+        'vwap_reclaim_stop_valid': True,
+        'vwap_reclaim_prior_below_vwap_observed': True,
+        'vwap_reclaim_result_reason': '',
+        'vwap_qualified_trigger_result': '',
+        'vwap_qualified_trigger_reason': 'PDH trigger preserved',
+        'pdh_result': 'success',
+        'notes': '',
+        'current_pct': 0.01,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.8,
+        'reference_low': 9.8,
+        'reference_basis': 'PDH',
+        'trigger_break_time': pd.Timestamp('2026-05-01 09:45'),
+        'latest_close': 10.6,
+        'close_price': 10.0,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.06,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'VWAP Trigger'] == '-'
+    assert table.loc[0, 'Raw VWAP Reclaim Result'] == 'success'
+    assert table.loc[0, 'Qualified VWAP Trigger Reason'] == 'PDH trigger preserved'
 
 
 def test_vwap_reclaim_fields_detect_stop_validity_from_existing_reference_low():

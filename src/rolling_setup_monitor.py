@@ -32,7 +32,7 @@ MAIN_COLUMNS = [
     'PDH',
     '1m ORH',
     '5m ORH',
-    'VWAP Reclaim',
+    'VWAP Trigger',
     'Notes',
     'Current %',
     'Max %',
@@ -69,15 +69,16 @@ DETAIL_COLUMNS = [
     'PDH Trigger Level',
     'PDH Reference Low',
     'PDH Reference Basis',
-    'VWAP Reclaim Result',
-    'VWAP Reclaim Time',
-    'VWAP Reclaim Bar High',
-    'VWAP Reclaim Trigger Time',
-    'VWAP Reclaim Trigger Price',
-    'VWAP Reclaim Stop Valid',
-    'VWAP Reclaim Prior Below VWAP',
-    'VWAP Reclaim Reason',
-    'VWAP Reclaim Result Reason',
+    'Raw VWAP Reclaim Result',
+    'Raw VWAP Reclaim Prior Below VWAP',
+    'Raw VWAP Reclaim Time',
+    'Raw VWAP Reclaim Bar High',
+    'Raw VWAP Reclaim Trigger Time',
+    'Raw VWAP Reclaim Trigger Price',
+    'Raw VWAP Reclaim Stop Valid',
+    'Raw VWAP Reclaim Result Reason',
+    'Qualified VWAP Trigger Result',
+    'Qualified VWAP Trigger Reason',
     'Trigger Level',
     'Reference Low',
     'Reference Basis',
@@ -911,7 +912,7 @@ def _badge_class(column: str, value: str) -> str:
         return f'monitor-badge trigger-day-{normalized}'
     if column == 'Trigger':
         return f'monitor-badge trigger-{normalized}'
-    if column in {'PDH', '1m ORH', '5m ORH', 'VWAP Reclaim'} and value in {'success', 'failed'}:
+    if column in {'PDH', '1m ORH', '5m ORH', 'VWAP Trigger'} and value in {'success', 'failed'}:
         return f'monitor-badge result-{value}'
     if value in {'-', 'Gap', 'Not Applicable'}:
         return 'monitor-badge status-muted'
@@ -1027,7 +1028,7 @@ def format_summary_blocks_html(summary: dict) -> str:
     groups = [
         ('Overall', [('Setups', 'Setups', False), ('Day Success', 'Day Success', True), ('Day Fail', 'Day Fail', True), ('Unresolved', 'Unresolved', True), ('Active', 'Active', True), ('Later Failed', 'Later Failed', True)]),
         ('PDH', [('Gap', 'PDH Gap', True), ('Success', 'PDH', True), ('Failed', 'Failed PDH Trigger', True)]),
-        ('VWAP', [('Success', 'VWAP Reclaim', True), ('Failed', 'VWAP Failed', True)]),
+        ('VWAP', [('Success', 'VWAP Trigger', True), ('Failed', 'VWAP Failed', True)]),
         ('1m OR', [('Clean 1m', 'Clean 1m', True), ('Failed 1m', '1m Failed', True)]),
         ('5m OR', [('Clean 5m', 'Clean 5m', True), ('Failed 5m', '5m Failed', True)]),
         ('Alternate / Other', [('Alt Required', 'Alt Required', True), ('No Trigger', 'No Trigger', True), ('Retested', 'Retested', True)]),
@@ -1089,13 +1090,13 @@ def detail_table(table: pd.DataFrame) -> pd.DataFrame:
 
 def day_summary(df: pd.DataFrame) -> dict:
     pdh = df['PDH'] if 'PDH' in df else pd.Series(dtype=object)
-    vwap = df['VWAP Reclaim'] if 'VWAP Reclaim' in df else pd.Series(dtype=object)
+    vwap = df['VWAP Trigger'] if 'VWAP Trigger' in df else pd.Series(dtype=object)
     return {
         'Setups': len(df),
         'PDH Gap': int((pdh == 'Gap').sum()) if not df.empty else 0,
         'PDH': int((df['Trigger'] == 'PDH').sum()) if not df.empty else 0,
         'Failed PDH Trigger': int((df['Trigger'] == 'Failed PDH Trigger').sum()) if not df.empty else 0,
-        'VWAP Reclaim': int((vwap == 'success').sum()) if not df.empty else 0,
+        'VWAP Trigger': int((vwap == 'success').sum()) if not df.empty else 0,
         'VWAP Failed': int((vwap == 'failed').sum()) if not df.empty else 0,
         'Clean 1m': int((df['1m ORH'] == 'success').sum()) if not df.empty else 0,
         'Clean 5m': int((df['5m ORH'] == 'success').sum()) if not df.empty else 0,
@@ -1167,6 +1168,8 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
     raw_five_min_result = raw.get('raw_five_min_result', raw.get('five_min_result', blank_series)).apply(_blank)
     display_one_min_result = raw.get('one_min_result', raw_one_min_result).apply(_blank)
     display_five_min_result = raw.get('five_min_result', raw_five_min_result).apply(_blank)
+    qualified_vwap_result = raw.get('vwap_qualified_trigger_result', blank_series).apply(_blank)
+    qualified_vwap_result = qualified_vwap_result.mask(qualified_vwap_result.eq('') & raw['trigger_type'].eq('VWAP Reclaim'), 'success')
 
     display = pd.DataFrame({
         'candidate_id': raw['candidate_id'],
@@ -1178,7 +1181,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'PDH': raw.get('pdh_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
         '1m ORH': display_one_min_result.apply(lambda v: '-' if v == '' else v),
         '5m ORH': display_five_min_result.apply(lambda v: '-' if v == '' else v),
-        'VWAP Reclaim': raw.get('vwap_reclaim_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
+        'VWAP Trigger': qualified_vwap_result.apply(lambda v: '-' if v == '' else v),
         'Notes': raw.get('notes', blank_series).apply(_blank),
         'Current %': raw['current_pct'].apply(_fmt_pct),
         'Max %': raw['max_pct'].apply(_fmt_pct),
@@ -1203,15 +1206,16 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'PDH Trigger Level': raw.get('pdh_trigger_level', blank_series).apply(_fmt_price),
         'PDH Reference Low': raw.get('pdh_reference_low', blank_series).apply(_fmt_price),
         'PDH Reference Basis': raw.get('pdh_reference_basis', blank_series).apply(_blank),
-        'VWAP Reclaim Result': raw.get('vwap_reclaim_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
-        'VWAP Reclaim Time': raw.get('vwap_reclaim_time', blank_series).apply(_fmt_ts),
-        'VWAP Reclaim Bar High': raw.get('vwap_reclaim_reclaim_bar_high', blank_series).apply(_fmt_price),
-        'VWAP Reclaim Trigger Time': raw.get('vwap_reclaim_trigger_time', blank_series).apply(_fmt_ts),
-        'VWAP Reclaim Trigger Price': raw.get('vwap_reclaim_trigger_price', blank_series).apply(_fmt_price),
-        'VWAP Reclaim Stop Valid': raw.get('vwap_reclaim_stop_valid', blank_series).apply(_fmt_bool_available),
-        'VWAP Reclaim Prior Below VWAP': raw.get('vwap_reclaim_prior_below_vwap_observed', blank_series).apply(_fmt_bool_available),
-        'VWAP Reclaim Reason': raw.get('vwap_reclaim_failure_reason', blank_series).apply(_blank),
-        'VWAP Reclaim Result Reason': raw.get('vwap_reclaim_result_reason', blank_series).apply(_blank),
+        'Raw VWAP Reclaim Result': raw.get('vwap_reclaim_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
+        'Raw VWAP Reclaim Prior Below VWAP': raw.get('vwap_reclaim_prior_below_vwap_observed', blank_series).apply(_fmt_bool_available),
+        'Raw VWAP Reclaim Time': raw.get('vwap_reclaim_time', blank_series).apply(_fmt_ts),
+        'Raw VWAP Reclaim Bar High': raw.get('vwap_reclaim_reclaim_bar_high', blank_series).apply(_fmt_price),
+        'Raw VWAP Reclaim Trigger Time': raw.get('vwap_reclaim_trigger_time', blank_series).apply(_fmt_ts),
+        'Raw VWAP Reclaim Trigger Price': raw.get('vwap_reclaim_trigger_price', blank_series).apply(_fmt_price),
+        'Raw VWAP Reclaim Stop Valid': raw.get('vwap_reclaim_stop_valid', blank_series).apply(_fmt_bool_available),
+        'Raw VWAP Reclaim Result Reason': raw.get('vwap_reclaim_result_reason', blank_series).apply(_blank),
+        'Qualified VWAP Trigger Result': raw.get('vwap_qualified_trigger_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
+        'Qualified VWAP Trigger Reason': raw.get('vwap_qualified_trigger_reason', blank_series).apply(_blank),
         'Trigger Level': raw['trigger_level'].apply(_fmt_price),
         'Reference Low': raw['reference_low'].apply(_fmt_price),
         'Reference Basis': raw['reference_basis'].apply(_blank),

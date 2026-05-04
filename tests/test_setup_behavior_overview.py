@@ -64,7 +64,7 @@ def _history() -> pd.DataFrame:
             'Current Status': 'Failed D1',
             'Trigger Day': 'Success',
             'Trigger': 'Alt Required',
-            'VWAP Reclaim': '',
+            'VWAP Trigger': '',
             '1m ORH': 'failed',
             '5m ORH': 'failed',
             'Notes': '',
@@ -84,7 +84,7 @@ def _history() -> pd.DataFrame:
             'Current Status': 'Failed D2',
             'Trigger Day': 'Success',
             'Trigger': '5m ORH',
-            'VWAP Reclaim': '',
+            'VWAP Trigger': '',
             '1m ORH': 'failed',
             '5m ORH': 'success',
             'Notes': 'Wide 5m OR',
@@ -104,7 +104,7 @@ def _history() -> pd.DataFrame:
             'Current Status': '—',
             'Trigger Day': 'Fail',
             'Trigger': 'Failed OR Trigger',
-            'VWAP Reclaim': '',
+            'VWAP Trigger': '',
             '1m ORH': 'failed',
             '5m ORH': 'failed',
             'Notes': 'Wide 1m OR; Wide 5m OR',
@@ -124,7 +124,7 @@ def _history() -> pd.DataFrame:
             'Current Status': '—',
             'Trigger Day': 'Unresolved',
             'Trigger': 'No Trigger',
-            'VWAP Reclaim': '',
+            'VWAP Trigger': '',
             '1m ORH': '',
             '5m ORH': '',
             'Notes': '',
@@ -449,6 +449,26 @@ def test_vwap_reclaim_higher_price_preserves_orh_display_trigger():
     out = resolve_display_triggers(rows)
 
     assert out.loc[0, 'Trigger'] == '1m ORH'
+    assert out.loc[0, 'vwap_qualified_trigger_result'] == ''
+
+
+def test_vwap_reclaim_lower_price_promotes_over_5m_orh():
+    rows = pd.DataFrame([{
+        'Ticker': 'FIVE',
+        'Trigger': '5m ORH',
+        'Trigger Day': 'Success',
+        '1m ORH': 'failed',
+        '5m ORH': 'success',
+        'VWAP Reclaim': 'success',
+        'VWAP Reclaim Trigger Price': 10.5,
+        'Trigger Level': 11.0,
+        'PDH': 'Gap',
+    }])
+
+    out = resolve_display_triggers(rows)
+
+    assert out.loc[0, 'Trigger'] == 'VWAP Reclaim'
+    assert out.loc[0, 'vwap_qualified_trigger_result'] == 'success'
 
 
 def test_vwap_reclaim_stop_invalid_prevents_display_trigger_promotion():
@@ -468,6 +488,20 @@ def test_vwap_reclaim_stop_invalid_prevents_display_trigger_promotion():
     out = resolve_display_triggers(rows)
 
     assert out.loc[0, 'Trigger'] == '5m ORH'
+    assert out.loc[0, 'vwap_qualified_trigger_result'] == ''
+
+
+def test_vwap_reclaim_raw_non_success_results_do_not_qualify():
+    rows = pd.DataFrame([
+        {'Ticker': 'FAILED', 'Trigger': 'Alt Required', 'VWAP Reclaim': 'failed', 'VWAP Reclaim Trigger Price': 10.5},
+        {'Ticker': 'BLANK', 'Trigger': 'Alt Required', 'VWAP Reclaim': '', 'VWAP Reclaim Trigger Price': 10.5},
+        {'Ticker': 'NA', 'Trigger': 'Alt Required', 'VWAP Reclaim': 'Not Applicable', 'VWAP Reclaim Trigger Price': 10.5},
+    ])
+
+    out = resolve_display_triggers(rows)
+
+    assert out['Trigger'].tolist() == ['Alt Required', 'Alt Required', 'Alt Required']
+    assert out['vwap_qualified_trigger_result'].tolist() == ['', '', '']
 
 
 def test_vwap_reclaim_display_trigger_appears_in_detail_rows():
@@ -497,7 +531,7 @@ def test_vwap_reclaim_display_trigger_appears_in_detail_rows():
     detail = detail_rows(resolved, overview_windows(['2026-05-08'])[0])
 
     assert detail.loc[0, 'Trigger'] == 'VWAP Reclaim'
-    assert detail.loc[0, 'VWAP Reclaim'] == 'success'
+    assert detail.loc[0, 'VWAP Trigger'] == 'success'
 
 
 def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
@@ -509,7 +543,7 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
             'Trigger Day': 'Success',
             '1m ORH': 'success',
             '5m ORH': '-',
-            'VWAP Reclaim': '',
+            'VWAP Trigger': '',
             'PDH': 'Gap',
             'current_pct_raw': 0.04,
             'max_pct_raw': 0.10,
@@ -521,7 +555,7 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
             'Trigger Day': 'Success',
             '1m ORH': 'failed',
             '5m ORH': 'success',
-            'VWAP Reclaim': 'success',
+            'VWAP Trigger': 'success',
             'PDH': '-',
             'current_pct_raw': 0.02,
             'max_pct_raw': 0.08,
@@ -533,7 +567,7 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
             'Trigger Day': 'Success',
             '1m ORH': '-',
             '5m ORH': 'failed',
-            'VWAP Reclaim': 'failed',
+            'VWAP Trigger': '',
             'PDH': 'success',
             'current_pct_raw': 0.01,
             'max_pct_raw': 0.05,
@@ -545,7 +579,7 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
             'Trigger Day': 'Unresolved',
             '1m ORH': '',
             '5m ORH': '',
-            'VWAP Reclaim': '',
+            'VWAP Trigger': '',
             'PDH': '-',
             'current_pct_raw': None,
             'max_pct_raw': None,
@@ -606,7 +640,7 @@ def test_trigger_outcome_by_window_tables_drop_window_column_and_group_triggers(
     assert 'Ineligible' in last_10.columns
     assert last_10.loc[0, 'Triggered'] == 2
     assert last_10.loc[1, 'Triggered'] == 2
-    assert last_10.loc[2, 'Triggered'] == 2
+    assert last_10.loc[2, 'Triggered'] == 1
     assert last_10.loc[3, 'Triggered'] == 1
     assert last_10.loc[4, 'Triggered'] == 0
 
@@ -685,18 +719,18 @@ def test_trigger_outcome_follow_through_uses_successful_trigger_rows_only():
     assert one_last_10['Median Max'] == '10.0%'
 
 
-def test_trigger_outcome_includes_vwap_reclaim_event_rows():
+def test_trigger_outcome_includes_qualified_vwap_trigger_rows():
     comparison = trigger_outcome_comparison(_trigger_comparison_history())
 
     vwap_last_10 = comparison[(comparison['Trigger'] == 'VWAP Reclaim') & (comparison['Window'] == 'Last 10 Setup Dates')].iloc[0]
     assert vwap_last_10['Setups'] == 4
     assert vwap_last_10['Eligible'] == 4
-    assert vwap_last_10['Triggered'] == 2
-    assert vwap_last_10['Trigger Rate'] == '50%'
+    assert vwap_last_10['Triggered'] == 1
+    assert vwap_last_10['Trigger Rate'] == '25%'
     assert vwap_last_10['Success'] == 1
-    assert vwap_last_10['Success %'] == '50%'
-    assert vwap_last_10['Failed'] == 1
-    assert vwap_last_10['Fail %'] == '50%'
+    assert vwap_last_10['Success %'] == '100%'
+    assert vwap_last_10['Failed'] == 0
+    assert vwap_last_10['Fail %'] == '0%'
     assert vwap_last_10['Later Failed Count'] == 1
     assert vwap_last_10['Later Failed %'] == '100%'
     assert vwap_last_10['Median Max'] == '8.0%'
@@ -727,7 +761,7 @@ def test_trigger_outcome_alt_required_derives_event_result_and_denominator():
                 'Trigger Day': 'Success',
                 '1m ORH': 'failed',
                 '5m ORH': 'failed',
-                'VWAP Reclaim': '',
+                'VWAP Trigger': '',
                 'PDH': '-',
                 'current_pct_raw': 0.03,
                 'max_pct_raw': 0.07,
@@ -739,7 +773,7 @@ def test_trigger_outcome_alt_required_derives_event_result_and_denominator():
                 'Trigger Day': 'Success',
                 '1m ORH': 'success',
                 '5m ORH': '-',
-                'VWAP Reclaim': '',
+                'VWAP Trigger': '',
                 'PDH': 'Gap',
                 'current_pct_raw': 0.05,
                 'max_pct_raw': 0.10,
@@ -751,7 +785,7 @@ def test_trigger_outcome_alt_required_derives_event_result_and_denominator():
                 'Trigger Day': 'Unresolved',
                 '1m ORH': '',
                 '5m ORH': '',
-                'VWAP Reclaim': '',
+                'VWAP Trigger': '',
                 'PDH': '-',
                 'current_pct_raw': None,
                 'max_pct_raw': None,
@@ -784,7 +818,7 @@ def test_vwap_success_prevents_fallback_alt_required_event_count():
                 'Trigger Day': 'Success',
                 '1m ORH': 'failed',
                 '5m ORH': 'failed',
-                'VWAP Reclaim': 'success',
+                'VWAP Trigger': 'success',
                 'PDH': '-',
                 'current_pct_raw': 0.04,
                 'max_pct_raw': 0.11,
@@ -796,7 +830,7 @@ def test_vwap_success_prevents_fallback_alt_required_event_count():
                 'Trigger Day': 'Success',
                 '1m ORH': 'failed',
                 '5m ORH': 'failed',
-                'VWAP Reclaim': '',
+                'VWAP Trigger': '',
                 'PDH': '-',
                 'current_pct_raw': 0.03,
                 'max_pct_raw': 0.07,
@@ -840,7 +874,7 @@ def test_trigger_outcome_zero_success_display_uses_dashes_for_follow_through():
             'Trigger Day': 'Success',
             '1m ORH': 'failed',
             '5m ORH': 'success',
-            'VWAP Reclaim': '',
+            'VWAP Trigger': '',
             'PDH': '-',
             'current_pct_raw': 0.03,
             'max_pct_raw': 0.09,
@@ -900,7 +934,7 @@ def test_filter_detail_rows_by_trigger_level_and_result():
     pdh_blank = filter_detail_rows(detail, trigger_level='PDH', trigger_result='blank')
     assert pdh_blank['Ticker'].tolist() == ['AAA', 'EEE', 'BBB', 'CCC']
 
-    vwap_success = filter_detail_rows(detail.assign(**{'VWAP Reclaim': ['success', '', '', '']}), trigger_level='VWAP Reclaim', trigger_result='success')
+    vwap_success = filter_detail_rows(detail.assign(**{'VWAP Trigger': ['success', '', '', '']}), trigger_level='VWAP Reclaim', trigger_result='success')
     assert vwap_success['Ticker'].tolist() == ['AAA']
 
 
@@ -1137,7 +1171,7 @@ def test_opening_behavior_main_table_includes_vwap_reclaim_success_row():
         'PDH': '-',
         '1m ORH': 'failed',
         '5m ORH': 'failed',
-        'VWAP Reclaim': 'success',
+        'VWAP Trigger': 'success',
         'max_pct_raw': 0.12,
     }])
 
