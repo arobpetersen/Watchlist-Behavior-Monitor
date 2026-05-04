@@ -741,6 +741,37 @@ def apply_one_min_quality_notes(record: dict, intraday: pd.DataFrame | None = No
     }
 
 
+ACTIONABLE_TRIGGERS = {'VWAP Reclaim', '1m ORH', '5m ORH', 'PDH', 'Alt Required'}
+
+
+def apply_weak_close_note(record: dict) -> dict:
+    trigger_type = _blank(record.get('trigger_type'))
+    if trigger_type not in ACTIONABLE_TRIGGERS:
+        return {'notes': _blank(record.get('notes'))}
+    if trigger_day_status(trigger_type, record.get('fail_day')) != 'Success':
+        return {'notes': _blank(record.get('notes'))}
+
+    close = _num(record.get('close_price'))
+    breakeven = _num(record.get('trigger_level'))
+    if breakeven is None:
+        breakeven = _num(record.get('base_price'))
+    for key in ['reference_price', 'entry_price', 'setup_price']:
+        if breakeven is None:
+            breakeven = _num(record.get(key))
+
+    below_breakeven = close is not None and breakeven is not None and close < breakeven
+    if close is None or breakeven is None:
+        current_pct = _num(record.get('current_pct'))
+        below_breakeven = current_pct is not None and current_pct < 0
+    if not below_breakeven:
+        return {'notes': _blank(record.get('notes'))}
+
+    note = 'VWAP reclaim, weak close below BE' if trigger_type == 'VWAP Reclaim' else 'Weak close below BE'
+    notes = [existing for existing in _blank(record.get('notes')).split('; ') if existing]
+    notes.append(note)
+    return {'notes': '; '.join(dict.fromkeys(notes))}
+
+
 def opening_range_result(or_json: str, minutes: int, trigger_type: str, intraday: pd.DataFrame | None = None, daily: pd.DataFrame | None = None) -> str:
     data = _loads(or_json)
     if trigger_type == 'Alt Required' and minutes in {1, 5}:
@@ -1337,6 +1368,7 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
             record['one_min_result'] = raw_one_min_result or '-'
             record['five_min_result'] = '-' if record['trigger_type'] == '1m ORH' else raw_five_min_result or '-'
         record.update(apply_one_min_quality_notes(record, ticker_intraday))
+        record.update(apply_weak_close_note(record))
         record['status'] = status_for(record['trigger_type'], record['fail_day'])
         rows.append(record)
 

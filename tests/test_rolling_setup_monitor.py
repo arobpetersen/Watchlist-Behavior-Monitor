@@ -10,6 +10,7 @@ from src.rolling_setup_monitor import (
     _follow_through,
     _vwap_reclaim_fields,
     apply_setup_rating_updates,
+    apply_weak_close_note,
     day_summary,
     derive_trigger_reference,
     detail_table,
@@ -560,6 +561,114 @@ def test_one_min_quality_notes_skip_weak_when_follow_through_confirmed_or_atr_mi
     assert zero['one_min_follow_through_atr'] is None
     assert missing['notes'] == ''
     assert zero['notes'] == ''
+
+
+def test_weak_close_note_for_vwap_reclaim_below_trigger_price():
+    out = apply_weak_close_note({
+        'trigger_type': 'VWAP Reclaim',
+        'fail_day': None,
+        'trigger_level': 10.5,
+        'close_price': 10.1,
+        'notes': '',
+    })
+
+    assert out['notes'] == 'VWAP reclaim, weak close below BE'
+
+
+def test_weak_close_note_for_non_vwap_trigger_below_breakeven():
+    out = apply_weak_close_note({
+        'trigger_type': '5m ORH',
+        'fail_day': None,
+        'trigger_level': 10.5,
+        'close_price': 10.1,
+        'notes': '',
+    })
+
+    assert out['notes'] == 'Weak close below BE'
+
+
+def test_weak_close_note_skips_strong_close_failures_and_missing_inputs():
+    strong = apply_weak_close_note({
+        'trigger_type': '1m ORH',
+        'fail_day': None,
+        'trigger_level': 10.5,
+        'close_price': 10.7,
+        'notes': '',
+    })
+    failed = apply_weak_close_note({
+        'trigger_type': '1m ORH',
+        'fail_day': 0,
+        'trigger_level': 10.5,
+        'close_price': 10.1,
+        'notes': '',
+    })
+    missing = apply_weak_close_note({
+        'trigger_type': '1m ORH',
+        'fail_day': None,
+        'notes': '',
+    })
+
+    assert strong['notes'] == ''
+    assert failed['notes'] == ''
+    assert missing['notes'] == ''
+
+
+def test_weak_close_note_appends_without_duplicates_and_uses_current_return_fallback():
+    out = apply_weak_close_note({
+        'trigger_type': 'Alt Required',
+        'fail_day': None,
+        'current_pct': -0.01,
+        'notes': 'Wide 5m OR',
+    })
+    duplicate = apply_weak_close_note({
+        'trigger_type': 'Alt Required',
+        'fail_day': None,
+        'current_pct': -0.01,
+        'notes': out['notes'],
+    })
+
+    assert out['notes'] == 'Wide 5m OR; Weak close below BE'
+    assert duplicate['notes'] == out['notes']
+
+
+def test_format_section_table_displays_weak_close_note():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'AAPL',
+        'status': 'Active',
+        'trigger_type': 'VWAP Reclaim',
+        'one_min_result': 'failed',
+        'five_min_result': 'failed',
+        'vwap_qualified_trigger_result': 'success',
+        'notes': 'VWAP reclaim, weak close below BE',
+        'current_pct': -0.01,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.5,
+        'reference_low': 9.8,
+        'reference_basis': 'VWAP Reclaim',
+        'trigger_break_time': pd.Timestamp('2026-05-01 10:10'),
+        'latest_close': 10.1,
+        'close_price': 10.1,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': -0.01,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Notes'] == 'VWAP reclaim, weak close below BE'
+    assert main_table(table).loc[0, 'Notes'] == 'VWAP reclaim, weak close below BE'
 
 
 def test_one_min_follow_through_atr_formula():
