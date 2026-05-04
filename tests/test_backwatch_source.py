@@ -120,7 +120,7 @@ def test_scan_source_files_mixed_statuses(tmp_path: Path):
     (source_dir / '2026-05-01_backwatch.csv').write_text('ticker\nNVDA\n')
     (watchlists_dir / canonical_filename('2026-05-01', '2026-05-01_backwatch')).write_text('ticker,rating,setup,focus,key_level\nNVDA,,,,\n')
     (source_dir / 'backwatch_without_date.csv').write_text('ticker\nTSLA\n')
-    (source_dir / '2026-05-02_backwatch.csv').write_text('ticker\nnot a symbol?\n')
+    (source_dir / '2026-05-04_backwatch.csv').write_text('ticker\nnot a symbol?\n')
     (source_dir / 'sample_2026-05-03_backwatch.csv').write_text('ticker\nAAPL\n')
     con = get_connection(':memory:')
 
@@ -131,8 +131,26 @@ def test_scan_source_files_mixed_statuses(tmp_path: Path):
     assert by_file['2026-04-30_backwatch.csv'].ticker_count == 2
     assert by_file['2026-05-01_backwatch.csv'].status == 'Already Processed'
     assert by_file['backwatch_without_date.csv'].status == 'Missing Date'
-    assert by_file['2026-05-02_backwatch.csv'].status == 'No Valid Tickers'
+    assert by_file['2026-05-04_backwatch.csv'].status == 'No Valid Tickers'
     assert by_file['sample_2026-05-03_backwatch.csv'].status == 'Skipped Sample/Test'
+
+
+def test_scan_source_files_skips_weekend_setup_dates(tmp_path: Path):
+    source_dir = tmp_path / 'tc2000'
+    watchlists_dir = tmp_path / 'watchlists'
+    source_dir.mkdir()
+    watchlists_dir.mkdir()
+    (source_dir / '2026-05-02_backwatch.csv').write_text('ticker\nAAPL\n')
+    (source_dir / '2026-05-03_backwatch.csv').write_text('ticker\nMSFT\n')
+    con = get_connection(':memory:')
+
+    rows = scan_source_files(source_dir, watchlists_dir, con)
+    by_file = {r.source_file: r for r in rows}
+
+    assert by_file['2026-05-02_backwatch.csv'].status == 'Skipped Weekend'
+    assert by_file['2026-05-02_backwatch.csv'].message == 'Skipped: setup date 2026-05-02 is a weekend/non-trading date.'
+    assert by_file['2026-05-03_backwatch.csv'].status == 'Skipped Weekend'
+    assert by_file['2026-05-03_backwatch.csv'].message == 'Skipped: setup date 2026-05-03 is a weekend/non-trading date.'
 
 
 def test_process_new_source_files_saves_only_new_files(tmp_path: Path):
@@ -153,6 +171,25 @@ def test_process_new_source_files_saves_only_new_files(tmp_path: Path):
         '2026-04-30_backwatch.csv': 'Processed',
         '2026-05-01_backwatch.csv': 'Already Processed',
     }
+
+
+def test_process_new_source_files_skips_weekend_and_processes_weekday(tmp_path: Path):
+    source_dir = tmp_path / 'tc2000'
+    watchlists_dir = tmp_path / 'watchlists'
+    source_dir.mkdir()
+    watchlists_dir.mkdir()
+    (source_dir / '2026-05-02_backwatch.csv').write_text('ticker\nAAPL\n')
+    (source_dir / '2026-05-04_backwatch.csv').write_text('ticker\nMSFT\n')
+    con = get_connection(':memory:')
+
+    rows, saved = process_new_source_files(source_dir, watchlists_dir, con)
+    by_file = {r.source_file: r for r in rows}
+
+    assert by_file['2026-05-02_backwatch.csv'].status == 'Skipped Weekend'
+    assert by_file['2026-05-02_backwatch.csv'].message == 'Skipped: setup date 2026-05-02 is a weekend/non-trading date.'
+    assert by_file['2026-05-04_backwatch.csv'].status == 'Processed'
+    assert [path.name for path in saved] == [canonical_filename('2026-05-04', '2026-05-04_backwatch')]
+    assert not (watchlists_dir / canonical_filename('2026-05-02', '2026-05-02_backwatch')).exists()
 
 
 def test_reprocess_source_file_removes_old_and_inserts_corrected_tickers(tmp_path: Path):
@@ -200,3 +237,19 @@ def test_reprocess_source_file_removes_related_features_and_labels_but_leaves_ba
     assert con.execute('select count(*) from entry_day_features').fetchone()[0] == 0
     assert con.execute('select count(*) from behavior_labels').fetchone()[0] == 0
     assert con.execute('select count(*) from daily_bars').fetchone()[0] == 1
+
+
+def test_reprocess_source_file_rejects_weekend_setup_date(tmp_path: Path):
+    source_dir = tmp_path / 'tc2000'
+    watchlists_dir = tmp_path / 'watchlists'
+    source_dir.mkdir()
+    watchlists_dir.mkdir()
+    source = source_dir / '2026-05-02_backwatch.csv'
+    source.write_text('ticker\nAAPL\n')
+    con = get_connection(':memory:')
+
+    with pytest.raises(ValueError, match='setup date 2026-05-02 is a weekend/non-trading date'):
+        reprocess_source_file(con, source, watchlists_dir)
+
+    assert con.execute('select count(*) from watchlist_candidates').fetchone()[0] == 0
+    assert not (watchlists_dir / canonical_filename('2026-05-02', '2026-05-02_backwatch')).exists()

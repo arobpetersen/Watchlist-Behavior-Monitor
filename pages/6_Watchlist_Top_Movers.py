@@ -16,7 +16,7 @@ from src.watchlist_top_movers import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-TOP_MOVERS_CACHE_VERSION = 'top-movers-qualified-vwap-v1'
+TOP_MOVERS_CACHE_VERSION = 'top-movers-weekend-filter-v1'
 
 
 @st.cache_data(show_spinner=False)

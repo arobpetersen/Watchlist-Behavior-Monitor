@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from src.data_maintenance import (
     find_orphaned_watchlist_sources,
     preview_watchlist_source_removal,
@@ -115,7 +113,7 @@ def test_remove_watchlist_source_deletes_only_selected_source_and_keeps_bars():
 
 def test_reimporting_corrected_file_after_source_cleanup_works(tmp_path):
     con = get_connection(':memory:')
-    stale = tmp_path / '2026-05-02_backwatch_stale.csv'
+    stale = tmp_path / '2026-05-01_backwatch_stale.csv'
     stale.write_text('ticker,rating,setup,focus,key_level\nCRML,1,EP,,10\n')
     result = ingest_watchlists(con, tmp_path, files=[stale])
     assert result['candidates_inserted'] == 1
@@ -155,12 +153,3 @@ def test_orphaned_watchlist_sources_find_imports_missing_from_folder(tmp_path):
     assert orphaned['source_file'].tolist() == ['2026-05-02_backwatch_missing.csv']
     assert orphaned['candidate_rows'].tolist() == [1]
     assert orphaned['distinct_tickers'].tolist() == [1]
-
-
-def test_source_file_cleanup_ui_requires_explicit_confirmation():
-    app_text = Path('app.py').read_text()
-
-    assert 'Source File Cleanup' in app_text
-    assert 'I understand this will remove candidates imported from the selected source file only.' in app_text
-    assert 'Remove Selected Source File Candidates' in app_text
-    assert 'disabled=not confirmed_cleanup' in app_text

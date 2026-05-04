@@ -40,7 +40,7 @@ def test_reimporting_same_watchlist_does_not_duplicate_candidates(tmp_path: Path
 
 def test_importing_new_setup_date_preserves_prior_setup_dates(tmp_path: Path):
     first_file = tmp_path / '2026-05-01_watchlist.csv'
-    second_file = tmp_path / '2026-05-02_watchlist.csv'
+    second_file = tmp_path / '2026-05-04_watchlist.csv'
     first_file.write_text('ticker\nAAPL\n')
     con = get_connection(':memory:')
 
@@ -49,7 +49,7 @@ def test_importing_new_setup_date_preserves_prior_setup_dates(tmp_path: Path):
     ingest_watchlists(con, tmp_path, files=[second_file])
 
     rows = con.execute('select cast(watchlist_date as varchar), ticker from watchlist_candidates order by watchlist_date, ticker').fetchall()
-    assert rows == [('2026-05-01', 'AAPL'), ('2026-05-02', 'MSFT')]
+    assert rows == [('2026-05-01', 'AAPL'), ('2026-05-04', 'MSFT')]
 
 
 def test_ingest_skips_sample_test_example_files(tmp_path: Path):
@@ -64,3 +64,18 @@ def test_ingest_skips_sample_test_example_files(tmp_path: Path):
     assert out['skipped_sample_files'] == 3
     assert out['candidates_inserted'] == 1
     assert con.execute('select ticker from watchlist_candidates').fetchall() == [('TSLA',)]
+
+
+def test_ingest_skips_weekend_setup_dates(tmp_path: Path):
+    (tmp_path / '2026-05-02_watchlist.csv').write_text('ticker\nAAPL\n')
+    (tmp_path / '2026-05-03_watchlist.csv').write_text('ticker\nMSFT\n')
+    (tmp_path / '2026-05-04_watchlist.csv').write_text('ticker\nNVDA\n')
+    con = get_connection(':memory:')
+
+    out = ingest_watchlists(con, tmp_path)
+
+    assert out['skipped_weekend_files'] == 2
+    assert out['candidates_inserted'] == 1
+    assert any('2026-05-02_watchlist.csv: Skipped: setup date 2026-05-02 is a weekend/non-trading date.' in failure for failure in out['failures'])
+    assert any('2026-05-03_watchlist.csv: Skipped: setup date 2026-05-03 is a weekend/non-trading date.' in failure for failure in out['failures'])
+    assert con.execute('select cast(watchlist_date as varchar), ticker from watchlist_candidates').fetchall() == [('2026-05-04', 'NVDA')]

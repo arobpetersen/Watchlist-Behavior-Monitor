@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.backwatch_source import infer_setup_date, is_sample_or_test_file
+from src.backwatch_source import infer_setup_date, is_sample_or_test_file, is_weekend_setup_date, weekend_setup_date_message
 
 
 def infer_date(name: str) -> str | None:
@@ -20,12 +20,17 @@ def ingest_watchlists(con, watchlists_dir: Path, files: list[Path] | None = None
         files = sorted([Path(f) for f in files])
     inserted, failures = 0, []
     skipped_sample_files = 0
+    skipped_weekend_files = 0
     for f in files:
         if is_sample_or_test_file(f.name):
             skipped_sample_files += 1
             continue
         rows_seen, rows_inserted = 0, 0
         d = infer_date(f.name)
+        if is_weekend_setup_date(d):
+            skipped_weekend_files += 1
+            failures.append(f'{f.name}: {weekend_setup_date_message(d)}')
+            continue
         h = hashlib.sha256(f.read_bytes()).hexdigest()
         try:
             df = pd.read_csv(f) if f.suffix.lower() == '.csv' else pd.read_excel(f)
@@ -52,5 +57,6 @@ def ingest_watchlists(con, watchlists_dir: Path, files: list[Path] | None = None
         'files_scanned': len(files),
         'candidates_inserted': inserted,
         'skipped_sample_files': skipped_sample_files,
+        'skipped_weekend_files': skipped_weekend_files,
         'failures': failures,
     }

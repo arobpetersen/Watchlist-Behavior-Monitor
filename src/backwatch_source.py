@@ -92,6 +92,20 @@ def infer_setup_date(name: str) -> str | None:
     return None
 
 
+def is_weekend_setup_date(setup_date: str | None) -> bool:
+    if not setup_date:
+        return False
+    try:
+        parsed = datetime.strptime(setup_date, '%Y-%m-%d').date()
+    except ValueError:
+        return False
+    return parsed.weekday() >= 5
+
+
+def weekend_setup_date_message(setup_date: str) -> str:
+    return f'Skipped: setup date {setup_date} is a weekend/non-trading date.'
+
+
 def _read_source_file(path: Path) -> pd.DataFrame:
     suffix = path.suffix.lower()
     if suffix == '.csv':
@@ -179,6 +193,9 @@ def scan_source_files(source_dir: Path, watchlists_dir: Path, con=None) -> list[
         if not setup_date:
             statuses.append(SourceFileStatus(source.name, source.path, None, None, 'Missing Date', 'No setup date found in filename.'))
             continue
+        if is_weekend_setup_date(setup_date):
+            statuses.append(SourceFileStatus(source.name, source.path, setup_date, None, 'Skipped Weekend', weekend_setup_date_message(setup_date)))
+            continue
         try:
             normalized = normalize_backwatch_file(source.path)
         except Exception as exc:
@@ -226,6 +243,8 @@ def reprocess_source_file(con, source_path: Path, watchlists_dir: Path) -> dict:
     setup_date = infer_setup_date(source_path.name)
     if not setup_date:
         raise ValueError('No setup date found in filename.')
+    if is_weekend_setup_date(setup_date):
+        raise ValueError(weekend_setup_date_message(setup_date))
     normalized = normalize_backwatch_file(source_path)
     if normalized.empty:
         raise ValueError('No symbol-like tickers detected.')
