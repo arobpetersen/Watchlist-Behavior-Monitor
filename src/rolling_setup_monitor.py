@@ -151,6 +151,12 @@ def _pct(numerator: float | None, denominator: float | None) -> float | None:
     return float(numerator) / float(denominator)
 
 
+def _change_pct(value: float | None, base: float | None) -> float | None:
+    if value is None or base is None:
+        return None
+    return _pct(float(value) - float(base), base)
+
+
 def _fmt_pct(value) -> str:
     return '' if value is None or pd.isna(value) else f'{float(value) * 100:.1f}%'
 
@@ -868,11 +874,11 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
     return {
         'latest_trading_date': latest['trading_date'],
         'latest_close': latest_close,
-        'current_pct': _pct(latest_close - base_price, base_price),
-        'max_pct': _pct(max_high - base_price, base_price),
-        'd3_high_pct': _pct(d3_high - base_price, base_price) if d3_high is not None else None,
-        'current_pct_from_setup_close': _pct(latest_close - setup_close, setup_close),
-        'max_gain_from_setup_close': _pct(max_high - setup_close, setup_close),
+        'current_pct': _change_pct(latest_close, base_price),
+        'max_pct': _change_pct(max_high, base_price),
+        'd3_high_pct': _change_pct(d3_high, base_price),
+        'current_pct_from_setup_close': _change_pct(latest_close, setup_close),
+        'max_gain_from_setup_close': _change_pct(max_high, setup_close),
         'fail_day': preset_fail_day if row.get('trigger_type') in {'Failed OR Trigger', 'Failed PDH Trigger'} else fail_day(intraday, daily, row.get('trigger_break_time'), reference_low),
         'retest_day': retest_day(intraday, daily, row.get('trigger_break_time'), trigger_level),
         'base_price': base_price,

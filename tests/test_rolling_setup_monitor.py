@@ -7,6 +7,7 @@ import pandas as pd
 
 from src.rolling_setup_monitor import (
     _format_section_table,
+    _follow_through,
     _vwap_reclaim_fields,
     apply_setup_rating_updates,
     day_summary,
@@ -569,6 +570,30 @@ def test_one_min_follow_through_atr_formula():
     })
 
     assert one_min_follow_through_atr(_or(orh=10.0, orh_break_time='2026-05-01 09:31'), 2.0, intraday) == 0.25
+
+
+def test_follow_through_handles_missing_base_prices():
+    row = {
+        'watchlist_date': '2026-05-01',
+        'ticker': 'AAPL',
+        'trigger_type': 'No Trigger',
+        'trigger_level': None,
+        'reference_low': None,
+        'close_price': None,
+        'trigger_break_time': None,
+    }
+    daily = pd.DataFrame([
+        {'ticker': 'AAPL', 'trading_date': '2026-05-01', 'high': 10.5, 'low': 9.5, 'close': 10.0},
+        {'ticker': 'AAPL', 'trading_date': '2026-05-02', 'high': 11.0, 'low': 10.0, 'close': 10.8},
+    ])
+
+    out = _follow_through(row, daily, pd.DataFrame())
+
+    assert out['latest_close'] == 10.8
+    assert out['base_price'] is None
+    assert out['current_pct'] is None
+    assert out['max_pct'] is None
+    assert out['current_pct_from_setup_close'] is None
 
 
 def test_pdh_never_breaks_does_not_fall_back_to_clean_1m():
