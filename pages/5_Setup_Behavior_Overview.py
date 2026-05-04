@@ -16,7 +16,7 @@ from src.setup_behavior_overview import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-OVERVIEW_CACHE_VERSION = 'setup-overview-display-v3'
+OVERVIEW_CACHE_VERSION = 'setup-overview-display-v4'
 
 
 @st.cache_data(show_spinner=False)
@@ -82,11 +82,11 @@ else:
     st.markdown(overview['snapshot_cards'][selected_window], unsafe_allow_html=True)
     st.write(overview['reads'][selected_window])
 
-    st.subheader('Selected Window Opening Path')
+    st.subheader('Selected Window Successful Triggers')
     st.dataframe(overview['opening_behavior_main'][selected_window], width='stretch', hide_index=True)
     st.caption(
-        'Main rows show selected-window setups where each trigger succeeded. Richer path detail remains in Supporting '
-        'Selected-Window Stats.'
+        'Currently Active and Later Failed are measured among setups where that trigger succeeded. Richer path detail '
+        'remains in Supporting Selected-Window Stats.'
     )
 
     st.subheader('Trigger Event Outcomes Across Windows')
@@ -94,7 +94,7 @@ else:
         st.markdown(f'**{window_label}**')
         st.dataframe(table, width='stretch', hide_index=True)
     st.caption(
-        'Triggered % uses eligible setups. Failed % and Success % use triggered setups.'
+        'Triggered % uses eligible setups. Failed %, Success %, Currently Active %, and Later Failed % use triggered setups.'
     )
 
     st.subheader('Supporting Stats / Primary Trigger Outcome')

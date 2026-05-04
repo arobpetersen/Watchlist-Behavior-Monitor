@@ -493,8 +493,12 @@ def test_trigger_event_main_tables_use_compact_count_percent_columns():
     assert last_10.loc[0, 'Triggered'] == '2 (50%)'
     assert last_10.loc[0, 'Failed'] == '1 (50%)'
     assert last_10.loc[0, 'Success'] == '1 (50%)'
+    assert last_10.loc[0, 'Currently Active'] == '1 (50%)'
+    assert last_10.loc[0, 'Later Failed'] == '1 (50%)'
     assert 'Median Current' not in last_10.columns
     assert 'Ineligible' not in last_10.columns
+    assert 'Active %' not in last_10.columns
+    assert 'Later Failed %' not in last_10.columns
 
 
 def test_trigger_outcome_internal_table_includes_alt_required_event_rows():
@@ -848,8 +852,8 @@ def test_opening_behavior_main_table_shows_successful_trigger_rows_only():
     by_trigger = main.set_index('Trigger')
     assert by_trigger.loc['1m ORH', 'Count'] == 1
     assert by_trigger.loc['1m ORH', '% of Setups'] == '17%'
-    assert by_trigger.loc['1m ORH', 'Active %'] == '100%'
-    assert by_trigger.loc['1m ORH', 'Later Failed %'] == '0%'
+    assert by_trigger.loc['1m ORH', 'Currently Active'] == '1 (100%)'
+    assert by_trigger.loc['1m ORH', 'Later Failed'] == '0 (0%)'
     assert by_trigger.loc['1m ORH', 'Median Max'] == '10.0%'
     assert by_trigger.loc['5m ORH', 'Count'] == 1
     assert by_trigger.loc['PDH', 'Count'] == 1
@@ -874,9 +878,16 @@ def test_opening_behavior_main_table_zero_count_display():
 
     assert main.loc['1m ORH', 'Count'] == 0
     assert main.loc['1m ORH', '% of Setups'] == '0%'
-    assert main.loc['1m ORH', 'Active %'] == '-'
-    assert main.loc['1m ORH', 'Later Failed %'] == '-'
+    assert main.loc['1m ORH', 'Currently Active'] == '-'
+    assert main.loc['1m ORH', 'Later Failed'] == '-'
     assert main.loc['1m ORH', 'Median Max'] == '-'
+
+
+def test_setup_behavior_page_uses_successful_triggers_section_title():
+    page = open('pages/5_Setup_Behavior_Overview.py', encoding='utf-8').read()
+
+    assert "st.subheader('Selected Window Successful Triggers')" in page
+    assert "st.subheader('Selected Window Opening Path')" not in page
 
 
 def test_opening_behavior_detail_retains_richer_path_rows():

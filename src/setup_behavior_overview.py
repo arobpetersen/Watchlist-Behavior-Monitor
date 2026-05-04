@@ -353,8 +353,8 @@ OPENING_BEHAVIOR_MAIN_COLUMNS = [
     'Trigger',
     'Count',
     '% of Setups',
-    'Active %',
-    'Later Failed %',
+    'Currently Active',
+    'Later Failed',
     'Median Max',
 ]
 MAIN_OPENING_TRIGGERS = ['1m ORH', '5m ORH', 'PDH', 'Alt Required']
@@ -462,12 +462,14 @@ def opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
 
 def _main_opening_row(trigger_name: str, rows: pd.DataFrame, total_setups: int) -> dict:
     count = len(rows)
+    active_count = int(rows['Current Status'].eq('Active').sum()) if 'Current Status' in rows else 0
+    later_failed_count = int(_is_later_failed(rows['Current Status']).sum()) if 'Current Status' in rows else 0
     return {
         'Trigger': trigger_name,
         'Count': count,
         '% of Setups': _pct_of_rows(count, total_setups),
-        'Active %': _pct_of_rows(int(rows['Current Status'].eq('Active').sum()) if 'Current Status' in rows else 0, count),
-        'Later Failed %': _pct_of_rows(int(_is_later_failed(rows['Current Status']).sum()) if 'Current Status' in rows else 0, count),
+        'Currently Active': _count_with_pct(active_count, _pct_of_rows(active_count, count)) if count else '-',
+        'Later Failed': _count_with_pct(later_failed_count, _pct_of_rows(later_failed_count, count)) if count else '-',
         'Median Max': _fmt_pct(rows['max_pct_raw'].median() if 'max_pct_raw' in rows and count else None),
     }
 
@@ -655,7 +657,9 @@ TRIGGER_COMPARISON_COLUMNS = [
     'Fail %',
     'Success',
     'Success %',
+    'Later Failed Count',
     'Later Failed %',
+    'Active Count',
     'Active %',
     'Median Current',
     'Median Max',
@@ -667,8 +671,8 @@ TRIGGER_EVENT_MAIN_COLUMNS = [
     'Triggered',
     'Failed',
     'Success',
-    'Active %',
-    'Later Failed %',
+    'Currently Active',
+    'Later Failed',
     'Median Max',
 ]
 
@@ -730,7 +734,9 @@ def trigger_outcome_comparison(history_by_window: dict[str, pd.DataFrame]) -> pd
                 'Success %': _fmt_rate(int(success_mask.sum()), triggered_count),
                 'Failed': int(failed_mask.sum()),
                 'Fail %': _fmt_rate(int(failed_mask.sum()), triggered_count),
+                'Later Failed Count': later_failed_count,
                 'Later Failed %': _fmt_rate(later_failed_count, triggered_count),
+                'Active Count': active_count,
                 'Active %': _fmt_rate(active_count, triggered_count),
                 'Median Current': _fmt_pct(triggered['current_pct_raw'].median() if 'current_pct_raw' in triggered and triggered_count else None),
                 'Median Max': _fmt_pct(triggered['max_pct_raw'].median() if 'max_pct_raw' in triggered and triggered_count else None),
@@ -815,8 +821,8 @@ def trigger_event_main_tables(trigger_outcomes: pd.DataFrame) -> dict[str, pd.Da
             'Triggered': [_count_with_pct(count, pct) for count, pct in zip(table['Triggered'], table['Trigger Rate'])],
             'Failed': [_count_with_pct(count, pct) for count, pct in zip(table['Failed'], table['Fail %'])],
             'Success': [_count_with_pct(count, pct) for count, pct in zip(table['Success'], table['Success %'])],
-            'Active %': table['Active %'],
-            'Later Failed %': table['Later Failed %'],
+            'Currently Active': [_count_with_pct(count, pct) if pct != '-' else '-' for count, pct in zip(table['Active Count'], table['Active %'])],
+            'Later Failed': [_count_with_pct(count, pct) if pct != '-' else '-' for count, pct in zip(table['Later Failed Count'], table['Later Failed %'])],
             'Median Max': table['Median Max'],
         })
         tables[window_label] = out[TRIGGER_EVENT_MAIN_COLUMNS]
