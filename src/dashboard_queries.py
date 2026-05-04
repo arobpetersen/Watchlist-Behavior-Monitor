@@ -11,7 +11,7 @@ DISPLAY_NULL = '—'
 def _is_missing(value) -> bool:
     if value is None or pd.isna(value):
         return True
-    if isinstance(value, str) and value.strip().lower() in {'nan', 'none'}:
+    if isinstance(value, str) and value.strip().lower() in {'', 'nan', 'none'}:
         return True
     return False
 

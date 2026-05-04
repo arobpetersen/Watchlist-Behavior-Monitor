@@ -9,6 +9,8 @@ from src.dashboard_queries import (
     TICKER_DETAIL_COLUMNS,
     _clean_display_value,
     _close_bucket,
+    _format_num,
+    _format_pct,
     _or_result,
     _rating_bucket,
     _vwap_result,
@@ -72,8 +74,18 @@ def test_close_bucket_formatting(value, expected):
 def test_clean_display_value_hides_missing_values():
     assert _clean_display_value(None) == ''
     assert _clean_display_value(float('nan')) == ''
+    assert _clean_display_value('') == ''
+    assert _clean_display_value('   ') == ''
     assert _clean_display_value('nan') == ''
     assert _clean_display_value('setup') == 'setup'
+
+
+def test_numeric_formatters_treat_blank_strings_as_missing():
+    assert _format_num('') == ''
+    assert _format_num('   ') == ''
+    assert _format_pct('') == ''
+    assert _rating_bucket('') == 'No Rating'
+    assert _close_bucket('') == ''
 
 
 def test_display_labels_use_atr14_not_atr20():
