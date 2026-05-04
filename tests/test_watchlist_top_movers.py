@@ -22,6 +22,8 @@ def _history() -> pd.DataFrame:
             'Current %': f'{index:.1f}%',
             'Max %': f'{index + 5:.1f}%',
             'Latest Status Date': '2026-04-30',
+            'Ticker Latest Bar Date': '2026-04-30',
+            'Global Latest Bar Date': '2026-04-30',
             'current_pct_raw': float(index) / 100,
             'max_pct_raw': float(index + 5) / 100,
             'Max High': 20 + index,
@@ -145,6 +147,8 @@ def test_vwap_reclaim_can_display_as_top_mover_trigger():
         'Trigger Day': 'Success',
         'Current Status': 'Active',
         'Latest Status Date': '2026-04-05',
+        'Ticker Latest Bar Date': '2026-04-05',
+        'Global Latest Bar Date': '2026-04-05',
         '1m ORH': 'failed',
         '5m ORH': 'failed',
         'VWAP Reclaim': 'success',
@@ -168,6 +172,8 @@ def test_raw_vwap_reclaim_does_not_display_as_top_mover_trigger_when_not_resolve
         'Trigger Day': 'Success',
         'Current Status': 'Active',
         'Latest Status Date': '2026-04-05',
+        'Ticker Latest Bar Date': '2026-04-05',
+        'Global Latest Bar Date': '2026-04-05',
         '1m ORH': '-',
         '5m ORH': '-',
         'VWAP Reclaim': 'success',
@@ -189,6 +195,8 @@ def test_missing_optional_field_behavior_keeps_row_with_dashes():
         'Trigger': 'Alt Required',
         'Current Status': 'Active',
         'Latest Status Date': '2026-04-05',
+        'Ticker Latest Bar Date': '2026-04-05',
+        'Global Latest Bar Date': '2026-04-05',
         'current_pct_raw': 0.012,
         'max_pct_raw': 0.044,
     }])
@@ -243,9 +251,9 @@ def test_active_table_limits_to_10_rows():
 
 def test_active_table_sorts_by_max_pct_then_current_pct():
     history = pd.DataFrame([
-        {'Ticker': 'A', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
-        {'Ticker': 'B', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'current_pct_raw': 0.04, 'max_pct_raw': 0.10},
-        {'Ticker': 'C', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.20},
+        {'Ticker': 'A', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
+        {'Ticker': 'B', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.04, 'max_pct_raw': 0.10},
+        {'Ticker': 'C', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.20},
     ])
 
     result = top_movers_from_history(history, latest_date='2026-04-30')
@@ -255,11 +263,11 @@ def test_active_table_sorts_by_max_pct_then_current_pct():
 
 def test_active_table_excludes_non_active_statuses():
     history = pd.DataFrame([
-        {'Ticker': 'ACTIVE', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
-        {'Ticker': 'LATER', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Current Status': 'Later Failed', 'Latest Status Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.30},
-        {'Ticker': 'D1', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.29},
-        {'Ticker': 'DAYFAIL', 'Setup Date': '2026-04-01', 'Trigger': 'Failed OR Trigger', 'Trigger Day': 'Fail', 'Current Status': '—', 'Latest Status Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.28},
-        {'Ticker': 'UNRES', 'Setup Date': '2026-04-01', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved', 'Current Status': '—', 'Latest Status Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.27},
+        {'Ticker': 'ACTIVE', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
+        {'Ticker': 'LATER', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Current Status': 'Later Failed', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.30},
+        {'Ticker': 'D1', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.29},
+        {'Ticker': 'DAYFAIL', 'Setup Date': '2026-04-01', 'Trigger': 'Failed OR Trigger', 'Trigger Day': 'Fail', 'Current Status': '—', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.28},
+        {'Ticker': 'UNRES', 'Setup Date': '2026-04-01', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved', 'Current Status': '—', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.27},
     ])
 
     result = top_movers_from_history(history, latest_date='2026-04-30')
@@ -269,8 +277,8 @@ def test_active_table_excludes_non_active_statuses():
 
 def test_active_table_excludes_stale_active_status_rows():
     history = pd.DataFrame([
-        {'Ticker': 'CURRENT', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
-        {'Ticker': 'STALE', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-22', 'current_pct_raw': 0.08, 'max_pct_raw': 0.30},
+        {'Ticker': 'CURRENT', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
+        {'Ticker': 'STALE', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-22', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.30},
     ])
 
     result = top_movers_from_history(history, latest_date='2026-04-30')
@@ -278,13 +286,14 @@ def test_active_table_excludes_stale_active_status_rows():
     assert result.active_table['Ticker'].tolist() == ['CURRENT']
     assert result.table['Ticker'].tolist() == ['STALE', 'CURRENT']
     assert result.audit.set_index('Ticker').loc['STALE', 'Status Current'] == 'No'
+    assert result.audit.set_index('Ticker').loc['STALE', 'Active Table Exclusion Reason'] == 'latest status date older than ticker latest bar date'
 
 
 def test_active_table_uses_latest_status_when_duplicate_ticker_setup_rows_exist():
     history = pd.DataFrame([
-        {'Ticker': 'DUP', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-22', 'current_pct_raw': 0.08, 'max_pct_raw': 0.30},
-        {'Ticker': 'DUP', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'current_pct_raw': -0.02, 'max_pct_raw': 0.30},
-        {'Ticker': 'OK', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
+        {'Ticker': 'DUP', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-22', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.30},
+        {'Ticker': 'DUP', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': -0.02, 'max_pct_raw': 0.30},
+        {'Ticker': 'OK', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
     ])
 
     result = top_movers_from_history(history, latest_date='2026-04-30')
@@ -299,6 +308,8 @@ def test_active_table_excludes_bird_like_stale_status_even_with_high_max_return(
         'Trigger': '5m ORH',
         'Current Status': 'Active',
         'Latest Status Date': '2026-04-22',
+        'Ticker Latest Bar Date': '2026-04-22',
+        'Global Latest Bar Date': '2026-05-04',
         'Trigger Level': 7.94,
         'Reference Low': 6.11,
         'Latest Close': 8.43,
@@ -310,3 +321,45 @@ def test_active_table_excludes_bird_like_stale_status_even_with_high_max_return(
 
     assert result.active_table.empty
     assert result.table.loc[0, 'Ticker'] == 'BIRD'
+
+
+def test_active_table_includes_rows_with_current_ticker_and_global_status_dates():
+    history = pd.DataFrame([{
+        'Ticker': 'AKAN',
+        'Setup Date': '2026-04-28',
+        'Trigger': 'PDH',
+        'Current Status': 'Active',
+        'Latest Status Date': '2026-05-04',
+        'Ticker Latest Bar Date': '2026-05-04',
+        'Global Latest Bar Date': '2026-05-04',
+        'current_pct_raw': 2.038,
+        'max_pct_raw': 4.836,
+    }])
+
+    result = top_movers_from_history(history, latest_date='2026-05-04')
+
+    assert result.active_table['Ticker'].tolist() == ['AKAN']
+    audit = result.audit.set_index('Ticker').loc['AKAN']
+    assert audit['Status Current'] == 'Yes'
+    assert audit['Active Table Exclusion Reason'] == '-'
+
+
+def test_active_table_excludes_ticker_not_current_to_global_latest_bar_date():
+    history = pd.DataFrame([{
+        'Ticker': 'STALE_TICKER',
+        'Setup Date': '2026-04-28',
+        'Trigger': 'PDH',
+        'Current Status': 'Active',
+        'Latest Status Date': '2026-04-22',
+        'Ticker Latest Bar Date': '2026-04-22',
+        'Global Latest Bar Date': '2026-05-04',
+        'current_pct_raw': 0.10,
+        'max_pct_raw': 0.50,
+    }])
+
+    result = top_movers_from_history(history, latest_date='2026-05-04')
+
+    assert result.active_table.empty
+    audit = result.audit.set_index('Ticker').loc['STALE_TICKER']
+    assert audit['Status Current'] == 'No'
+    assert audit['Active Table Exclusion Reason'] == 'ticker latest bar date older than global latest bar date'

@@ -46,7 +46,10 @@ AUDIT_COLUMNS = [
     'Reference Price',
     'Latest Close',
     'Latest Status Date',
+    'Ticker Latest Bar Date',
+    'Global Latest Bar Date',
     'Status Current',
+    'Active Table Exclusion Reason',
     'Max Date',
     'D3 High',
     'Setup',
@@ -180,6 +183,37 @@ def _missing_notes(rows: pd.DataFrame) -> pd.Series:
     return pd.Series(notes, index=rows.index)
 
 
+def _date_display(series: pd.Series) -> pd.Series:
+    return pd.to_datetime(series, errors='coerce').dt.strftime('%Y-%m-%d').fillna('-')
+
+
+def _date_equal(left: pd.Series, right: pd.Series) -> pd.Series:
+    left_dates = pd.to_datetime(left, errors='coerce').dt.normalize()
+    right_dates = pd.to_datetime(right, errors='coerce').dt.normalize()
+    return left_dates.notna() & right_dates.notna() & left_dates.eq(right_dates)
+
+
+def _active_exclusion_reasons(rows: pd.DataFrame) -> pd.Series:
+    reasons = []
+    for _, row in rows.iterrows():
+        status = _display(row.get('Current Status'))
+        if status != 'Active':
+            reasons.append(f'not active: {status}')
+        elif pd.isna(row.get('_latest_status_date')):
+            reasons.append('missing latest status date')
+        elif pd.isna(row.get('_ticker_latest_bar_date')):
+            reasons.append('missing ticker latest bar date')
+        elif pd.isna(row.get('_global_latest_bar_date')):
+            reasons.append('missing global latest bar date')
+        elif not bool(row.get('_status_matches_ticker_latest')):
+            reasons.append('latest status date older than ticker latest bar date')
+        elif not bool(row.get('_ticker_current_to_global')):
+            reasons.append('ticker latest bar date older than global latest bar date')
+        else:
+            reasons.append('-')
+    return pd.Series(reasons, index=rows.index)
+
+
 def top_movers_from_history(
     history: pd.DataFrame,
     latest_date: pd.Timestamp | str | None = None,
@@ -236,8 +270,26 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
         errors='coerce',
     )
     latest_market_date = pd.to_datetime(latest_date, errors='coerce') if latest_date is not None else pd.NaT
+    ticker_latest_source_exists = any(name in rows for name in ['ticker_latest_bar_date', 'Ticker Latest Bar Date'])
+    ticker_latest_dates = pd.to_datetime(
+        _first_existing(rows, ['ticker_latest_bar_date', 'Ticker Latest Bar Date']),
+        errors='coerce',
+    )
+    if not ticker_latest_source_exists and not pd.isna(latest_market_date):
+        ticker_latest_dates = pd.Series(latest_market_date, index=rows.index)
+    global_latest_source_exists = any(name in rows for name in ['global_latest_bar_date', 'Global Latest Bar Date'])
+    global_latest_dates = pd.to_datetime(
+        _first_existing(rows, ['global_latest_bar_date', 'Global Latest Bar Date']),
+        errors='coerce',
+    )
+    if not global_latest_source_exists and not pd.isna(latest_market_date):
+        global_latest_dates = pd.Series(latest_market_date, index=rows.index)
     rows['_latest_status_date'] = latest_status_dates
-    rows['_status_current'] = True if pd.isna(latest_market_date) else latest_status_dates.dt.normalize().ge(latest_market_date.normalize())
+    rows['_ticker_latest_bar_date'] = ticker_latest_dates
+    rows['_global_latest_bar_date'] = global_latest_dates
+    rows['_status_matches_ticker_latest'] = _date_equal(latest_status_dates, ticker_latest_dates)
+    rows['_ticker_current_to_global'] = _date_equal(ticker_latest_dates, global_latest_dates)
+    rows['_status_current'] = rows['_status_matches_ticker_latest'] & rows['_ticker_current_to_global']
 
     rows['Ticker'] = _first_existing(rows, ['Ticker', 'ticker']).apply(_display)
     rows['Trigger'] = _first_existing(rows, ['Trigger', 'trigger_type']).apply(_display)
@@ -268,8 +320,11 @@ def _audit_table(rows: pd.DataFrame) -> pd.DataFrame:
     rows = rows.copy()
     rows['Reference Price'] = _first_existing(rows, ['Trigger Level', 'Reference Price', 'base_price']).apply(_display)
     rows['Latest Close'] = _first_existing(rows, ['Latest Close', 'latest_close']).apply(_display)
-    rows['Latest Status Date'] = rows['_latest_status_date'].dt.strftime('%Y-%m-%d').fillna('-')
+    rows['Latest Status Date'] = _date_display(rows['_latest_status_date'])
+    rows['Ticker Latest Bar Date'] = _date_display(rows['_ticker_latest_bar_date'])
+    rows['Global Latest Bar Date'] = _date_display(rows['_global_latest_bar_date'])
     rows['Status Current'] = rows['_status_current'].apply(lambda v: 'Yes' if bool(v) else 'No')
+    rows['Active Table Exclusion Reason'] = _active_exclusion_reasons(rows)
     rows['Max Date'] = _first_existing(rows, ['Max Date', 'max_date']).apply(_display)
     rows['D3 High'] = _first_existing(rows, ['D3 High %', 'D3 High', 'd3_high_pct_raw']).apply(_display)
     rows['Setup'] = _first_existing(rows, ['Setup', 'setup']).apply(_display)
@@ -281,4 +336,25 @@ def _audit_table(rows: pd.DataFrame) -> pd.DataFrame:
 
 def load_top_movers(con) -> tuple[pd.DataFrame, pd.Timestamp | None]:
     history = monitor_history(con)
-    return history, latest_market_date(con, history)
+    latest = latest_market_date(con, history)
+    if not history.empty and 'Ticker' in history:
+        tickers = history['Ticker'].dropna().astype(str).unique().tolist()
+        if tickers:
+            try:
+                latest_by_ticker = con.execute(
+                    f"""
+                    select ticker, max(trading_date) as ticker_latest_bar_date
+                    from daily_bars
+                    where ticker in ({','.join(['?'] * len(tickers))})
+                    group by ticker
+                    """,
+                    tickers,
+                ).df()
+                history = history.merge(latest_by_ticker, how='left', left_on='Ticker', right_on='ticker')
+                history = history.drop(columns=['ticker'], errors='ignore')
+            except Exception:
+                history['ticker_latest_bar_date'] = pd.NaT
+        else:
+            history['ticker_latest_bar_date'] = pd.NaT
+        history['global_latest_bar_date'] = latest
+    return history, latest
