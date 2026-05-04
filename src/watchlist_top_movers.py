@@ -9,6 +9,7 @@ from src.setup_behavior_overview import monitor_history
 
 
 SETUP_WINDOW_OPTIONS = ['Last 5 setup dates', 'Last 10 setup dates', 'Last 20 setup dates', 'All']
+DEFAULT_SETUP_WINDOW = 'All'
 TOP_N_OPTIONS = [10, 20, 50]
 SORT_OPTIONS = ['Max %', 'Current %', 'Days Since Setup']
 VISIBLE_COLUMNS = [
@@ -17,6 +18,19 @@ VISIBLE_COLUMNS = [
     'Setup Date',
     'Trigger',
     'Current Status',
+    'Current %',
+    'Max %',
+    'Max High',
+    'Days Since Setup',
+    'Retested',
+    'Breakeven / D1 Eligible',
+    'Notes',
+]
+ACTIVE_VISIBLE_COLUMNS = [
+    'Rank',
+    'Ticker',
+    'Setup Date',
+    'Trigger',
     'Current %',
     'Max %',
     'Max High',
@@ -42,6 +56,7 @@ AUDIT_COLUMNS = [
 
 @dataclass(frozen=True)
 class TopMoverResult:
+    active_table: pd.DataFrame
     table: pd.DataFrame
     audit: pd.DataFrame
 
@@ -133,6 +148,11 @@ def _days_since(setup_dates: pd.Series, latest_date: pd.Timestamp | None) -> pd.
     return days.astype('Int64')
 
 
+def _format_setup_date(series: pd.Series) -> pd.Series:
+    dates = pd.to_datetime(series, errors='coerce')
+    return dates.dt.strftime('%Y-%m-%d').fillna('-')
+
+
 def _breakeven_or_d1(rows: pd.DataFrame) -> pd.Series:
     # Rolling Setup Monitor does not expose a formal breakeven field yet. If a
     # future row source supplies one, prefer it; otherwise keep the display
@@ -161,18 +181,27 @@ def _missing_notes(rows: pd.DataFrame) -> pd.Series:
 def top_movers_from_history(
     history: pd.DataFrame,
     latest_date: pd.Timestamp | str | None = None,
-    setup_window: str = 'Last 20 setup dates',
+    setup_window: str = DEFAULT_SETUP_WINDOW,
     top_n: int = 20,
     sort_by: str = 'Max %',
 ) -> TopMoverResult:
     if history.empty:
-        return TopMoverResult(pd.DataFrame(columns=VISIBLE_COLUMNS), pd.DataFrame(columns=AUDIT_COLUMNS))
+        return TopMoverResult(
+            pd.DataFrame(columns=ACTIVE_VISIBLE_COLUMNS),
+            pd.DataFrame(columns=VISIBLE_COLUMNS),
+            pd.DataFrame(columns=AUDIT_COLUMNS),
+        )
 
     rows = filter_setup_window(history, setup_window).copy()
     if rows.empty:
-        return TopMoverResult(pd.DataFrame(columns=VISIBLE_COLUMNS), pd.DataFrame(columns=AUDIT_COLUMNS))
+        return TopMoverResult(
+            pd.DataFrame(columns=ACTIVE_VISIBLE_COLUMNS),
+            pd.DataFrame(columns=VISIBLE_COLUMNS),
+            pd.DataFrame(columns=AUDIT_COLUMNS),
+        )
 
     rows['Setup Date'] = pd.to_datetime(rows['Setup Date'])
+    rows['_setup_date_display'] = _format_setup_date(rows['Setup Date'])
     rows['_current_sort'] = _numeric(rows, ['current_pct_raw', 'Current %'])
     rows['_max_sort'] = _numeric(rows, ['max_pct_raw', 'Max %'])
     rows['_days_sort'] = _days_since(rows['Setup Date'], pd.to_datetime(latest_date) if latest_date is not None else None)
@@ -187,6 +216,16 @@ def top_movers_from_history(
     rows['Retested'] = _first_existing(rows, ['Retested', 'Retest', 'Retest Day', 'retest_day']).apply(_display)
     rows['Breakeven / D1 Eligible'] = _breakeven_or_d1(rows).apply(_display)
     rows['Notes'] = _first_existing(rows, ['Notes', 'notes']).apply(_display)
+    rows['Setup Date'] = rows['_setup_date_display']
+
+    active_rows = rows[rows['Current Status'].eq('Active')].copy()
+    active_rows = active_rows.sort_values(
+        ['_max_sort', '_current_sort', 'Setup Date', 'Ticker'],
+        ascending=[False, False, False, True],
+        na_position='last',
+    ).head(10).copy()
+    active_rows.insert(0, 'Rank', range(1, len(active_rows) + 1))
+    active_table = active_rows[ACTIVE_VISIBLE_COLUMNS].copy()
 
     if sort_by == 'Current %':
         sort_cols = ['_current_sort', '_max_sort', 'Setup Date', 'Ticker']
@@ -211,7 +250,7 @@ def top_movers_from_history(
     rows['Source'] = _first_existing(rows, ['Source', 'source_file', 'Source File']).apply(_display)
     rows['Missing Data Notes'] = _missing_notes(rows)
     audit = rows[AUDIT_COLUMNS].copy()
-    return TopMoverResult(table.reset_index(drop=True), audit.reset_index(drop=True))
+    return TopMoverResult(active_table.reset_index(drop=True), table.reset_index(drop=True), audit.reset_index(drop=True))
 
 
 def load_top_movers(con) -> tuple[pd.DataFrame, pd.Timestamp | None]:

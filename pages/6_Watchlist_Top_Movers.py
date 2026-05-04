@@ -3,6 +3,7 @@ import streamlit as st
 from src.config import get_settings
 from src.database import get_connection
 from src.watchlist_top_movers import (
+    DEFAULT_SETUP_WINDOW,
     SETUP_WINDOW_OPTIONS,
     SORT_OPTIONS,
     TOP_N_OPTIONS,
@@ -35,7 +36,7 @@ else:
         setup_window = st.selectbox(
             'Setup Window',
             SETUP_WINDOW_OPTIONS,
-            index=SETUP_WINDOW_OPTIONS.index('Last 20 setup dates'),
+            index=SETUP_WINDOW_OPTIONS.index(DEFAULT_SETUP_WINDOW),
             key='top_movers_setup_window',
         )
     with filter_cols[1]:
@@ -60,6 +61,9 @@ else:
         top_n=top_n,
         sort_by=sort_by,
     )
+
+    st.subheader('Top 10 Active Watchlist Movers')
+    st.dataframe(result.active_table, width='stretch', hide_index=True)
 
     st.subheader('Top Triggered Watchlist Movers')
     st.dataframe(result.table, width='stretch', hide_index=True)

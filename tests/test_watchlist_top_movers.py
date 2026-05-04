@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pandas as pd
 
-from src.watchlist_top_movers import VISIBLE_COLUMNS, filter_setup_window, top_movers_from_history
+from src.watchlist_top_movers import (
+    ACTIVE_VISIBLE_COLUMNS,
+    DEFAULT_SETUP_WINDOW,
+    VISIBLE_COLUMNS,
+    filter_setup_window,
+    top_movers_from_history,
+)
 
 
 def _history() -> pd.DataFrame:
@@ -59,6 +65,13 @@ def test_setup_window_all_includes_all_setup_dates():
     out = filter_setup_window(_history(), 'All')
 
     assert len(out) == 12
+
+
+def test_default_setup_window_is_all():
+    page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
+
+    assert DEFAULT_SETUP_WINDOW == 'All'
+    assert 'index=SETUP_WINDOW_OPTIONS.index(DEFAULT_SETUP_WINDOW)' in page
 
 
 def test_top_n_filtering_and_deterministic_rank_assignment():
@@ -132,7 +145,45 @@ def test_missing_optional_field_behavior_keeps_row_with_dashes():
     assert row['Notes'] == '-'
 
 
+def test_setup_date_formats_as_date_only_in_tables_and_audit():
+    result = top_movers_from_history(_history().iloc[[0]], latest_date='2026-04-30')
+
+    assert result.table.loc[0, 'Setup Date'] == '2026-04-01'
+    assert result.audit.loc[0, 'Setup Date'] == '2026-04-01'
+    assert result.active_table.loc[0, 'Setup Date'] == '2026-04-01'
+
+
 def test_visible_column_contract():
     result = top_movers_from_history(_history(), latest_date='2026-04-30')
 
     assert result.table.columns.tolist() == VISIBLE_COLUMNS
+
+
+def test_active_table_filters_active_only_and_omits_current_status():
+    result = top_movers_from_history(_history(), latest_date='2026-04-30')
+
+    assert result.active_table.columns.tolist() == ACTIVE_VISIBLE_COLUMNS
+    assert 'Current Status' not in result.active_table.columns
+    assert result.active_table['Ticker'].tolist() == ['T11', 'T09', 'T07', 'T05', 'T03', 'T01']
+
+
+def test_active_table_limits_to_10_rows():
+    history = _history()
+    history['Current Status'] = 'Active'
+
+    result = top_movers_from_history(history, latest_date='2026-04-30')
+
+    assert len(result.active_table) == 10
+    assert result.active_table['Rank'].tolist() == list(range(1, 11))
+
+
+def test_active_table_sorts_by_max_pct_then_current_pct():
+    history = pd.DataFrame([
+        {'Ticker': 'A', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
+        {'Ticker': 'B', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.04, 'max_pct_raw': 0.10},
+        {'Ticker': 'C', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'current_pct_raw': 0.08, 'max_pct_raw': 0.20},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30')
+
+    assert result.active_table['Ticker'].tolist() == ['B', 'A']
