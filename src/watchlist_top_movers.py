@@ -22,7 +22,7 @@ VISIBLE_COLUMNS = [
     'Max %',
     'Close < BE',
     'Days Since Setup',
-    'Retested',
+    'Retests',
     'Notes',
 ]
 ACTIVE_VISIBLE_COLUMNS = [
@@ -34,7 +34,7 @@ ACTIVE_VISIBLE_COLUMNS = [
     'Max %',
     'Close < BE',
     'Days Since Setup',
-    'Retested',
+    'Retests',
     'Notes',
 ]
 AUDIT_COLUMNS = [
@@ -50,6 +50,9 @@ AUDIT_COLUMNS = [
     'Global Latest Bar Date',
     'Status Current',
     'Active Table Exclusion Reason',
+    'Retest Count',
+    'Retest Days Raw',
+    'Retest Dates Raw',
     'Max Date',
     'D3 High',
     'Setup',
@@ -299,7 +302,7 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
     rows['Max High'] = _first_existing(rows, ['Max High', 'max_high']).apply(_fmt_price)
     rows['Close < BE'] = _first_existing(rows, ['Close < BE', 'close_below_be'], '-').apply(_display)
     rows['Days Since Setup'] = rows['_days_sort'].apply(lambda v: '-' if pd.isna(v) else int(v))
-    rows['Retested'] = _first_existing(rows, ['Retested', 'Retest', 'Retest Day', 'retest_day']).apply(_display)
+    rows['Retests'] = _first_existing(rows, ['Retests', 'Retested', 'Retest', 'Retest Day', 'retest_day']).apply(_display)
     rows['Breakeven / D1 Eligible'] = _breakeven_or_d1(rows).apply(_display)
     rows['Notes'] = _first_existing(rows, ['Notes', 'notes']).apply(_display)
     rows['Setup Date'] = rows['_setup_date_display']
@@ -328,6 +331,9 @@ def _audit_table(rows: pd.DataFrame) -> pd.DataFrame:
     rows['Global Latest Bar Date'] = _date_display(rows['_global_latest_bar_date'])
     rows['Status Current'] = rows['_status_current'].apply(lambda v: 'Yes' if bool(v) else 'No')
     rows['Active Table Exclusion Reason'] = _active_exclusion_reasons(rows)
+    rows['Retest Count'] = _first_existing(rows, ['Retest Count', 'retest_count']).apply(_display)
+    rows['Retest Days Raw'] = _first_existing(rows, ['Retest Days Raw', 'retest_days_raw']).apply(_display)
+    rows['Retest Dates Raw'] = _first_existing(rows, ['Retest Dates Raw', 'retest_dates_raw']).apply(_display)
     rows['Max Date'] = _first_existing(rows, ['Max Date', 'max_date']).apply(_display)
     rows['D3 High'] = _first_existing(rows, ['D3 High %', 'D3 High', 'd3_high_pct_raw']).apply(_display)
     rows['Setup'] = _first_existing(rows, ['Setup', 'setup']).apply(_display)

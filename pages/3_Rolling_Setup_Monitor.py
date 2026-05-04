@@ -29,7 +29,7 @@ with st.expander('Definitions / Logic', expanded=False):
 - **VWAP Reclaim**: qualified VWAP reclaim trigger shown only when the shared trigger stack selects VWAP over fallback labels or a looser ORH trigger. Raw VWAP reclaim diagnostics remain in detail/audit fields.
 - **Alt Required**: alternate framework used only when failed/missing OR triggers repair under the existing 15m/close-location rule.
 - **Failed OR Trigger**: OR trigger framework failed and no alternate qualification repaired it.
-- **Retest**: first D0/D1/D2/D3 touch of the selected trigger level.
+- **Retests**: D0/D1/etc. touches of the selected trigger level while the setup is still active, capped in the table after the first three labels.
 - **D3 High**: day-3 high follow-through; shown only when completed D3 data is available.
 - **Wide OR notes**: flags opening ranges that are wide versus ATR14.
         """

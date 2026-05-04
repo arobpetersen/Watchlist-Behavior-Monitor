@@ -38,7 +38,7 @@ MAIN_COLUMNS = [
     'Max %',
     'Close < BE',
     'D3 High %',
-    'Retest Day',
+    'Retests',
     'Setup',
     'Rating',
 ]
@@ -49,7 +49,6 @@ MAIN_COLUMN_LABELS = {
     'Current %': 'Current',
     'Max %': 'Max',
     'D3 High %': 'D3 High',
-    'Retest Day': 'Retest',
 }
 
 DETAIL_COLUMNS = [
@@ -85,6 +84,10 @@ DETAIL_COLUMNS = [
     'Reference Basis',
     'Trigger Break Time',
     'Fail Day',
+    'Retests',
+    'Retest Count',
+    'Retest Days Raw',
+    'Retest Dates Raw',
     'Latest Close',
     'Setup Close',
     'Setup High',
@@ -185,6 +188,90 @@ def _fmt_compact_day(value: int | None) -> str:
     if value is None or pd.isna(value):
         return ''
     return f'D{int(value)}'
+
+
+def _retest_day_values(value: Any) -> list[int]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        values = value
+    else:
+        try:
+            if pd.isna(value):
+                return []
+        except (TypeError, ValueError):
+            pass
+        text = str(value).strip()
+        if not text:
+            return []
+        values = [part.strip().lstrip('D') for part in text.split(',')]
+    days: list[int] = []
+    for item in values:
+        try:
+            if pd.isna(item):
+                continue
+        except (TypeError, ValueError):
+            pass
+        text = str(item).strip().lstrip('D')
+        if not text:
+            continue
+        try:
+            day = int(float(text))
+        except (TypeError, ValueError):
+            continue
+        if day not in days:
+            days.append(day)
+    return sorted(days)
+
+
+def _fmt_retests(value: Any, fallback: Any = None) -> str:
+    days = _retest_day_values(value)
+    if not days:
+        days = _retest_day_values(fallback)
+    if not days:
+        return ''
+    labels = [f'D{day}' for day in days[:3]]
+    extra = len(days) - 3
+    return f"{', '.join(labels)} +{extra}" if extra > 0 else ', '.join(labels)
+
+
+def _fmt_retest_count(value: Any, fallback: Any = None) -> str:
+    days = _retest_day_values(value)
+    if not days:
+        days = _retest_day_values(fallback)
+    return '' if not days else str(len(days))
+
+
+def _fmt_retest_days_raw(value: Any, fallback: Any = None) -> str:
+    days = _retest_day_values(value)
+    if not days:
+        days = _retest_day_values(fallback)
+    return ', '.join(f'D{day}' for day in days)
+
+
+def _fmt_retest_dates_raw(value: Any) -> str:
+    if value is None:
+        return ''
+    if not isinstance(value, (list, tuple, set)):
+        try:
+            if pd.isna(value):
+                return ''
+        except (TypeError, ValueError):
+            pass
+        return _blank(value)
+    dates = []
+    for item in value:
+        if item is None:
+            continue
+        try:
+            if pd.isna(item):
+                continue
+        except (TypeError, ValueError):
+            pass
+        date_value = pd.to_datetime(item, errors='coerce')
+        if not pd.isna(date_value):
+            dates.append(date_value.date().isoformat())
+    return ', '.join(dates)
 
 
 def _fmt_d3_pct(value) -> str:
@@ -855,15 +942,63 @@ def fail_day(intraday: pd.DataFrame, daily: pd.DataFrame, trigger_break_time, re
 
 
 def retest_day(intraday: pd.DataFrame, daily: pd.DataFrame, trigger_break_time, trigger_level: float | None) -> int | None:
+    days, _ = retest_events(intraday, daily, trigger_break_time, trigger_level)
+    return days[0] if days else None
+
+
+def retest_events(
+    intraday: pd.DataFrame,
+    daily: pd.DataFrame,
+    trigger_break_time,
+    trigger_level: float | None,
+    fail_day_value: int | None = None,
+    latest_trading_date=None,
+) -> tuple[list[int], list[str]]:
     if trigger_level is None:
-        return None
-    if day0_retest(intraday, trigger_break_time, trigger_level):
-        return 0
-    after_setup = daily.iloc[1:4] if not daily.empty else pd.DataFrame()
+        return [], []
+
+    max_day = None
+    if fail_day_value is not None:
+        try:
+            if not pd.isna(fail_day_value):
+                max_day = int(float(fail_day_value))
+        except (TypeError, ValueError):
+            max_day = None
+
+    days: list[int] = []
+    dates: list[str] = []
+    setup_date = None
+    if not daily.empty and 'trading_date' in daily:
+        setup_date = pd.to_datetime(daily.iloc[0].get('trading_date'), errors='coerce')
+        setup_date = None if pd.isna(setup_date) else setup_date.date().isoformat()
+    if setup_date is None:
+        break_time = _ts(trigger_break_time)
+        setup_date = '' if break_time is None else break_time.date().isoformat()
+
+    if max_day is None or max_day >= 0:
+        if day0_retest(intraday, trigger_break_time, trigger_level):
+            days.append(0)
+            dates.append(setup_date)
+
+    if daily.empty:
+        return days, dates
+
+    bars = daily.copy()
+    if latest_trading_date is not None and 'trading_date' in bars:
+        latest_date = pd.to_datetime(latest_trading_date, errors='coerce')
+        if not pd.isna(latest_date):
+            bars = bars[pd.to_datetime(bars['trading_date'], errors='coerce') <= latest_date]
+
+    after_setup = bars.iloc[1:]
     for day_number, (_, row) in enumerate(after_setup.iterrows(), start=1):
+        if max_day is not None and day_number > max_day:
+            break
         if _num(row.get('low')) is not None and float(row['low']) <= float(trigger_level):
-            return day_number
-    return None
+            if day_number not in days:
+                days.append(day_number)
+                date_value = pd.to_datetime(row.get('trading_date'), errors='coerce')
+                dates.append('' if pd.isna(date_value) else date_value.date().isoformat())
+    return days, dates
 
 
 def status_for(trigger_type: str, fail_day_value: int | None) -> str:
@@ -884,6 +1019,18 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
     reference_low = row.get('reference_low')
     setup_close = _num(row.get('close_price'))
     preset_fail_day = row.get('framework_fail_day')
+    current_fail_day = (
+        preset_fail_day
+        if row.get('trigger_type') in {'Failed OR Trigger', 'Failed PDH Trigger'}
+        else fail_day(intraday, daily, row.get('trigger_break_time'), reference_low)
+    )
+    current_retest_days, current_retest_dates = retest_events(
+        intraday,
+        daily,
+        row.get('trigger_break_time'),
+        trigger_level,
+        current_fail_day,
+    )
 
     if daily.empty:
         base_price = trigger_level if trigger_level is not None else setup_close
@@ -895,8 +1042,10 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
             'd3_high_pct': None,
             'current_pct_from_setup_close': None,
             'max_gain_from_setup_close': None,
-            'fail_day': preset_fail_day if row.get('trigger_type') in {'Failed OR Trigger', 'Failed PDH Trigger'} else fail_day(intraday, daily, row.get('trigger_break_time'), reference_low),
-            'retest_day': retest_day(intraday, daily, row.get('trigger_break_time'), trigger_level),
+            'fail_day': current_fail_day,
+            'retest_day': current_retest_days[0] if current_retest_days else None,
+            'retest_days': current_retest_days,
+            'retest_dates': current_retest_dates,
             'base_price': base_price,
         }
 
@@ -906,6 +1055,14 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
     max_high = _num(daily['high'].max())
     d3 = daily.iloc[:4]
     d3_high = _num(d3['high'].max()) if len(d3) >= 4 else None
+    current_retest_days, current_retest_dates = retest_events(
+        intraday,
+        daily,
+        row.get('trigger_break_time'),
+        trigger_level,
+        current_fail_day,
+        latest.get('trading_date'),
+    )
 
     return {
         'latest_trading_date': latest['trading_date'],
@@ -915,8 +1072,10 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
         'd3_high_pct': _change_pct(d3_high, base_price),
         'current_pct_from_setup_close': _change_pct(latest_close, setup_close),
         'max_gain_from_setup_close': _change_pct(max_high, setup_close),
-        'fail_day': preset_fail_day if row.get('trigger_type') in {'Failed OR Trigger', 'Failed PDH Trigger'} else fail_day(intraday, daily, row.get('trigger_break_time'), reference_low),
-        'retest_day': retest_day(intraday, daily, row.get('trigger_break_time'), trigger_level),
+        'fail_day': current_fail_day,
+        'retest_day': current_retest_days[0] if current_retest_days else None,
+        'retest_days': current_retest_days,
+        'retest_dates': current_retest_dates,
         'base_price': base_price,
     }
 
@@ -1152,7 +1311,7 @@ def day_summary(df: pd.DataFrame) -> dict:
         'Unresolved': int((df['Trigger Day'] == 'Unresolved').sum()) if not df.empty else 0,
         'Active': int((df['Current Status'] == 'Active').sum()) if not df.empty else 0,
         'Later Failed': int(df['Current Status'].isin({'Failed D1', 'Failed D2', 'Failed D3'}).sum()) if not df.empty else 0,
-        'Retested': int((df['Retest Day'] != '').sum()) if not df.empty else 0,
+        'Retested': int((df['Retests'] != '').sum()) if not df.empty and 'Retests' in df else 0,
         'Median Current %': _fmt_pct(df['current_pct_raw'].median()) if not df.empty else '',
         'Median Max %': _fmt_pct(df['max_pct_raw'].median()) if not df.empty else '',
         'Median D3 High %': _fmt_pct(df['d3_high_pct_raw'].median()) if not df.empty and 'd3_high_pct_raw' in df else '',
@@ -1236,8 +1395,20 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Max %': raw['max_pct'].apply(_fmt_pct),
         'Close < BE': raw.get('close_below_be', blank_series).apply(_fmt_bool_available),
         'D3 High %': raw['d3_high_pct'].apply(_fmt_d3_pct),
-        'Retest Day': raw['retest_day'].apply(_fmt_compact_day),
+        'Retests': [
+            _fmt_retests(days, fallback)
+            for days, fallback in zip(raw.get('retest_days', blank_series), raw.get('retest_day', blank_series))
+        ],
         'Fail Day': raw['fail_day'].apply(_fmt_day),
+        'Retest Count': [
+            _fmt_retest_count(days, fallback)
+            for days, fallback in zip(raw.get('retest_days', blank_series), raw.get('retest_day', blank_series))
+        ],
+        'Retest Days Raw': [
+            _fmt_retest_days_raw(days, fallback)
+            for days, fallback in zip(raw.get('retest_days', blank_series), raw.get('retest_day', blank_series))
+        ],
+        'Retest Dates Raw': raw.get('retest_dates', blank_series).apply(_fmt_retest_dates_raw),
         'Setup': raw['setup'].apply(_blank),
         'Rating': raw['rating'].apply(lambda v: '' if _num(v) is None else str(int(float(v))) if float(v).is_integer() else str(float(v))),
         'Prior Day High': raw.get('prior_day_high', blank_series).apply(_fmt_price),

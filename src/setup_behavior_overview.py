@@ -69,7 +69,7 @@ DETAIL_COLUMNS = [
     'Max',
     'Close < BE',
     'D3 High',
-    'Retest',
+    'Retests',
     'Setup',
     'Rating',
 ]
@@ -293,7 +293,7 @@ def summarize_window(history: pd.DataFrame, window: OverviewWindow) -> dict:
     pdh = rows['PDH'] if 'PDH' in rows else pd.Series(dtype=object)
     one, five = _visible_orh_results(rows) if not rows.empty else (pd.Series(dtype=object), pd.Series(dtype=object))
     notes = rows['Notes'] if 'Notes' in rows else pd.Series(dtype=object)
-    retest = rows['Retest Day'] if 'Retest Day' in rows else pd.Series(dtype=object)
+    retest = rows['Retests'] if 'Retests' in rows else rows['Retest Day'] if 'Retest Day' in rows else pd.Series(dtype=object)
 
     d3_values = rows['d3_high_pct_raw'].dropna() if 'd3_high_pct_raw' in rows else pd.Series(dtype=float)
 
@@ -338,6 +338,7 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
 
     vwap_trigger = rows['VWAP Trigger'] if 'VWAP Trigger' in rows else rows['vwap_qualified_trigger_result'] if 'vwap_qualified_trigger_result' in rows else pd.Series('', index=rows.index)
     one_min_result, five_min_result = _visible_orh_results(rows)
+    retests = rows['Retests'] if 'Retests' in rows else rows['Retest Day'] if 'Retest Day' in rows else pd.Series('', index=rows.index)
     out = pd.DataFrame({
         'Setup Date': pd.to_datetime(rows['Setup Date']).dt.date.astype(str),
         'Ticker': rows['Ticker'].apply(_display),
@@ -353,7 +354,7 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
         'Max': rows['Max %'].apply(_display),
         'Close < BE': rows['Close < BE'].apply(_display) if 'Close < BE' in rows else '-',
         'D3 High': rows['D3 High %'].apply(_display),
-        'Retest': rows['Retest Day'].apply(_display),
+        'Retests': retests.apply(_display),
         'Setup': rows['Setup'].apply(_display),
         'Rating': rows['Rating'].apply(_display),
     })

@@ -151,7 +151,7 @@ def test_field_mapping_for_trigger_status_max_high_retest_and_breakeven():
     assert row['Current Status'] == 'Active'
     assert 'Max High' not in row.index
     assert audit['Max High'] == '25.00'
-    assert row['Retested'] == '-'
+    assert row['Retests'] == '-'
     assert 'Breakeven / D1 Eligible' not in row.index
     assert audit['Breakeven / D1 Eligible'] == 'Yes'
 
@@ -224,12 +224,32 @@ def test_missing_optional_field_behavior_keeps_row_with_dashes():
 
     assert 'Max High' not in row.index
     assert audit['Max High'] == '-'
-    assert row['Retested'] == '-'
+    assert row['Retests'] == '-'
     assert 'Breakeven / D1 Eligible' not in row.index
     assert audit['Breakeven / D1 Eligible'] == '-'
     assert row['Close < BE'] == '-'
     assert row['Notes'] == '-'
     assert result.active_table['Ticker'].tolist() == ['MISS']
+
+
+def test_multiple_retests_display_in_top_movers_tables():
+    history = pd.DataFrame([{
+        'Ticker': 'MULTI',
+        'Setup Date': '2026-04-01',
+        'Trigger': 'PDH',
+        'Current Status': 'Active',
+        'Latest Status Date': '2026-04-05',
+        'Ticker Latest Bar Date': '2026-04-05',
+        'Global Latest Bar Date': '2026-04-05',
+        'current_pct_raw': 0.012,
+        'max_pct_raw': 0.044,
+        'Retests': 'D0, D3',
+    }])
+
+    result = top_movers_from_history(history, latest_date='2026-04-05')
+
+    assert result.table.loc[0, 'Retests'] == 'D0, D3'
+    assert result.active_table.loc[0, 'Retests'] == 'D0, D3'
 
 
 def test_setup_date_formats_as_date_only_in_tables_and_audit():
@@ -254,7 +274,7 @@ def test_visible_column_contract():
         'Max %',
         'Close < BE',
         'Days Since Setup',
-        'Retested',
+        'Retests',
         'Notes',
     ]
     assert 'Max High' not in result.table.columns
@@ -278,6 +298,9 @@ def test_audit_keeps_secondary_fields_removed_from_visible_tables():
 
     assert 'Max High' in result.audit.columns
     assert 'Breakeven / D1 Eligible' in result.audit.columns
+    assert 'Retest Count' in result.audit.columns
+    assert 'Retest Days Raw' in result.audit.columns
+    assert 'Retest Dates Raw' in result.audit.columns
 
 
 def test_active_table_ignores_selected_setup_window():

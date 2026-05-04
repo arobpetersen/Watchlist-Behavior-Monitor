@@ -25,6 +25,7 @@ from src.rolling_setup_monitor import (
     pdh_trigger_assessment,
     rating_dropdown_options,
     retest_day,
+    retest_events,
     setup_dropdown_options,
     sort_monitor_rows,
     status_for,
@@ -63,6 +64,41 @@ def _daily(lows=None):
         'low': lows,
         'close': [10.8, 11.1, 10.9, 11.0],
     })
+
+
+def _base_formatted_record():
+    return {
+        'candidate_id': 1,
+        'ticker': 'AAPL',
+        'status': 'Active',
+        'trigger_type': '1m ORH',
+        'pdh_result': '',
+        'one_min_result': 'success',
+        'five_min_result': '',
+        'notes': '',
+        'current_pct': 0.01,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.5,
+        'reference_low': 9.8,
+        'reference_basis': '1m OR',
+        'trigger_break_time': None,
+        'latest_close': 10.6,
+        'close_price': 10.0,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.06,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }
 
 
 def _pdh_intraday(lows_after_trigger=None, highs=None):
@@ -1453,6 +1489,51 @@ def test_retest_day_no_retest():
     assert retest_day(intraday, daily, pd.Timestamp('2026-05-01 09:35'), 10.0) is None
 
 
+def test_retest_events_no_retest():
+    days, dates = retest_events(_intraday(), _daily(lows=[10.5, 10.4, 10.3, 10.2]), pd.Timestamp('2026-05-01 09:35'), 10.0)
+
+    assert days == []
+    assert dates == []
+
+
+def test_retest_events_multiple_days_in_order():
+    daily = _daily(lows=[10.5, 10.6, 10.1, 10.2])
+
+    days, dates = retest_events(_intraday(), daily, pd.Timestamp('2026-05-01 09:31'), 10.25)
+
+    assert days == [0, 2, 3]
+    assert dates == ['2026-05-01', '2026-05-05', '2026-05-06']
+
+
+def test_retest_events_cap_display_in_formatted_table():
+    raw = pd.DataFrame([{
+        **_base_formatted_record(),
+        'retest_days': [0, 2, 5, 6],
+        'retest_dates': ['2026-05-01', '2026-05-05', '2026-05-08', '2026-05-11'],
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Retests'] == 'D0, D2, D5 +1'
+    assert table.loc[0, 'Retest Count'] == '4'
+    assert table.loc[0, 'Retest Days Raw'] == 'D0, D2, D5, D6'
+    assert table.loc[0, 'Retest Dates Raw'] == '2026-05-01, 2026-05-05, 2026-05-08, 2026-05-11'
+
+
+def test_retest_events_excludes_after_failure_day():
+    daily = pd.DataFrame({
+        'ticker': ['AAPL'] * 6,
+        'trading_date': pd.to_datetime(['2026-05-01', '2026-05-04', '2026-05-05', '2026-05-06', '2026-05-07', '2026-05-08']),
+        'high': [11.0, 11.4, 11.5, 11.2, 11.1, 11.3],
+        'low': [10.5, 10.2, 10.4, 10.1, 10.0, 10.2],
+        'close': [10.8, 11.1, 10.9, 11.0, 10.7, 11.2],
+    })
+
+    days, _ = retest_events(_intraday(), daily, pd.Timestamp('2026-05-01 09:35'), 10.25, fail_day_value=3)
+
+    assert days == [1, 3]
+
+
 def test_status_values():
     assert status_for('1m ORH', None) == 'Active'
     assert status_for('5m ORH', 1) == 'Failed'
@@ -1531,7 +1612,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'Current %': '1.0%',
         'Max %': '3.0%',
         'D3 High %': '-',
-        'Retest Day': '',
+        'Retests': '',
         'Fail Day': '',
         'Setup': '',
         'Rating': '',
@@ -1558,7 +1639,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
 
     assert main_table(df).columns.tolist() == [
         'Ticker', 'Current Status', 'Trigger Day', 'Trigger', 'PDH', '1m ORH', 'VWAP Reclaim', '5m ORH', 'Notes',
-        'Current %', 'Max %', 'Close < BE', 'D3 High %', 'Retest Day', 'Setup', 'Rating',
+        'Current %', 'Max %', 'Close < BE', 'D3 High %', 'Retests', 'Setup', 'Rating',
     ]
     assert 'VWAP Trigger' not in main_table(df).columns
     assert detail_table(df).columns.tolist() == [
@@ -1573,7 +1654,8 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'Raw VWAP Reclaim Stop Valid', 'Raw VWAP Reclaim Result Reason',
         'Qualified VWAP Trigger Result', 'Qualified VWAP Trigger Reason',
         'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
-        'Fail Day', 'Latest Close', 'Setup Close', 'Setup High', 'Setup Low',
+        'Fail Day', 'Retests', 'Retest Count', 'Retest Days Raw', 'Retest Dates Raw',
+        'Latest Close', 'Setup Close', 'Setup High', 'Setup Low',
         'Current vs Setup Close', 'Max Gain from Setup Close', 'RVOL', 'Range / ATR14', '1m OR Width / ATR14',
         '5m OR Width / ATR14', 'Close Bucket',
         '1m OR Result', '5m OR Result', '5m ORH Break Time',
@@ -1591,14 +1673,14 @@ def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
         '1m ORH': 'success',
         '5m ORH': 'failed',
         'Current %': float('nan'),
-        'Retest Day': '',
+        'Retests': '',
     }])
 
     html = format_monitor_table_html(df)
 
     assert '<th>Ticker</th>' in html
     assert '<th>Current</th>' in html
-    assert '<th>Retest</th>' in html
+    assert '<th>Retests</th>' in html
     assert '&lt;ABC&gt;' in html
     assert 'current-status-active' in html
     assert 'trigger-day-success' in html
@@ -1721,7 +1803,7 @@ def test_format_section_table_formats_nan_day_values_as_blank():
 
     table = _format_section_table(raw)
 
-    assert table.loc[0, 'Retest Day'] == ''
+    assert table.loc[0, 'Retests'] == ''
     assert table.loc[0, 'Fail Day'] == ''
     assert table.loc[0, 'D3 High %'] == '-'
 
@@ -2042,9 +2124,9 @@ def test_format_section_table_derives_status_display_fields():
 
 def test_day_summary_metrics():
     df = pd.DataFrame([
-        {'Trigger': '1m ORH', '1m ORH': 'success', '5m ORH': '', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retest Day': 'D1', 'current_pct_raw': 0.10, 'max_pct_raw': 0.20, 'd3_high_pct_raw': 0.25},
-        {'Trigger': 'Alt Required', '1m ORH': 'failed', '5m ORH': 'failed', 'Trigger Day': 'Success', 'Current Status': 'Failed D2', 'Retest Day': '', 'current_pct_raw': 0.00, 'max_pct_raw': 0.10, 'd3_high_pct_raw': 0.15},
-        {'Trigger': 'No Trigger', '1m ORH': '', '5m ORH': '', 'Trigger Day': 'Unresolved', 'Current Status': '—', 'Retest Day': '', 'current_pct_raw': None, 'max_pct_raw': None, 'd3_high_pct_raw': None},
+        {'Trigger': '1m ORH', '1m ORH': 'success', '5m ORH': '', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retests': 'D1', 'current_pct_raw': 0.10, 'max_pct_raw': 0.20, 'd3_high_pct_raw': 0.25},
+        {'Trigger': 'Alt Required', '1m ORH': 'failed', '5m ORH': 'failed', 'Trigger Day': 'Success', 'Current Status': 'Failed D2', 'Retests': '', 'current_pct_raw': 0.00, 'max_pct_raw': 0.10, 'd3_high_pct_raw': 0.15},
+        {'Trigger': 'No Trigger', '1m ORH': '', '5m ORH': '', 'Trigger Day': 'Unresolved', 'Current Status': '—', 'Retests': '', 'current_pct_raw': None, 'max_pct_raw': None, 'd3_high_pct_raw': None},
     ])
 
     summary = day_summary(df)
@@ -2069,9 +2151,9 @@ def test_day_summary_metrics():
 def test_day_summary_counts_pdh_and_excludes_pdh_rows_from_orh_counts():
     muted = current_status_display('Fail', 0)
     df = pd.DataFrame([
-        {'Trigger': 'PDH', '1m ORH': '-', '5m ORH': '-', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retest Day': '', 'current_pct_raw': 0.04, 'max_pct_raw': 0.08, 'd3_high_pct_raw': 0.10},
-        {'Trigger': 'Failed PDH Trigger', '1m ORH': '-', '5m ORH': '-', 'Trigger Day': 'Fail', 'Current Status': muted, 'Retest Day': '', 'current_pct_raw': -0.01, 'max_pct_raw': 0.02, 'd3_high_pct_raw': 0.03},
-        {'Trigger': '1m ORH', 'PDH': 'Gap', '1m ORH': 'success', '5m ORH': 'success', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retest Day': '', 'current_pct_raw': 0.02, 'max_pct_raw': 0.04, 'd3_high_pct_raw': 0.05},
+        {'Trigger': 'PDH', '1m ORH': '-', '5m ORH': '-', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retests': '', 'current_pct_raw': 0.04, 'max_pct_raw': 0.08, 'd3_high_pct_raw': 0.10},
+        {'Trigger': 'Failed PDH Trigger', '1m ORH': '-', '5m ORH': '-', 'Trigger Day': 'Fail', 'Current Status': muted, 'Retests': '', 'current_pct_raw': -0.01, 'max_pct_raw': 0.02, 'd3_high_pct_raw': 0.03},
+        {'Trigger': '1m ORH', 'PDH': 'Gap', '1m ORH': 'success', '5m ORH': 'success', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retests': '', 'current_pct_raw': 0.02, 'max_pct_raw': 0.04, 'd3_high_pct_raw': 0.05},
     ])
 
     summary = day_summary(df)

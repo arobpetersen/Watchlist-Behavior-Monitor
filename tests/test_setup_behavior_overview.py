@@ -240,8 +240,11 @@ def test_detail_rows_match_expected_columns_and_window_filter():
     assert detail.columns.tolist() == DETAIL_COLUMNS
     assert detail.columns.tolist()[5:9] == ['PDH', '1m ORH', 'VWAP Reclaim', '5m ORH']
     assert 'VWAP Trigger' not in detail.columns
+    assert 'Retests' in detail.columns
+    assert 'Retest' not in detail.columns
     assert 'Close < BE' in detail.columns
     assert detail['Ticker'].tolist() == ['AAA', 'EEE', 'BBB']
+    assert detail.loc[0, 'Retests'] == 'D1'
     assert detail.loc[0, 'D3 High'] == '-'
     assert detail.loc[1, 'Setup'] == '-'
     assert detail.loc[1, 'Rating'] == '-'
@@ -256,6 +259,16 @@ def test_detail_rows_sort_by_date_status_priority_and_current():
         ['EEE', 'Failed D1', '2.0%'],
         ['BBB', 'Failed D2', '1.0%'],
     ]
+
+
+def test_detail_rows_preserve_multiple_retests_display():
+    history = _history().copy()
+    history.loc[history['Ticker'].eq('AAA'), 'Retests'] = 'D0, D3'
+    window = overview_windows(['2026-05-08'])[0]
+
+    detail = detail_rows(history, window)
+
+    assert detail.loc[0, 'Retests'] == 'D0, D3'
 
 
 def test_selected_window_metrics_group_diagnostics_separately():
