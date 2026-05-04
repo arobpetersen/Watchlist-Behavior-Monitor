@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from src.rolling_setup_monitor import rolling_setup_monitor
+from src.vwap_reclaim import assess_vwap_reclaim
 
 
 FULL_SUMMARY_COLUMNS = [
@@ -60,6 +61,7 @@ DETAIL_COLUMNS = [
     'PDH',
     '1m ORH',
     '5m ORH',
+    'VWAP Reclaim',
     'Notes',
     'Current',
     'Max',
@@ -179,6 +181,77 @@ def monitor_history(con) -> pd.DataFrame:
         return pd.DataFrame()
     history = pd.concat(frames, ignore_index=True)
     history['Setup Date'] = pd.to_datetime(history['Setup Date'])
+    return _add_vwap_reclaim_events(con, history)
+
+
+def _vwap_reclaim_defaults(history: pd.DataFrame) -> pd.DataFrame:
+    out = history.copy()
+    for column, value in {
+        'VWAP Reclaim': 'Not Applicable',
+        'VWAP Reclaim Time': '',
+        'VWAP Reclaim Bar High': None,
+        'VWAP Reclaim Trigger Time': '',
+        'VWAP Reclaim Trigger Price': None,
+        'VWAP Reclaim Reason': 'intraday bars unavailable',
+    }.items():
+        if column not in out:
+            out[column] = value
+    return out
+
+
+def _add_vwap_reclaim_events(con, history: pd.DataFrame) -> pd.DataFrame:
+    """Attach objective VWAP Reclaim diagnostics from cached 1-minute bars.
+
+    VWAP Reclaim is an independent trigger event for overview diagnostics. It is
+    not used here to rewrite the Rolling Setup Monitor final/primary trigger.
+    """
+    history = _vwap_reclaim_defaults(history)
+    if history.empty or 'Ticker' not in history or 'Setup Date' not in history:
+        return history
+
+    tickers = sorted(history['Ticker'].dropna().astype(str).unique())
+    setup_dates = sorted(pd.to_datetime(history['Setup Date'], errors='coerce').dt.date.dropna().astype(str).unique())
+    if not tickers or not setup_dates:
+        return history
+
+    ticker_placeholders = ','.join(['?'] * len(tickers))
+    date_placeholders = ','.join(['?'] * len(setup_dates))
+    try:
+        bars = con.execute(
+            f"""
+            select ticker, trading_date, timestamp_et, open, high, low, close, volume
+            from intraday_bars_1m
+            where ticker in ({ticker_placeholders})
+              and cast(trading_date as varchar) in ({date_placeholders})
+            order by ticker, trading_date, timestamp_et
+            """,
+            tickers + setup_dates,
+        ).df()
+    except Exception:
+        return history
+
+    if bars.empty:
+        return history
+
+    bars['ticker'] = bars['ticker'].astype(str)
+    bars['trading_date'] = pd.to_datetime(bars['trading_date'], errors='coerce').dt.date.astype(str)
+    grouped = {
+        (ticker, trading_date): group.copy()
+        for (ticker, trading_date), group in bars.groupby(['ticker', 'trading_date'], dropna=False)
+    }
+
+    for idx, row in history.iterrows():
+        ticker = str(row.get('Ticker', ''))
+        setup_date = pd.to_datetime(row.get('Setup Date'), errors='coerce')
+        if not ticker or pd.isna(setup_date):
+            continue
+        result = assess_vwap_reclaim(grouped.get((ticker, setup_date.date().isoformat())))
+        history.at[idx, 'VWAP Reclaim'] = result.get('result') or ''
+        history.at[idx, 'VWAP Reclaim Time'] = result.get('reclaim_time') or ''
+        history.at[idx, 'VWAP Reclaim Bar High'] = result.get('reclaim_bar_high')
+        history.at[idx, 'VWAP Reclaim Trigger Time'] = result.get('trigger_time') or ''
+        history.at[idx, 'VWAP Reclaim Trigger Price'] = result.get('trigger_price')
+        history.at[idx, 'VWAP Reclaim Reason'] = result.get('failure_reason') or ''
     return history
 
 
@@ -262,6 +335,7 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
         'PDH': rows['PDH'].apply(_display) if 'PDH' in rows else '-',
         '1m ORH': rows['1m ORH'].apply(_display),
         '5m ORH': rows['5m ORH'].apply(_display),
+        'VWAP Reclaim': rows['VWAP Reclaim'].apply(_display) if 'VWAP Reclaim' in rows else '-',
         'Notes': rows['Notes'].apply(_display),
         'Current': rows['Current %'].apply(_display),
         'Max': rows['Max %'].apply(_display),
@@ -357,7 +431,7 @@ OPENING_BEHAVIOR_MAIN_COLUMNS = [
     'Later Failed',
     'Median Max',
 ]
-MAIN_OPENING_TRIGGERS = ['1m ORH', '5m ORH', 'PDH', 'Alt Required']
+MAIN_OPENING_TRIGGERS = ['1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH', 'Alt Required']
 
 
 def _count_int(value: Any) -> int:
@@ -436,6 +510,7 @@ def opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
     one = rows['1m ORH'] if '1m ORH' in rows else pd.Series('', index=rows.index)
     five = rows['5m ORH'] if '5m ORH' in rows else pd.Series('', index=rows.index)
     pdh = rows['PDH'] if 'PDH' in rows else pd.Series('', index=rows.index)
+    vwap = rows['VWAP Reclaim'] if 'VWAP Reclaim' in rows else pd.Series('', index=rows.index)
     trigger = rows['Trigger'] if 'Trigger' in rows else pd.Series('', index=rows.index)
 
     one_success = one.eq('success')
@@ -444,7 +519,7 @@ def opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
     five_failed_or_blank = five.eq('failed') | _is_blank_or_dash(five)
     pdh_success = pdh.eq('success')
     pdh_failed_or_blank = pdh.eq('failed') | _is_blank_or_dash(pdh)
-    successful_trigger = trigger.isin({'PDH', '1m ORH', '5m ORH', 'Alt Required'})
+    successful_trigger = trigger.isin({'PDH', '1m ORH', '5m ORH', 'Alt Required'}) | vwap.eq('success')
     trigger_day = rows['Trigger Day'] if 'Trigger Day' in rows else pd.Series('', index=rows.index)
     alt_success = trigger.eq('Alt Required') & trigger_day.eq('Success')
 
@@ -485,6 +560,7 @@ def main_opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
     masks = {
         '1m ORH': rows['1m ORH'].eq('success') if '1m ORH' in rows else pd.Series(False, index=rows.index),
         '5m ORH': rows['5m ORH'].eq('success') if '5m ORH' in rows else pd.Series(False, index=rows.index),
+        'VWAP Reclaim': rows['VWAP Reclaim'].eq('success') if 'VWAP Reclaim' in rows else pd.Series(False, index=rows.index),
         'PDH': rows['PDH'].eq('success') if 'PDH' in rows else pd.Series(False, index=rows.index),
         'Alt Required': (rows['Trigger'].eq('Alt Required') & trigger_day.eq('Success')) if 'Trigger' in rows else pd.Series(False, index=rows.index),
     }
@@ -498,6 +574,7 @@ def _opening_path_mask(rows: pd.DataFrame, path: str) -> pd.Series:
     one = rows['1m ORH'] if '1m ORH' in rows else pd.Series('', index=rows.index)
     five = rows['5m ORH'] if '5m ORH' in rows else pd.Series('', index=rows.index)
     pdh = rows['PDH'] if 'PDH' in rows else pd.Series('', index=rows.index)
+    vwap = rows['VWAP Reclaim'] if 'VWAP Reclaim' in rows else pd.Series('', index=rows.index)
     trigger = rows['Trigger'] if 'Trigger' in rows else pd.Series('', index=rows.index)
     one_success = one.eq('success')
     one_failed = one.eq('failed')
@@ -505,7 +582,7 @@ def _opening_path_mask(rows: pd.DataFrame, path: str) -> pd.Series:
     five_failed_or_blank = five.eq('failed') | _is_blank_or_dash(five)
     pdh_success = pdh.eq('success')
     pdh_failed_or_blank = pdh.eq('failed') | _is_blank_or_dash(pdh)
-    successful_trigger = trigger.isin({'PDH', '1m ORH', '5m ORH', 'Alt Required'})
+    successful_trigger = trigger.isin({'PDH', '1m ORH', '5m ORH', 'Alt Required'}) | vwap.eq('success')
     trigger_day = rows['Trigger Day'] if 'Trigger Day' in rows else pd.Series('', index=rows.index)
     masks = {
         'Clean 1m ORH Success': one_success,
@@ -644,7 +721,7 @@ def mix_tables(window_summary: dict) -> dict[str, pd.DataFrame]:
 
 
 TRIGGER_ORDER = ['PDH', '1m ORH', '5m ORH', 'Alt Required', 'Failed PDH Trigger', 'Failed OR Trigger', 'No Trigger']
-TRIGGER_COMPARISON_ORDER = ['1m ORH', '5m ORH', 'PDH', 'Alt Required']
+TRIGGER_COMPARISON_ORDER = ['1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH', 'Alt Required']
 TRIGGER_COMPARISON_COLUMNS = [
     'Trigger',
     'Window',
@@ -680,7 +757,7 @@ TRIGGER_EVENT_MAIN_COLUMNS = [
 def _trigger_event_values(rows: pd.DataFrame, trigger_name: str) -> pd.Series:
     if rows.empty:
         return pd.Series('', index=rows.index)
-    if trigger_name in {'1m ORH', '5m ORH', 'PDH'}:
+    if trigger_name in {'1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH'}:
         if trigger_name not in rows:
             return pd.Series('', index=rows.index)
         return _normalized_result(rows[trigger_name])
@@ -689,14 +766,16 @@ def _trigger_event_values(rows: pd.DataFrame, trigger_name: str) -> pd.Series:
 
     # Alt Required is stored as a final/primary trigger label, not a raw event
     # diagnostic column. For event aggregation, treat it as applicable only when
-    # no displayed 1m/5m/PDH trigger event succeeded, or when Alt Required itself
-    # was the final trigger. Eligible non-trigger rows stay blank.
+    # no displayed 1m/5m/VWAP/PDH trigger event succeeded, or when Alt
+    # Required itself was the final trigger. Eligible non-trigger rows stay
+    # blank so Alt Required remains the fallback event.
     trigger = rows['Trigger'] if 'Trigger' in rows else pd.Series('', index=rows.index)
     trigger_day = rows['Trigger Day'] if 'Trigger Day' in rows else pd.Series('', index=rows.index)
     one = rows['1m ORH'] if '1m ORH' in rows else pd.Series('', index=rows.index)
     five = rows['5m ORH'] if '5m ORH' in rows else pd.Series('', index=rows.index)
+    vwap = rows['VWAP Reclaim'] if 'VWAP Reclaim' in rows else pd.Series('', index=rows.index)
     pdh = rows['PDH'] if 'PDH' in rows else pd.Series('', index=rows.index)
-    lower_success = one.eq('success') | five.eq('success') | pdh.eq('success')
+    lower_success = one.eq('success') | five.eq('success') | vwap.eq('success') | pdh.eq('success')
     alt_selected = trigger.eq('Alt Required')
 
     values = pd.Series('Not Applicable', index=rows.index, dtype=object)
@@ -756,7 +835,7 @@ def filter_detail_rows(
     if rows.empty:
         return rows.copy()
     out = rows.copy()
-    trigger_columns = ['1m ORH', '5m ORH', 'PDH', 'Alt Required']
+    trigger_columns = ['1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH', 'Alt Required']
 
     if trigger_level != 'All':
         values = _trigger_event_values(out, trigger_level)

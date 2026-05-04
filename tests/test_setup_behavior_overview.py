@@ -388,6 +388,7 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
             'Trigger Day': 'Success',
             '1m ORH': 'success',
             '5m ORH': '-',
+            'VWAP Reclaim': '',
             'PDH': 'Gap',
             'current_pct_raw': 0.04,
             'max_pct_raw': 0.10,
@@ -399,6 +400,7 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
             'Trigger Day': 'Success',
             '1m ORH': 'failed',
             '5m ORH': 'success',
+            'VWAP Reclaim': 'success',
             'PDH': '-',
             'current_pct_raw': 0.02,
             'max_pct_raw': 0.08,
@@ -410,6 +412,7 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
             'Trigger Day': 'Success',
             '1m ORH': '-',
             '5m ORH': 'failed',
+            'VWAP Reclaim': 'failed',
             'PDH': 'success',
             'current_pct_raw': 0.01,
             'max_pct_raw': 0.05,
@@ -421,6 +424,7 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
             'Trigger Day': 'Unresolved',
             '1m ORH': '',
             '5m ORH': '',
+            'VWAP Reclaim': '',
             'PDH': '-',
             'current_pct_raw': None,
             'max_pct_raw': None,
@@ -444,6 +448,9 @@ def test_trigger_outcome_comparison_rows_and_denominators():
         ['5m ORH', 'Last 5 Setup Dates'],
         ['5m ORH', 'Last 10 Setup Dates'],
         ['5m ORH', 'Last 20 Setup Dates'],
+        ['VWAP Reclaim', 'Last 5 Setup Dates'],
+        ['VWAP Reclaim', 'Last 10 Setup Dates'],
+        ['VWAP Reclaim', 'Last 20 Setup Dates'],
         ['PDH', 'Last 5 Setup Dates'],
         ['PDH', 'Last 10 Setup Dates'],
         ['PDH', 'Last 20 Setup Dates'],
@@ -472,14 +479,15 @@ def test_trigger_outcome_by_window_tables_drop_window_column_and_group_triggers(
     last_10 = by_window['Last 10 Setup Dates']
     assert last_10.columns.tolist() == TRIGGER_COMPARISON_BY_WINDOW_COLUMNS
     assert 'Window' not in last_10.columns
-    assert last_10['Trigger'].tolist() == ['1m ORH', '5m ORH', 'PDH', 'Alt Required']
-    assert all(table['Trigger'].tolist() == ['1m ORH', '5m ORH', 'PDH', 'Alt Required'] for table in by_window.values())
+    assert last_10['Trigger'].tolist() == ['1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH', 'Alt Required']
+    assert all(table['Trigger'].tolist() == ['1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH', 'Alt Required'] for table in by_window.values())
     assert 'Eligible' in last_10.columns
     assert 'Ineligible' in last_10.columns
     assert last_10.loc[0, 'Triggered'] == 2
     assert last_10.loc[1, 'Triggered'] == 2
-    assert last_10.loc[2, 'Triggered'] == 1
-    assert last_10.loc[3, 'Triggered'] == 0
+    assert last_10.loc[2, 'Triggered'] == 2
+    assert last_10.loc[3, 'Triggered'] == 1
+    assert last_10.loc[4, 'Triggered'] == 0
 
 
 def test_trigger_event_main_tables_use_compact_count_percent_columns():
@@ -488,7 +496,7 @@ def test_trigger_event_main_tables_use_compact_count_percent_columns():
     last_10 = main['Last 10 Setup Dates']
 
     assert last_10.columns.tolist() == TRIGGER_EVENT_MAIN_COLUMNS
-    assert last_10['Trigger'].tolist() == ['1m ORH', '5m ORH', 'PDH', 'Alt Required']
+    assert last_10['Trigger'].tolist() == ['1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH', 'Alt Required']
     assert last_10.loc[0, 'Eligible'] == 4
     assert last_10.loc[0, 'Triggered'] == '2 (50%)'
     assert last_10.loc[0, 'Failed'] == '1 (50%)'
@@ -513,6 +521,9 @@ def test_trigger_outcome_internal_table_includes_alt_required_event_rows():
         ['5m ORH', 'Last 5 Setup Dates'],
         ['5m ORH', 'Last 10 Setup Dates'],
         ['5m ORH', 'Last 20 Setup Dates'],
+        ['VWAP Reclaim', 'Last 5 Setup Dates'],
+        ['VWAP Reclaim', 'Last 10 Setup Dates'],
+        ['VWAP Reclaim', 'Last 20 Setup Dates'],
         ['PDH', 'Last 5 Setup Dates'],
         ['PDH', 'Last 10 Setup Dates'],
         ['PDH', 'Last 20 Setup Dates'],
@@ -553,6 +564,23 @@ def test_trigger_outcome_follow_through_uses_successful_trigger_rows_only():
     assert one_last_10['Median Max'] == '10.0%'
 
 
+def test_trigger_outcome_includes_vwap_reclaim_event_rows():
+    comparison = trigger_outcome_comparison(_trigger_comparison_history())
+
+    vwap_last_10 = comparison[(comparison['Trigger'] == 'VWAP Reclaim') & (comparison['Window'] == 'Last 10 Setup Dates')].iloc[0]
+    assert vwap_last_10['Setups'] == 4
+    assert vwap_last_10['Eligible'] == 4
+    assert vwap_last_10['Triggered'] == 2
+    assert vwap_last_10['Trigger Rate'] == '50%'
+    assert vwap_last_10['Success'] == 1
+    assert vwap_last_10['Success %'] == '50%'
+    assert vwap_last_10['Failed'] == 1
+    assert vwap_last_10['Fail %'] == '50%'
+    assert vwap_last_10['Later Failed Count'] == 1
+    assert vwap_last_10['Later Failed %'] == '100%'
+    assert vwap_last_10['Median Max'] == '8.0%'
+
+
 def test_trigger_outcome_pdh_gap_is_ineligible_for_trigger_rate():
     comparison = trigger_outcome_comparison(_trigger_comparison_history())
 
@@ -578,6 +606,7 @@ def test_trigger_outcome_alt_required_derives_event_result_and_denominator():
                 'Trigger Day': 'Success',
                 '1m ORH': 'failed',
                 '5m ORH': 'failed',
+                'VWAP Reclaim': '',
                 'PDH': '-',
                 'current_pct_raw': 0.03,
                 'max_pct_raw': 0.07,
@@ -589,6 +618,7 @@ def test_trigger_outcome_alt_required_derives_event_result_and_denominator():
                 'Trigger Day': 'Success',
                 '1m ORH': 'success',
                 '5m ORH': '-',
+                'VWAP Reclaim': '',
                 'PDH': 'Gap',
                 'current_pct_raw': 0.05,
                 'max_pct_raw': 0.10,
@@ -600,6 +630,7 @@ def test_trigger_outcome_alt_required_derives_event_result_and_denominator():
                 'Trigger Day': 'Unresolved',
                 '1m ORH': '',
                 '5m ORH': '',
+                'VWAP Reclaim': '',
                 'PDH': '-',
                 'current_pct_raw': None,
                 'max_pct_raw': None,
@@ -620,6 +651,46 @@ def test_trigger_outcome_alt_required_derives_event_result_and_denominator():
     assert alt['Fail %'] == '0%'
     assert alt['Median Current'] == '3.0%'
     assert alt['Median Max'] == '7.0%'
+
+
+def test_vwap_success_prevents_fallback_alt_required_event_count():
+    history = {
+        'Last 5 Setup Dates': pd.DataFrame([
+            {
+                'Ticker': 'VWAP',
+                'Current Status': 'Active',
+                'Trigger': 'No Trigger',
+                'Trigger Day': 'Success',
+                '1m ORH': 'failed',
+                '5m ORH': 'failed',
+                'VWAP Reclaim': 'success',
+                'PDH': '-',
+                'current_pct_raw': 0.04,
+                'max_pct_raw': 0.11,
+            },
+            {
+                'Ticker': 'ALT',
+                'Current Status': 'Active',
+                'Trigger': 'Alt Required',
+                'Trigger Day': 'Success',
+                '1m ORH': 'failed',
+                '5m ORH': 'failed',
+                'VWAP Reclaim': '',
+                'PDH': '-',
+                'current_pct_raw': 0.03,
+                'max_pct_raw': 0.07,
+            },
+        ])
+    }
+
+    comparison = trigger_outcome_comparison(history)
+
+    vwap = comparison[(comparison['Trigger'] == 'VWAP Reclaim') & (comparison['Window'] == 'Last 5 Setup Dates')].iloc[0]
+    alt = comparison[(comparison['Trigger'] == 'Alt Required') & (comparison['Window'] == 'Last 5 Setup Dates')].iloc[0]
+    assert vwap['Success'] == 1
+    assert alt['Eligible'] == 1
+    assert alt['Triggered'] == 1
+    assert alt['Success'] == 1
 
 
 def test_trigger_outcome_comparison_zero_trigger_display():
@@ -648,6 +719,7 @@ def test_trigger_outcome_zero_success_display_uses_dashes_for_follow_through():
             'Trigger Day': 'Success',
             '1m ORH': 'failed',
             '5m ORH': 'success',
+            'VWAP Reclaim': '',
             'PDH': '-',
             'current_pct_raw': 0.03,
             'max_pct_raw': 0.09,
@@ -706,6 +778,9 @@ def test_filter_detail_rows_by_trigger_level_and_result():
 
     pdh_blank = filter_detail_rows(detail, trigger_level='PDH', trigger_result='blank')
     assert pdh_blank['Ticker'].tolist() == ['AAA', 'EEE', 'BBB', 'CCC']
+
+    vwap_success = filter_detail_rows(detail.assign(**{'VWAP Reclaim': ['success', '', '', '']}), trigger_level='VWAP Reclaim', trigger_result='success')
+    assert vwap_success['Ticker'].tolist() == ['AAA']
 
 
 def test_filter_detail_rows_by_ineligible_gap_result():
@@ -932,11 +1007,34 @@ def test_opening_behavior_main_table_zero_count_display():
     assert main.loc['1m ORH', 'Median Max'] == '-'
 
 
+def test_opening_behavior_main_table_includes_vwap_reclaim_success_row():
+    history = pd.DataFrame([{
+        'Ticker': 'VWAP',
+        'Current Status': 'Failed D1',
+        'Trigger Day': 'Success',
+        'Trigger': 'No Trigger',
+        'PDH': '-',
+        '1m ORH': 'failed',
+        '5m ORH': 'failed',
+        'VWAP Reclaim': 'success',
+        'max_pct_raw': 0.12,
+    }])
+
+    main = main_opening_behavior_table(history).set_index('Trigger')
+
+    assert main.loc['VWAP Reclaim', 'Count'] == 1
+    assert main.loc['VWAP Reclaim', '% of Setups'] == '100%'
+    assert main.loc['VWAP Reclaim', 'Currently Active'] == '0 (0%)'
+    assert main.loc['VWAP Reclaim', 'Later Failed'] == '1 (100%)'
+    assert main.loc['VWAP Reclaim', 'Median Max'] == '12.0%'
+
+
 def test_setup_behavior_page_uses_successful_triggers_section_title():
     page = open('pages/5_Setup_Behavior_Overview.py', encoding='utf-8').read()
 
     assert "st.subheader('Selected Window Successful Triggers')" in page
     assert "st.subheader('Selected Window Opening Path')" not in page
+    assert "'VWAP Reclaim'" in page
 
 
 def test_opening_behavior_detail_retains_richer_path_rows():
