@@ -748,9 +748,9 @@ ACTIONABLE_TRIGGERS = {'VWAP Reclaim', '1m ORH', '5m ORH', 'PDH', 'Alt Required'
 def weak_close_assessment(record: dict) -> dict:
     trigger_type = _blank(record.get('trigger_type'))
     if trigger_type not in ACTIONABLE_TRIGGERS:
-        return {'close_below_be': None, 'weak_close_note': ''}
+        return {'close_below_be': None}
     if trigger_day_status(trigger_type, record.get('fail_day')) != 'Success':
-        return {'close_below_be': None, 'weak_close_note': ''}
+        return {'close_below_be': None}
 
     close = _num(record.get('close_price'))
     breakeven = _num(record.get('trigger_level'))
@@ -764,25 +764,15 @@ def weak_close_assessment(record: dict) -> dict:
     if close is None or breakeven is None:
         current_pct = _num(record.get('current_pct'))
         if current_pct is None:
-            return {'close_below_be': None, 'weak_close_note': ''}
+            return {'close_below_be': None}
         below_breakeven = current_pct < 0
-    note = 'VWAP reclaim, weak close below BE' if trigger_type == 'VWAP Reclaim' else 'Weak close below BE'
-    return {
-        'close_below_be': bool(below_breakeven),
-        'weak_close_note': note if below_breakeven else '',
-    }
+    return {'close_below_be': bool(below_breakeven)}
 
 
 def apply_weak_close_note(record: dict) -> dict:
     assessment = weak_close_assessment(record)
-    note = assessment['weak_close_note']
-    if not note:
-        return {'notes': _blank(record.get('notes')), 'close_below_be': assessment['close_below_be']}
-
-    notes = [existing for existing in _blank(record.get('notes')).split('; ') if existing]
-    notes.append(note)
     return {
-        'notes': '; '.join(dict.fromkeys(notes)),
+        'notes': _blank(record.get('notes')),
         'close_below_be': assessment['close_below_be'],
     }
 

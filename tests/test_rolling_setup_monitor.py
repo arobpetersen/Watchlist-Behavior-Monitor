@@ -563,7 +563,7 @@ def test_one_min_quality_notes_skip_weak_when_follow_through_confirmed_or_atr_mi
     assert zero['notes'] == ''
 
 
-def test_weak_close_note_for_vwap_reclaim_below_trigger_price():
+def test_close_below_be_for_vwap_reclaim_below_trigger_price_without_note_append():
     out = apply_weak_close_note({
         'trigger_type': 'VWAP Reclaim',
         'fail_day': None,
@@ -572,11 +572,11 @@ def test_weak_close_note_for_vwap_reclaim_below_trigger_price():
         'notes': '',
     })
 
-    assert out['notes'] == 'VWAP reclaim, weak close below BE'
+    assert out['notes'] == ''
     assert out['close_below_be'] is True
 
 
-def test_weak_close_note_for_non_vwap_trigger_below_breakeven():
+def test_close_below_be_for_non_vwap_trigger_below_breakeven_without_note_append():
     out = apply_weak_close_note({
         'trigger_type': '5m ORH',
         'fail_day': None,
@@ -585,7 +585,7 @@ def test_weak_close_note_for_non_vwap_trigger_below_breakeven():
         'notes': '',
     })
 
-    assert out['notes'] == 'Weak close below BE'
+    assert out['notes'] == ''
     assert out['close_below_be'] is True
 
 
@@ -618,7 +618,7 @@ def test_weak_close_note_skips_strong_close_failures_and_missing_inputs():
     assert missing['close_below_be'] is None
 
 
-def test_weak_close_note_appends_without_duplicates_and_uses_current_return_fallback():
+def test_close_below_be_preserves_existing_notes_and_uses_current_return_fallback():
     out = apply_weak_close_note({
         'trigger_type': 'Alt Required',
         'fail_day': None,
@@ -632,7 +632,7 @@ def test_weak_close_note_appends_without_duplicates_and_uses_current_return_fall
         'notes': out['notes'],
     })
 
-    assert out['notes'] == 'Wide 5m OR; Weak close below BE'
+    assert out['notes'] == 'Wide 5m OR'
     assert out['close_below_be'] is True
     assert duplicate['notes'] == out['notes']
 
@@ -707,7 +707,7 @@ def test_weak_close_column_displays_no_and_dash_states():
     assert dash.loc[0, 'Close < BE'] == ''
 
 
-def test_format_section_table_displays_weak_close_note():
+def test_format_section_table_displays_close_below_be_without_weak_close_note():
     raw = pd.DataFrame([{
         'candidate_id': 1,
         'ticker': 'AAPL',
@@ -716,7 +716,7 @@ def test_format_section_table_displays_weak_close_note():
         'one_min_result': 'failed',
         'five_min_result': 'failed',
         'vwap_qualified_trigger_result': 'success',
-        'notes': 'VWAP reclaim, weak close below BE',
+        'notes': '',
         'close_below_be': True,
         'current_pct': -0.01,
         'max_pct': 0.03,
@@ -744,9 +744,9 @@ def test_format_section_table_displays_weak_close_note():
 
     table = _format_section_table(raw)
 
-    assert table.loc[0, 'Notes'] == 'VWAP reclaim, weak close below BE'
+    assert table.loc[0, 'Notes'] == ''
     assert table.loc[0, 'Close < BE'] == 'Yes'
-    assert main_table(table).loc[0, 'Notes'] == 'VWAP reclaim, weak close below BE'
+    assert main_table(table).loc[0, 'Notes'] == ''
     assert main_table(table).loc[0, 'Close < BE'] == 'Yes'
 
 
