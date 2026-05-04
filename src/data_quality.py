@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
@@ -23,6 +24,17 @@ CANDIDATE_DUPLICATE_COLUMNS = [
     'Source File',
     'Rows',
 ]
+
+
+@dataclass(frozen=True)
+class DataHealthSummary:
+    status: str
+    latest_setup_date: str
+    latest_daily_bar_date: str
+    latest_intraday_bar_date: str
+    candidate_rows: int
+    duplicate_candidate_key_count: int
+    partial_intraday_session_count: int
 
 
 def duplicate_candidate_keys(con) -> pd.DataFrame:
@@ -126,3 +138,65 @@ def partial_intraday_sessions_from_db(con, min_regular_session_bars: int = 300) 
         """
     ).df()
     return partial_intraday_sessions(bars, min_regular_session_bars=min_regular_session_bars)
+
+
+def _scalar(con, sql: str, default: Any = None) -> Any:
+    try:
+        row = con.execute(sql).fetchone()
+        if row is None:
+            return default
+        return row[0] if row[0] is not None else default
+    except Exception:
+        return default
+
+
+def _fmt_date(value: Any) -> str:
+    parsed = pd.to_datetime(value, errors='coerce')
+    if pd.isna(parsed):
+        return '-'
+    return parsed.strftime('%Y-%m-%d')
+
+
+def build_data_health_summary(con) -> DataHealthSummary:
+    latest_setup = _scalar(con, 'select max(watchlist_date) from watchlist_candidates')
+    latest_daily = _scalar(con, 'select max(trading_date) from daily_bars')
+    latest_intraday = _scalar(con, 'select max(trading_date) from intraday_bars_1m')
+    candidate_rows = int(_scalar(con, 'select count(*) from watchlist_candidates', 0) or 0)
+
+    try:
+        duplicate_count = len(duplicate_candidate_keys(con))
+    except Exception:
+        duplicate_count = 0
+    try:
+        partial_count = len(partial_intraday_sessions_from_db(con))
+    except Exception:
+        partial_count = 0
+
+    check_data = (
+        candidate_rows == 0
+        or latest_setup is None
+        or duplicate_count > 0
+        or partial_count > 0
+        or (candidate_rows > 0 and (latest_daily is None or latest_intraday is None))
+    )
+    return DataHealthSummary(
+        status='Check Data' if check_data else 'OK',
+        latest_setup_date=_fmt_date(latest_setup),
+        latest_daily_bar_date=_fmt_date(latest_daily),
+        latest_intraday_bar_date=_fmt_date(latest_intraday),
+        candidate_rows=candidate_rows,
+        duplicate_candidate_key_count=duplicate_count,
+        partial_intraday_session_count=partial_count,
+    )
+
+
+def data_health_line(summary: DataHealthSummary) -> str:
+    return (
+        f'Data Health: {summary.status} | '
+        f'Latest Setup: {summary.latest_setup_date} | '
+        f'Daily Bars: {summary.latest_daily_bar_date} | '
+        f'Intraday: {summary.latest_intraday_bar_date} | '
+        f'Candidates: {summary.candidate_rows} | '
+        f'Duplicates: {summary.duplicate_candidate_key_count} | '
+        f'Partial Sessions: {summary.partial_intraday_session_count}'
+    )

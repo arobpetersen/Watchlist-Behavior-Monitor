@@ -1,6 +1,7 @@
 import streamlit as st
 
 from src.config import get_settings
+from src.data_health_indicator import load_data_health_summary, render_data_health_indicator
 from src.database import get_connection
 from src.setup_behavior_overview import (
     OPENING_BEHAVIOR_MAIN_COLUMNS,
@@ -49,6 +50,7 @@ db_path = str(get_settings().db_path)
 st.title('Setup Behavior Overview')
 st.caption('Rolling summary of Back-Watch setup behavior across recent setup-date windows.')
 st.caption('D3 High only includes setups with completed D3 data.')
+render_data_health_indicator(load_data_health_summary(db_path))
 
 with st.expander('Definitions / Logic', expanded=False):
     st.markdown(

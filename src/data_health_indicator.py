@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+import streamlit as st
+
+from src.data_quality import DataHealthSummary, build_data_health_summary, data_health_line
+from src.database import get_connection
+
+
+@st.cache_data(show_spinner=False)
+def load_data_health_summary(db_path: str, cache_version: str = 'data-health-v1') -> DataHealthSummary:
+    con = get_connection(db_path)
+    return build_data_health_summary(con)
+
+
+def render_data_health_indicator(summary: DataHealthSummary) -> None:
+    expanded = summary.status == 'Check Data'
+    with st.expander(f'Data Health: {summary.status}', expanded=expanded):
+        st.caption(data_health_line(summary))
+        st.dataframe(
+            [{
+                'Latest Setup Date': summary.latest_setup_date,
+                'Latest Daily Bar Date': summary.latest_daily_bar_date,
+                'Latest Intraday Bar Date': summary.latest_intraday_bar_date,
+                'Candidate Rows': summary.candidate_rows,
+                'Duplicate Candidate Keys': summary.duplicate_candidate_key_count,
+                'Partial Intraday Sessions': summary.partial_intraday_session_count,
+            }],
+            width='stretch',
+            hide_index=True,
+        )
