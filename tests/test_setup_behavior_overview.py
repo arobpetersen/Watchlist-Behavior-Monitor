@@ -493,8 +493,9 @@ def test_trigger_event_main_tables_use_compact_count_percent_columns():
     assert last_10.loc[0, 'Triggered'] == '2 (50%)'
     assert last_10.loc[0, 'Failed'] == '1 (50%)'
     assert last_10.loc[0, 'Success'] == '1 (50%)'
-    assert last_10.loc[0, 'Currently Active'] == '1 (50%)'
-    assert last_10.loc[0, 'Later Failed'] == '1 (50%)'
+    assert last_10.loc[0, 'Currently Active'] == '1 (100%)'
+    assert last_10.loc[0, 'Later Failed'] == '0 (0%)'
+    assert last_10.loc[0, 'Median Max'] == '10.0%'
     assert 'Median Current' not in last_10.columns
     assert 'Ineligible' not in last_10.columns
     assert 'Active %' not in last_10.columns
@@ -526,10 +527,30 @@ def test_trigger_outcome_comparison_later_failed_active_and_medians():
 
     five_last_10 = comparison[(comparison['Trigger'] == '5m ORH') & (comparison['Window'] == 'Last 10 Setup Dates')].iloc[0]
     assert five_last_10['Triggered'] == 2
-    assert five_last_10['Later Failed %'] == '50%'
-    assert five_last_10['Active %'] == '50%'
+    assert five_last_10['Success'] == 1
+    assert five_last_10['Later Failed Count'] == 1
+    assert five_last_10['Later Failed %'] == '100%'
+    assert five_last_10['Active Count'] == 0
+    assert five_last_10['Active %'] == '0%'
     assert five_last_10['Median Current'] == '1.5%'
-    assert five_last_10['Median Max'] == '6.5%'
+    assert five_last_10['Median Max'] == '8.0%'
+
+
+def test_trigger_outcome_follow_through_uses_successful_trigger_rows_only():
+    comparison = trigger_outcome_comparison(_trigger_comparison_history())
+
+    one_last_10 = comparison[(comparison['Trigger'] == '1m ORH') & (comparison['Window'] == 'Last 10 Setup Dates')].iloc[0]
+    assert one_last_10['Triggered'] == 2
+    assert one_last_10['Trigger Rate'] == '50%'
+    assert one_last_10['Failed'] == 1
+    assert one_last_10['Fail %'] == '50%'
+    assert one_last_10['Success'] == 1
+    assert one_last_10['Success %'] == '50%'
+    assert one_last_10['Active Count'] == 1
+    assert one_last_10['Active %'] == '100%'
+    assert one_last_10['Later Failed Count'] == 0
+    assert one_last_10['Later Failed %'] == '0%'
+    assert one_last_10['Median Max'] == '10.0%'
 
 
 def test_trigger_outcome_pdh_gap_is_ineligible_for_trigger_rate():
@@ -616,6 +637,34 @@ def test_trigger_outcome_comparison_zero_trigger_display():
     assert pdh_last_5['Active %'] == '-'
     assert pdh_last_5['Median Current'] == '-'
     assert pdh_last_5['Median Max'] == '-'
+
+
+def test_trigger_outcome_zero_success_display_uses_dashes_for_follow_through():
+    comparison = trigger_outcome_comparison({
+        'Last 5 Setup Dates': pd.DataFrame([{
+            'Ticker': 'FAIL',
+            'Current Status': 'Active',
+            'Trigger': '5m ORH',
+            'Trigger Day': 'Success',
+            '1m ORH': 'failed',
+            '5m ORH': 'success',
+            'PDH': '-',
+            'current_pct_raw': 0.03,
+            'max_pct_raw': 0.09,
+        }])
+    })
+
+    one = comparison[(comparison['Trigger'] == '1m ORH') & (comparison['Window'] == 'Last 5 Setup Dates')].iloc[0]
+    assert one['Triggered'] == 1
+    assert one['Failed'] == 1
+    assert one['Fail %'] == '100%'
+    assert one['Success'] == 0
+    assert one['Success %'] == '0%'
+    assert one['Active Count'] == 0
+    assert one['Active %'] == '-'
+    assert one['Later Failed Count'] == 0
+    assert one['Later Failed %'] == '-'
+    assert one['Median Max'] == '-'
 
 
 def test_trigger_outcome_eligible_zero_display():

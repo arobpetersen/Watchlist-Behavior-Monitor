@@ -16,7 +16,7 @@ from src.setup_behavior_overview import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-OVERVIEW_CACHE_VERSION = 'setup-overview-display-v4'
+OVERVIEW_CACHE_VERSION = 'setup-overview-display-v5'
 
 
 @st.cache_data(show_spinner=False)
@@ -94,7 +94,8 @@ else:
         st.markdown(f'**{window_label}**')
         st.dataframe(table, width='stretch', hide_index=True)
     st.caption(
-        'Triggered % uses eligible setups. Failed %, Success %, Currently Active %, and Later Failed % use triggered setups.'
+        'Triggered % uses eligible setups. Failed % and Success % use triggered setups. Currently Active, Later Failed, '
+        'and Median Max use successful trigger setups only.'
     )
 
     st.subheader('Supporting Stats / Primary Trigger Outcome')

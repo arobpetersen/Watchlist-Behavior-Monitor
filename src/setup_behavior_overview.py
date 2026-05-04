@@ -717,11 +717,13 @@ def trigger_outcome_comparison(history_by_window: dict[str, pd.DataFrame]) -> pd
             eligible_mask = _eligible_trigger_mask(values)
             triggered_mask = success_mask | failed_mask
             triggered = rows[triggered_mask].copy()
+            successful = rows[success_mask].copy()
             eligible_count = int(eligible_mask.sum())
             ineligible_count = setups - eligible_count
             triggered_count = len(triggered)
-            later_failed_count = int(_is_later_failed(triggered['Current Status']).sum()) if triggered_count and 'Current Status' in triggered else 0
-            active_count = int(triggered['Current Status'].eq('Active').sum()) if triggered_count and 'Current Status' in triggered else 0
+            success_count = len(successful)
+            later_failed_count = int(_is_later_failed(successful['Current Status']).sum()) if success_count and 'Current Status' in successful else 0
+            active_count = int(successful['Current Status'].eq('Active').sum()) if success_count and 'Current Status' in successful else 0
             out.append({
                 'Trigger': trigger_name,
                 'Window': window_label,
@@ -730,16 +732,16 @@ def trigger_outcome_comparison(history_by_window: dict[str, pd.DataFrame]) -> pd
                 'Ineligible': ineligible_count,
                 'Triggered': triggered_count,
                 'Trigger Rate': _fmt_rate(triggered_count, eligible_count),
-                'Success': int(success_mask.sum()),
-                'Success %': _fmt_rate(int(success_mask.sum()), triggered_count),
+                'Success': success_count,
+                'Success %': _fmt_rate(success_count, triggered_count),
                 'Failed': int(failed_mask.sum()),
                 'Fail %': _fmt_rate(int(failed_mask.sum()), triggered_count),
                 'Later Failed Count': later_failed_count,
-                'Later Failed %': _fmt_rate(later_failed_count, triggered_count),
+                'Later Failed %': _fmt_rate(later_failed_count, success_count),
                 'Active Count': active_count,
-                'Active %': _fmt_rate(active_count, triggered_count),
+                'Active %': _fmt_rate(active_count, success_count),
                 'Median Current': _fmt_pct(triggered['current_pct_raw'].median() if 'current_pct_raw' in triggered and triggered_count else None),
-                'Median Max': _fmt_pct(triggered['max_pct_raw'].median() if 'max_pct_raw' in triggered and triggered_count else None),
+                'Median Max': _fmt_pct(successful['max_pct_raw'].median() if 'max_pct_raw' in successful and success_count else None),
             })
     return pd.DataFrame(out, columns=TRIGGER_COMPARISON_COLUMNS)
 
