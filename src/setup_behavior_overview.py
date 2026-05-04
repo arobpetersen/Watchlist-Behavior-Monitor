@@ -77,6 +77,7 @@ OPENING_PATH_FILTER_OPTIONS = [
     '1m ORH Failed, Never Recovered',
     '5m ORH Success After 1m Failure',
     'PDH Success After Early Noise',
+    'Alt Required Success',
     'Failed All Opening Triggers',
 ]
 
@@ -348,6 +349,21 @@ OPENING_BEHAVIOR_COLUMNS = [
     'Median Current',
     'Median Max',
 ]
+OPENING_BEHAVIOR_MAIN_COLUMNS = [
+    'Path',
+    'Count',
+    '% of Setups',
+    'Active %',
+    'Later Failed %',
+    'Median Max',
+]
+MAIN_OPENING_PATHS = [
+    'Clean 1m ORH Success',
+    '1m ORH Failed, Later Reclaimed',
+    '5m ORH Success After 1m Failure',
+    'PDH Success After Early Noise',
+    'Alt Required Success',
+]
 
 
 def _count_int(value: Any) -> int:
@@ -435,6 +451,8 @@ def opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
     pdh_success = pdh.eq('success')
     pdh_failed_or_blank = pdh.eq('failed') | _is_blank_or_dash(pdh)
     successful_trigger = trigger.isin({'PDH', '1m ORH', '5m ORH', 'Alt Required'})
+    trigger_day = rows['Trigger Day'] if 'Trigger Day' in rows else pd.Series('', index=rows.index)
+    alt_success = trigger.eq('Alt Required') & trigger_day.eq('Success')
 
     masks = [
         ('Clean 1m ORH Success', one_success),
@@ -442,9 +460,20 @@ def opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
         ('1m ORH Failed, Never Recovered', one_failed & ~five_success & ~pdh_success),
         ('5m ORH Success After 1m Failure', one_failed & five_success),
         ('PDH Success After Early Noise', pdh_success & (one.eq('failed') | five.eq('failed'))),
+        ('Alt Required Success', alt_success),
         ('Failed All Opening Triggers', one_failed & five_failed_or_blank & pdh_failed_or_blank & ~successful_trigger),
     ]
     return pd.DataFrame([_opening_path_row(label, rows[mask], total) for label, mask in masks], columns=columns)
+
+
+def main_opening_behavior_table(opening_behavior: pd.DataFrame) -> pd.DataFrame:
+    if opening_behavior.empty:
+        return pd.DataFrame(columns=OPENING_BEHAVIOR_MAIN_COLUMNS)
+    rows = opening_behavior[opening_behavior['Path'].isin(MAIN_OPENING_PATHS)].copy()
+    sorter = {path: index for index, path in enumerate(MAIN_OPENING_PATHS)}
+    rows['_path_order'] = rows['Path'].map(sorter).fillna(99)
+    rows = rows.sort_values('_path_order')
+    return rows[OPENING_BEHAVIOR_MAIN_COLUMNS].reset_index(drop=True)
 
 
 def _opening_path_mask(rows: pd.DataFrame, path: str) -> pd.Series:
@@ -459,12 +488,14 @@ def _opening_path_mask(rows: pd.DataFrame, path: str) -> pd.Series:
     pdh_success = pdh.eq('success')
     pdh_failed_or_blank = pdh.eq('failed') | _is_blank_or_dash(pdh)
     successful_trigger = trigger.isin({'PDH', '1m ORH', '5m ORH', 'Alt Required'})
+    trigger_day = rows['Trigger Day'] if 'Trigger Day' in rows else pd.Series('', index=rows.index)
     masks = {
         'Clean 1m ORH Success': one_success,
         '1m ORH Failed, Later Reclaimed': one_failed & (five_success | pdh_success),
         '1m ORH Failed, Never Recovered': one_failed & ~five_success & ~pdh_success,
         '5m ORH Success After 1m Failure': one_failed & five_success,
         'PDH Success After Early Noise': pdh_success & (one.eq('failed') | five.eq('failed')),
+        'Alt Required Success': trigger.eq('Alt Required') & trigger_day.eq('Success'),
         'Failed All Opening Triggers': one_failed & five_failed_or_blank & pdh_failed_or_blank & ~successful_trigger,
     }
     return masks.get(path, pd.Series(True, index=rows.index))
@@ -614,6 +645,16 @@ TRIGGER_COMPARISON_COLUMNS = [
     'Median Max',
 ]
 TRIGGER_COMPARISON_BY_WINDOW_COLUMNS = [column for column in TRIGGER_COMPARISON_COLUMNS if column != 'Window']
+TRIGGER_EVENT_MAIN_COLUMNS = [
+    'Trigger',
+    'Eligible',
+    'Triggered',
+    'Failed',
+    'Success',
+    'Active %',
+    'Later Failed %',
+    'Median Max',
+]
 
 
 def _trigger_event_values(rows: pd.DataFrame, trigger_name: str) -> pd.Series:
@@ -742,6 +783,30 @@ def trigger_outcome_by_window_tables(trigger_outcomes: pd.DataFrame) -> dict[str
     return tables
 
 
+def _count_with_pct(count: Any, pct: Any) -> str:
+    return f'{count} ({pct})'
+
+
+def trigger_event_main_tables(trigger_outcomes: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    tables = {}
+    for window_label, table in trigger_outcome_by_window_tables(trigger_outcomes).items():
+        if table.empty:
+            tables[window_label] = pd.DataFrame(columns=TRIGGER_EVENT_MAIN_COLUMNS)
+            continue
+        out = pd.DataFrame({
+            'Trigger': table['Trigger'],
+            'Eligible': table['Eligible'],
+            'Triggered': [_count_with_pct(count, pct) for count, pct in zip(table['Triggered'], table['Trigger Rate'])],
+            'Failed': [_count_with_pct(count, pct) for count, pct in zip(table['Failed'], table['Fail %'])],
+            'Success': [_count_with_pct(count, pct) for count, pct in zip(table['Success'], table['Success %'])],
+            'Active %': table['Active %'],
+            'Later Failed %': table['Later Failed %'],
+            'Median Max': table['Median Max'],
+        })
+        tables[window_label] = out[TRIGGER_EVENT_MAIN_COLUMNS]
+    return tables
+
+
 def trigger_quality_table(rows: pd.DataFrame) -> pd.DataFrame:
     columns = ['Trigger', 'Count', 'Failed Count', 'Failed %', 'Day Success %', 'Active %', 'Later Failed %', 'Median Current', 'Median Max']
     if rows.empty or 'Trigger' not in rows:
@@ -828,8 +893,10 @@ def setup_behavior_overview(con) -> dict:
             'snapshot_cards': {},
             'mixes': {},
             'opening_behavior': {},
+            'opening_behavior_main': {},
             'trigger_outcome_comparison': pd.DataFrame(columns=TRIGGER_COMPARISON_COLUMNS),
             'trigger_outcome_by_window': {},
+            'trigger_event_main_by_window': {},
             'trigger_quality': {},
             'details': {},
             'windows': [],
@@ -856,8 +923,10 @@ def setup_behavior_overview(con) -> dict:
         'snapshot_cards': {label: snapshot_cards_html(row) for label, row in summary_by_window.items()},
         'mixes': {label: mix_tables(row) for label, row in summary_by_window.items()},
         'opening_behavior': opening_behavior,
+        'opening_behavior_main': {label: main_opening_behavior_table(table) for label, table in opening_behavior.items()},
         'trigger_outcome_comparison': trigger_outcomes,
         'trigger_outcome_by_window': trigger_outcome_by_window_tables(trigger_outcomes),
+        'trigger_event_main_by_window': trigger_event_main_tables(trigger_outcomes),
         'trigger_quality': {label: trigger_quality_table(history_by_window[label]) for label in summary_by_window},
         'details': details,
         'windows': windows,

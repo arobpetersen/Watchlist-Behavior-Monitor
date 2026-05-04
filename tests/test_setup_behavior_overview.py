@@ -9,13 +9,17 @@ from src.setup_behavior_overview import (
     COMPARISON_COLUMNS,
     DETAIL_COLUMNS,
     FULL_SUMMARY_COLUMNS,
+    MAIN_OPENING_PATHS,
+    OPENING_BEHAVIOR_MAIN_COLUMNS,
     SUMMARY_COLUMNS,
+    TRIGGER_EVENT_MAIN_COLUMNS,
     TRIGGER_COMPARISON_BY_WINDOW_COLUMNS,
     TRIGGER_COMPARISON_COLUMNS,
     comparison_rows,
     detail_rows,
     factual_read,
     filter_detail_rows,
+    main_opening_behavior_table,
     mix_tables,
     monitor_history,
     opening_behavior_table,
@@ -27,6 +31,7 @@ from src.setup_behavior_overview import (
     summarize_window,
     trigger_outcome_by_window_tables,
     trigger_outcome_comparison,
+    trigger_event_main_tables,
     trigger_quality_table,
 )
 
@@ -477,6 +482,21 @@ def test_trigger_outcome_by_window_tables_drop_window_column_and_group_triggers(
     assert last_10.loc[3, 'Triggered'] == 0
 
 
+def test_trigger_event_main_tables_use_compact_count_percent_columns():
+    comparison = trigger_outcome_comparison(_trigger_comparison_history())
+    main = trigger_event_main_tables(comparison)
+    last_10 = main['Last 10 Setup Dates']
+
+    assert last_10.columns.tolist() == TRIGGER_EVENT_MAIN_COLUMNS
+    assert last_10['Trigger'].tolist() == ['1m ORH', '5m ORH', 'PDH', 'Alt Required']
+    assert last_10.loc[0, 'Eligible'] == 4
+    assert last_10.loc[0, 'Triggered'] == '2 (50%)'
+    assert last_10.loc[0, 'Failed'] == '1 (50%)'
+    assert last_10.loc[0, 'Success'] == '1 (50%)'
+    assert 'Median Current' not in last_10.columns
+    assert 'Ineligible' not in last_10.columns
+
+
 def test_trigger_outcome_internal_table_includes_alt_required_event_rows():
     comparison = trigger_outcome_comparison(_trigger_comparison_history())
 
@@ -801,6 +821,32 @@ def test_opening_behavior_classifies_failed_all_opening_triggers():
     assert table.loc['Failed All Opening Triggers', 'Active %'] == '0%'
 
 
+def test_opening_behavior_main_table_keeps_successful_paths_only():
+    history = pd.concat([
+        _opening_behavior_history(),
+        pd.DataFrame([{
+            'Ticker': 'ALT',
+            'Current Status': 'Active',
+            'Trigger Day': 'Success',
+            'Trigger': 'Alt Required',
+            'PDH': '-',
+            '1m ORH': 'failed',
+            '5m ORH': 'failed',
+            'current_pct_raw': 0.02,
+            'max_pct_raw': 0.07,
+        }]),
+    ], ignore_index=True)
+    full = opening_behavior_table(history)
+    main = main_opening_behavior_table(full)
+
+    assert main.columns.tolist() == OPENING_BEHAVIOR_MAIN_COLUMNS
+    assert main['Path'].tolist() == MAIN_OPENING_PATHS
+    assert '1m ORH Failed, Never Recovered' not in main['Path'].tolist()
+    assert 'Failed All Opening Triggers' not in main['Path'].tolist()
+    assert main.set_index('Path').loc['Alt Required Success', 'Count'] == 1
+    assert 'Median Current' not in main.columns
+
+
 def test_monitor_history_uses_rolling_setup_monitor_derived_rows(monkeypatch):
     calls = []
 
@@ -850,8 +896,10 @@ def test_setup_behavior_overview_handles_zero_setup_dates():
     assert out['reads'] == {}
     assert out['snapshot_cards'] == {}
     assert out['opening_behavior'] == {}
+    assert out['opening_behavior_main'] == {}
     assert out['trigger_outcome_comparison'].columns.tolist() == TRIGGER_COMPARISON_COLUMNS
     assert out['trigger_outcome_comparison'].empty
     assert out['trigger_outcome_by_window'] == {}
+    assert out['trigger_event_main_by_window'] == {}
     assert out['details'] == {}
     assert out['windows'] == []

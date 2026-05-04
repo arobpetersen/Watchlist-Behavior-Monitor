@@ -57,24 +57,31 @@ else:
     st.markdown(overview['snapshot_cards'][selected_window], unsafe_allow_html=True)
     st.write(overview['reads'][selected_window])
 
-    st.subheader('Trigger Event Outcomes Across Windows')
-    for window_label, table in overview['trigger_outcome_by_window'].items():
-        st.markdown(f'**{window_label}**')
-        st.dataframe(table, width='stretch', hide_index=True)
-    st.caption(
-        'Trigger Rate uses eligible setups only. Fail %, Success %, Active %, and Later Failed % use triggered setups only. '
-        'Ineligible setups are excluded when a trigger was not valid for that setup.'
-    )
-
     st.subheader('Selected Window Opening Path')
-    st.dataframe(overview['opening_behavior'][selected_window], width='stretch', hide_index=True)
+    st.dataframe(overview['opening_behavior_main'][selected_window], width='stretch', hide_index=True)
     st.caption(
         'Path rows describe selected-window setup sequences and may overlap when an early failed trigger later succeeds '
         'at a higher trigger level.'
     )
 
+    st.subheader('Trigger Event Outcomes Across Windows')
+    for window_label, table in overview['trigger_event_main_by_window'].items():
+        st.markdown(f'**{window_label}**')
+        st.dataframe(table, width='stretch', hide_index=True)
+    st.caption(
+        'Triggered % uses eligible setups. Failed % and Success % use triggered setups.'
+    )
+
     st.subheader('Supporting Stats / Primary Trigger Outcome')
     with st.expander('Supporting Selected-Window Stats', expanded=False):
+        st.markdown('**Opening Path Detail**')
+        st.dataframe(overview['opening_behavior'][selected_window], width='stretch', hide_index=True)
+
+        st.markdown('**Trigger Event Detail**')
+        for window_label, table in overview['trigger_outcome_by_window'].items():
+            st.markdown(f'_{window_label}_')
+            st.dataframe(table, width='stretch', hide_index=True)
+
         st.markdown('**Selected Window Breakdown**')
         st.markdown(metric_cards_html(overview['breakdowns'][selected_window]), unsafe_allow_html=True)
 
