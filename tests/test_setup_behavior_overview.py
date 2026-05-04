@@ -379,6 +379,8 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
         {
             'Ticker': 'A',
             'Current Status': 'Active',
+            'Trigger': '1m ORH',
+            'Trigger Day': 'Success',
             '1m ORH': 'success',
             '5m ORH': '-',
             'PDH': 'Gap',
@@ -388,6 +390,8 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
         {
             'Ticker': 'B',
             'Current Status': 'Failed D1',
+            'Trigger': '5m ORH',
+            'Trigger Day': 'Success',
             '1m ORH': 'failed',
             '5m ORH': 'success',
             'PDH': '-',
@@ -397,6 +401,8 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
         {
             'Ticker': 'C',
             'Current Status': 'Active',
+            'Trigger': 'PDH',
+            'Trigger Day': 'Success',
             '1m ORH': '-',
             '5m ORH': 'failed',
             'PDH': 'success',
@@ -406,6 +412,8 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
         {
             'Ticker': 'D',
             'Current Status': 'â€”',
+            'Trigger': 'No Trigger',
+            'Trigger Day': 'Unresolved',
             '1m ORH': '',
             '5m ORH': '',
             'PDH': '-',
@@ -434,6 +442,9 @@ def test_trigger_outcome_comparison_rows_and_denominators():
         ['PDH', 'Last 5 Setup Dates'],
         ['PDH', 'Last 10 Setup Dates'],
         ['PDH', 'Last 20 Setup Dates'],
+        ['Alt Required', 'Last 5 Setup Dates'],
+        ['Alt Required', 'Last 10 Setup Dates'],
+        ['Alt Required', 'Last 20 Setup Dates'],
     ]
 
     one_last_10 = comparison[(comparison['Trigger'] == '1m ORH') & (comparison['Window'] == 'Last 10 Setup Dates')].iloc[0]
@@ -456,15 +467,17 @@ def test_trigger_outcome_by_window_tables_drop_window_column_and_group_triggers(
     last_10 = by_window['Last 10 Setup Dates']
     assert last_10.columns.tolist() == TRIGGER_COMPARISON_BY_WINDOW_COLUMNS
     assert 'Window' not in last_10.columns
-    assert last_10['Trigger'].tolist() == ['1m ORH', '5m ORH', 'PDH']
+    assert last_10['Trigger'].tolist() == ['1m ORH', '5m ORH', 'PDH', 'Alt Required']
+    assert all(table['Trigger'].tolist() == ['1m ORH', '5m ORH', 'PDH', 'Alt Required'] for table in by_window.values())
     assert 'Eligible' in last_10.columns
     assert 'Ineligible' in last_10.columns
     assert last_10.loc[0, 'Triggered'] == 2
     assert last_10.loc[1, 'Triggered'] == 2
     assert last_10.loc[2, 'Triggered'] == 1
+    assert last_10.loc[3, 'Triggered'] == 0
 
 
-def test_trigger_outcome_by_trigger_table_remains_available_and_unchanged():
+def test_trigger_outcome_internal_table_includes_alt_required_event_rows():
     comparison = trigger_outcome_comparison(_trigger_comparison_history())
 
     assert comparison.columns.tolist() == TRIGGER_COMPARISON_COLUMNS
@@ -478,6 +491,9 @@ def test_trigger_outcome_by_trigger_table_remains_available_and_unchanged():
         ['PDH', 'Last 5 Setup Dates'],
         ['PDH', 'Last 10 Setup Dates'],
         ['PDH', 'Last 20 Setup Dates'],
+        ['Alt Required', 'Last 5 Setup Dates'],
+        ['Alt Required', 'Last 10 Setup Dates'],
+        ['Alt Required', 'Last 20 Setup Dates'],
     ]
 
 
@@ -505,6 +521,60 @@ def test_trigger_outcome_pdh_gap_is_ineligible_for_trigger_rate():
     assert pdh_last_10['Success %'] == '100%'
     assert pdh_last_10['Failed'] == 0
     assert pdh_last_10['Fail %'] == '0%'
+
+
+def test_trigger_outcome_alt_required_derives_event_result_and_denominator():
+    history = {
+        'Last 5 Setup Dates': pd.DataFrame([
+            {
+                'Ticker': 'ALT',
+                'Current Status': 'Active',
+                'Trigger': 'Alt Required',
+                'Trigger Day': 'Success',
+                '1m ORH': 'failed',
+                '5m ORH': 'failed',
+                'PDH': '-',
+                'current_pct_raw': 0.03,
+                'max_pct_raw': 0.07,
+            },
+            {
+                'Ticker': 'ORH',
+                'Current Status': 'Active',
+                'Trigger': '1m ORH',
+                'Trigger Day': 'Success',
+                '1m ORH': 'success',
+                '5m ORH': '-',
+                'PDH': 'Gap',
+                'current_pct_raw': 0.05,
+                'max_pct_raw': 0.10,
+            },
+            {
+                'Ticker': 'MISS',
+                'Current Status': 'â€”',
+                'Trigger': 'No Trigger',
+                'Trigger Day': 'Unresolved',
+                '1m ORH': '',
+                '5m ORH': '',
+                'PDH': '-',
+                'current_pct_raw': None,
+                'max_pct_raw': None,
+            },
+        ])
+    }
+    comparison = trigger_outcome_comparison(history)
+
+    alt = comparison[(comparison['Trigger'] == 'Alt Required') & (comparison['Window'] == 'Last 5 Setup Dates')].iloc[0]
+    assert alt['Setups'] == 3
+    assert alt['Eligible'] == 2
+    assert alt['Ineligible'] == 1
+    assert alt['Triggered'] == 1
+    assert alt['Trigger Rate'] == '50%'
+    assert alt['Success'] == 1
+    assert alt['Success %'] == '100%'
+    assert alt['Failed'] == 0
+    assert alt['Fail %'] == '0%'
+    assert alt['Median Current'] == '3.0%'
+    assert alt['Median Max'] == '7.0%'
 
 
 def test_trigger_outcome_comparison_zero_trigger_display():
@@ -556,8 +626,10 @@ def test_trigger_event_outcomes_are_separate_from_primary_trigger_grouping():
 def test_filter_detail_rows_by_trigger_level_and_result():
     detail = detail_rows(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[0])
 
+    one_success = filter_detail_rows(detail, trigger_level='1m ORH', trigger_result='success')
     five_success = filter_detail_rows(detail, trigger_level='5m ORH', trigger_result='success')
     assert five_success['Ticker'].tolist() == ['AAA', 'BBB']
+    assert one_success['Ticker'].tolist() == ['AAA']
 
     pdh_blank = filter_detail_rows(detail, trigger_level='PDH', trigger_result='blank')
     assert pdh_blank['Ticker'].tolist() == ['AAA', 'EEE', 'BBB', 'CCC']
@@ -572,6 +644,28 @@ def test_filter_detail_rows_by_ineligible_gap_result():
     gap = filter_detail_rows(detail, trigger_level='PDH', trigger_result='Gap')
 
     assert gap['Ticker'].tolist() == ['A']
+
+
+def test_filter_detail_rows_by_alt_required_event():
+    detail = pd.DataFrame([
+        {'Ticker': 'ALT', 'Current Status': 'Active', 'Trigger': 'Alt Required', 'Trigger Day': 'Success', 'PDH': '-', '1m ORH': 'failed', '5m ORH': 'failed'},
+        {'Ticker': 'ONE', 'Current Status': 'Active', 'Trigger': '1m ORH', 'Trigger Day': 'Success', 'PDH': 'Gap', '1m ORH': 'success', '5m ORH': '-'},
+        {'Ticker': 'MISS', 'Current Status': 'â€”', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved', 'PDH': '-', '1m ORH': '', '5m ORH': ''},
+    ])
+
+    alt_success = filter_detail_rows(detail, trigger_level='Alt Required', trigger_result='success')
+    alt_blank = filter_detail_rows(detail, trigger_level='Alt Required', trigger_result='blank')
+
+    assert alt_success['Ticker'].tolist() == ['ALT']
+    assert alt_blank['Ticker'].tolist() == ['MISS']
+
+
+def test_filter_detail_rows_combines_trigger_and_current_status_filters():
+    detail = detail_rows(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[0])
+
+    failed_later = filter_detail_rows(detail, trigger_level='5m ORH', trigger_result='success', current_status='Later Failed')
+
+    assert failed_later['Ticker'].tolist() == ['BBB']
 
 
 def test_filter_detail_rows_by_current_status_bucket():

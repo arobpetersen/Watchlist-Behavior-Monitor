@@ -470,56 +470,6 @@ def _opening_path_mask(rows: pd.DataFrame, path: str) -> pd.Series:
     return masks.get(path, pd.Series(True, index=rows.index))
 
 
-def filter_detail_rows(
-    rows: pd.DataFrame,
-    trigger_level: str = 'All',
-    trigger_result: str = 'All',
-    current_status: str = 'All',
-    opening_path_group: str = 'All',
-) -> pd.DataFrame:
-    if rows.empty:
-        return rows.copy()
-    out = rows.copy()
-    trigger_columns = ['1m ORH', '5m ORH', 'PDH']
-
-    if trigger_level != 'All' and trigger_level in out:
-        if trigger_result == 'All':
-            out = out[out[trigger_level].isin({'success', 'failed'})]
-        elif trigger_result == 'blank':
-            out = out[_is_blank_or_dash(out[trigger_level])]
-        else:
-            out = out[out[trigger_level] == trigger_result]
-    elif trigger_result != 'All':
-        available = [column for column in trigger_columns if column in out]
-        if trigger_result == 'blank':
-            mask = pd.Series(True, index=out.index)
-            for column in available:
-                mask &= _is_blank_or_dash(out[column])
-            out = out[mask]
-        else:
-            mask = pd.Series(False, index=out.index)
-            for column in available:
-                mask |= out[column].eq(trigger_result)
-            out = out[mask]
-
-    if current_status == 'Active' and 'Current Status' in out:
-        out = out[out['Current Status'] == 'Active']
-    elif current_status == 'Later Failed' and 'Current Status' in out:
-        out = out[_is_later_failed(out['Current Status'])]
-    elif current_status == 'Unresolved':
-        mask = pd.Series(False, index=out.index)
-        if 'Trigger Day' in out:
-            mask |= out['Trigger Day'].eq('Unresolved')
-        if 'Trigger' in out:
-            mask |= out['Trigger'].eq('No Trigger')
-        out = out[mask]
-
-    if opening_path_group != 'All':
-        out = out[_opening_path_mask(out, opening_path_group)]
-
-    return out
-
-
 def _opening_count(opening_behavior: pd.DataFrame | None, path: str) -> int:
     if opening_behavior is None or opening_behavior.empty:
         return 0
@@ -645,7 +595,7 @@ def mix_tables(window_summary: dict) -> dict[str, pd.DataFrame]:
 
 
 TRIGGER_ORDER = ['PDH', '1m ORH', '5m ORH', 'Alt Required', 'Failed PDH Trigger', 'Failed OR Trigger', 'No Trigger']
-TRIGGER_COMPARISON_ORDER = ['1m ORH', '5m ORH', 'PDH']
+TRIGGER_COMPARISON_ORDER = ['1m ORH', '5m ORH', 'PDH', 'Alt Required']
 TRIGGER_COMPARISON_COLUMNS = [
     'Trigger',
     'Window',
@@ -666,16 +616,41 @@ TRIGGER_COMPARISON_COLUMNS = [
 TRIGGER_COMPARISON_BY_WINDOW_COLUMNS = [column for column in TRIGGER_COMPARISON_COLUMNS if column != 'Window']
 
 
+def _trigger_event_values(rows: pd.DataFrame, trigger_name: str) -> pd.Series:
+    if rows.empty:
+        return pd.Series('', index=rows.index)
+    if trigger_name in {'1m ORH', '5m ORH', 'PDH'}:
+        if trigger_name not in rows:
+            return pd.Series('', index=rows.index)
+        return _normalized_result(rows[trigger_name])
+    if trigger_name != 'Alt Required':
+        return pd.Series('', index=rows.index)
+
+    # Alt Required is stored as a final/primary trigger label, not a raw event
+    # diagnostic column. For event aggregation, treat it as applicable only when
+    # no displayed 1m/5m/PDH trigger event succeeded, or when Alt Required itself
+    # was the final trigger. Eligible non-trigger rows stay blank.
+    trigger = rows['Trigger'] if 'Trigger' in rows else pd.Series('', index=rows.index)
+    trigger_day = rows['Trigger Day'] if 'Trigger Day' in rows else pd.Series('', index=rows.index)
+    one = rows['1m ORH'] if '1m ORH' in rows else pd.Series('', index=rows.index)
+    five = rows['5m ORH'] if '5m ORH' in rows else pd.Series('', index=rows.index)
+    pdh = rows['PDH'] if 'PDH' in rows else pd.Series('', index=rows.index)
+    lower_success = one.eq('success') | five.eq('success') | pdh.eq('success')
+    alt_selected = trigger.eq('Alt Required')
+
+    values = pd.Series('Not Applicable', index=rows.index, dtype=object)
+    values.loc[~lower_success | alt_selected] = ''
+    values.loc[alt_selected & trigger_day.eq('Success')] = 'success'
+    values.loc[alt_selected & trigger_day.eq('Fail')] = 'failed'
+    return values
+
+
 def trigger_outcome_comparison(history_by_window: dict[str, pd.DataFrame]) -> pd.DataFrame:
     out = []
     for trigger_name in TRIGGER_COMPARISON_ORDER:
-        column = trigger_name
         for window_label, rows in history_by_window.items():
             setups = len(rows)
-            if rows.empty or column not in rows:
-                values = pd.Series('', index=rows.index)
-            else:
-                values = _normalized_result(rows[column])
+            values = _trigger_event_values(rows, trigger_name)
             success_mask = values.eq('success')
             failed_mask = values.eq('failed')
             eligible_mask = _eligible_trigger_mask(values)
@@ -704,6 +679,56 @@ def trigger_outcome_comparison(history_by_window: dict[str, pd.DataFrame]) -> pd
                 'Median Max': _fmt_pct(triggered['max_pct_raw'].median() if 'max_pct_raw' in triggered and triggered_count else None),
             })
     return pd.DataFrame(out, columns=TRIGGER_COMPARISON_COLUMNS)
+
+
+def filter_detail_rows(
+    rows: pd.DataFrame,
+    trigger_level: str = 'All',
+    trigger_result: str = 'All',
+    current_status: str = 'All',
+    opening_path_group: str = 'All',
+) -> pd.DataFrame:
+    if rows.empty:
+        return rows.copy()
+    out = rows.copy()
+    trigger_columns = ['1m ORH', '5m ORH', 'PDH', 'Alt Required']
+
+    if trigger_level != 'All':
+        values = _trigger_event_values(out, trigger_level)
+        if trigger_result == 'All':
+            out = out[_eligible_trigger_mask(values)]
+        elif trigger_result == 'blank':
+            out = out[_is_blank_or_dash(values)]
+        else:
+            out = out[values.eq(trigger_result)]
+    elif trigger_result != 'All':
+        if trigger_result == 'blank':
+            mask = pd.Series(True, index=out.index)
+            for column in trigger_columns:
+                mask &= _is_blank_or_dash(_trigger_event_values(out, column))
+            out = out[mask]
+        else:
+            mask = pd.Series(False, index=out.index)
+            for column in trigger_columns:
+                mask |= _trigger_event_values(out, column).eq(trigger_result)
+            out = out[mask]
+
+    if current_status == 'Active' and 'Current Status' in out:
+        out = out[out['Current Status'] == 'Active']
+    elif current_status == 'Later Failed' and 'Current Status' in out:
+        out = out[_is_later_failed(out['Current Status'])]
+    elif current_status == 'Unresolved':
+        mask = pd.Series(False, index=out.index)
+        if 'Trigger Day' in out:
+            mask |= out['Trigger Day'].eq('Unresolved')
+        if 'Trigger' in out:
+            mask |= out['Trigger'].eq('No Trigger')
+        out = out[mask]
+
+    if opening_path_group != 'All':
+        out = out[_opening_path_mask(out, opening_path_group)]
+
+    return out
 
 
 def trigger_outcome_by_window_tables(trigger_outcomes: pd.DataFrame) -> dict[str, pd.DataFrame]:

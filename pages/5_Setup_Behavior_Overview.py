@@ -12,7 +12,14 @@ from src.setup_behavior_overview import (
 
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
-con = get_connection(str(get_settings().db_path))
+
+@st.cache_data(show_spinner=False)
+def load_setup_behavior_overview(db_path: str) -> dict:
+    con = get_connection(db_path)
+    return setup_behavior_overview(con)
+
+
+db_path = str(get_settings().db_path)
 
 st.title('Setup Behavior Overview')
 st.caption('Rolling summary of Back-Watch setup behavior across recent setup-date windows.')
@@ -33,7 +40,7 @@ with st.expander('Definitions / Logic', expanded=False):
         """
     )
 
-overview = setup_behavior_overview(con)
+overview = load_setup_behavior_overview(db_path)
 
 if overview['summary'].empty:
     st.info('No setup candidates yet. Process Back-Watch files to populate setup behavior history.')
@@ -42,20 +49,18 @@ else:
     st.dataframe(overview['summary'], width='stretch', hide_index=True)
 
     labels = [window.label for window in overview['windows']]
-    selected_window = st.selectbox('Selected Window', labels, index=0)
+    if 'setup_behavior_selected_window' not in st.session_state or st.session_state.setup_behavior_selected_window not in labels:
+        st.session_state.setup_behavior_selected_window = labels[0]
+    selected_window = st.selectbox('Selected Window', labels, key='setup_behavior_selected_window')
 
     st.subheader('Selected Window Snapshot')
     st.markdown(overview['snapshot_cards'][selected_window], unsafe_allow_html=True)
     st.write(overview['reads'][selected_window])
 
     st.subheader('Trigger Event Outcomes Across Windows')
-    trigger_event_mode = st.radio('Display mode', ['By Window', 'By Trigger'], horizontal=True)
-    if trigger_event_mode == 'By Window':
-        for window_label, table in overview['trigger_outcome_by_window'].items():
-            st.markdown(f'**{window_label}**')
-            st.dataframe(table, width='stretch', hide_index=True)
-    else:
-        st.dataframe(overview['trigger_outcome_comparison'], width='stretch', hide_index=True)
+    for window_label, table in overview['trigger_outcome_by_window'].items():
+        st.markdown(f'**{window_label}**')
+        st.dataframe(table, width='stretch', hide_index=True)
     st.caption(
         'Trigger Rate uses eligible setups only. Fail %, Success %, Active %, and Later Failed % use triggered setups only. '
         'Ineligible setups are excluded when a trigger was not valid for that setup.'
@@ -90,13 +95,17 @@ else:
     st.subheader('Selected Window Ticker Detail')
     filter_cols = st.columns(4)
     with filter_cols[0]:
-        trigger_level = st.selectbox('Trigger event level', ['All', '1m ORH', '5m ORH', 'PDH'])
+        trigger_level = st.selectbox('Trigger event level', ['All', '1m ORH', '5m ORH', 'PDH', 'Alt Required'], key='setup_behavior_trigger_event_level')
     with filter_cols[1]:
-        trigger_result = st.selectbox('Trigger event result', ['All', 'success', 'failed', 'blank', 'Gap'])
+        trigger_result = st.selectbox(
+            'Trigger event result',
+            ['All', 'success', 'failed', 'blank', 'Gap', 'N/A', 'Not Applicable'],
+            key='setup_behavior_trigger_event_result',
+        )
     with filter_cols[2]:
-        current_status = st.selectbox('Current status', ['All', 'Active', 'Later Failed', 'Unresolved'])
+        current_status = st.selectbox('Current status', ['All', 'Active', 'Later Failed', 'Unresolved'], key='setup_behavior_current_status_filter')
     with filter_cols[3]:
-        opening_path_group = st.selectbox('Opening path group', OPENING_PATH_FILTER_OPTIONS)
+        opening_path_group = st.selectbox('Opening path group', OPENING_PATH_FILTER_OPTIONS, key='setup_behavior_opening_path_group')
     filtered_detail = filter_detail_rows(
         overview['details'][selected_window],
         trigger_level=trigger_level,
