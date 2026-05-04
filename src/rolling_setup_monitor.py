@@ -75,7 +75,9 @@ DETAIL_COLUMNS = [
     'VWAP Reclaim Trigger Time',
     'VWAP Reclaim Trigger Price',
     'VWAP Reclaim Stop Valid',
+    'VWAP Reclaim Prior Below VWAP',
     'VWAP Reclaim Reason',
+    'VWAP Reclaim Result Reason',
     'Trigger Level',
     'Reference Low',
     'Reference Basis',
@@ -346,7 +348,9 @@ def _vwap_reclaim_fields(intraday: pd.DataFrame | None, reference_low: float | N
         'vwap_reclaim_trigger_time': trigger_time,
         'vwap_reclaim_trigger_price': assessment.get('trigger_price'),
         'vwap_reclaim_stop_valid': stop_valid,
+        'vwap_reclaim_prior_below_vwap_observed': assessment.get('prior_below_vwap_observed'),
         'vwap_reclaim_failure_reason': assessment.get('failure_reason') or '',
+        'vwap_reclaim_result_reason': assessment.get('result_reason') or '',
     }
 
 
@@ -1205,7 +1209,9 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'VWAP Reclaim Trigger Time': raw.get('vwap_reclaim_trigger_time', blank_series).apply(_fmt_ts),
         'VWAP Reclaim Trigger Price': raw.get('vwap_reclaim_trigger_price', blank_series).apply(_fmt_price),
         'VWAP Reclaim Stop Valid': raw.get('vwap_reclaim_stop_valid', blank_series).apply(_fmt_bool_available),
+        'VWAP Reclaim Prior Below VWAP': raw.get('vwap_reclaim_prior_below_vwap_observed', blank_series).apply(_fmt_bool_available),
         'VWAP Reclaim Reason': raw.get('vwap_reclaim_failure_reason', blank_series).apply(_blank),
+        'VWAP Reclaim Result Reason': raw.get('vwap_reclaim_result_reason', blank_series).apply(_blank),
         'Trigger Level': raw['trigger_level'].apply(_fmt_price),
         'Reference Low': raw['reference_low'].apply(_fmt_price),
         'Reference Basis': raw['reference_basis'].apply(_blank),

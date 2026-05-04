@@ -43,6 +43,18 @@ def _session_with_reclaim(
     return _bars('2026-05-01', rows)
 
 
+def _session_stays_above_vwap() -> pd.DataFrame:
+    rows = []
+    for hour in [9, 10, 11, 12, 13, 14, 15]:
+        start = 30 if hour == 9 else 0
+        end = 60
+        for minute in range(start, end):
+            rows.append((f'{hour:02d}:{minute:02d}:00', 10.2, 10.4, 9.8, 10.3, 1000))
+    later_idx = next(i for i, row in enumerate(rows) if row[0] == '10:10:00')
+    rows[later_idx] = ('10:10:00', 10.4, 10.8, 10.2, 10.6, 1000)
+    return _bars('2026-05-01', rows)
+
+
 def test_vwap_calculation_from_synthetic_1m_bars():
     bars = _bars('2026-05-01', [
         ('09:30:00', 10, 11, 9, 10, 100),
@@ -75,14 +87,26 @@ def test_vwap_reclaim_ignored_before_10am():
     out = assess_vwap_reclaim(bars, min_regular_session_bars=300)
 
     assert out['result'] == ''
+    assert out['prior_below_vwap_observed'] is True
 
 
-def test_vwap_reclaim_detected_between_10_and_1130():
+def test_no_vwap_reclaim_when_price_stays_above_vwap_all_morning():
+    bars = _session_stays_above_vwap()
+
+    out = assess_vwap_reclaim(bars, min_regular_session_bars=300)
+
+    assert out['result'] == ''
+    assert out['prior_below_vwap_observed'] is False
+    assert out['failure_reason'] == 'no prior 5-minute close below or equal to VWAP'
+
+
+def test_vwap_reclaim_success_after_prior_below_between_10_and_1130():
     bars = _session_with_reclaim(reclaim_start='10:00:00')
 
     out = assess_vwap_reclaim(bars, min_regular_session_bars=300)
 
     assert out['result'] == 'success'
+    assert out['prior_below_vwap_observed'] is True
     assert out['reclaim_time'] == '2026-05-01 10:05:00'
     assert out['reclaim_bar_high'] == 11.2
     assert out['trigger_time'] == '2026-05-01 10:10:00'
@@ -95,6 +119,7 @@ def test_vwap_reclaim_ignored_after_1130():
     out = assess_vwap_reclaim(bars, min_regular_session_bars=300)
 
     assert out['result'] == ''
+    assert out['prior_below_vwap_observed'] is True
 
 
 def test_vwap_reclaim_failed_when_reclaim_high_not_taken_out():
@@ -103,7 +128,18 @@ def test_vwap_reclaim_failed_when_reclaim_high_not_taken_out():
     out = assess_vwap_reclaim(bars, min_regular_session_bars=300)
 
     assert out['result'] == 'failed'
+    assert out['prior_below_vwap_observed'] is True
     assert out['failure_reason'] == 'reclaim-bar high not taken out'
+
+
+def test_vwap_reclaim_takeout_must_occur_after_reclaim_bar_close():
+    bars = _session_with_reclaim(reclaim_start='10:00:00', reclaim_high=11.4, later_high=11.3)
+
+    out = assess_vwap_reclaim(bars, min_regular_session_bars=300)
+
+    assert out['result'] == 'failed'
+    assert out['reclaim_bar_high'] == 11.4
+    assert out['trigger_time'] is None
 
 
 def test_vwap_reclaim_blank_when_no_qualifying_close_above_vwap():
@@ -112,6 +148,7 @@ def test_vwap_reclaim_blank_when_no_qualifying_close_above_vwap():
     out = assess_vwap_reclaim(bars, min_regular_session_bars=300)
 
     assert out['result'] == ''
+    assert out['prior_below_vwap_observed'] is True
 
 
 def test_vwap_reclaim_ineligible_when_intraday_missing():

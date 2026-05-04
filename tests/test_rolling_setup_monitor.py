@@ -1355,7 +1355,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'PDH Trigger Break Time', 'PDH Trigger Level', 'PDH Reference Low', 'PDH Reference Basis',
         'VWAP Reclaim Result', 'VWAP Reclaim Time', 'VWAP Reclaim Bar High',
         'VWAP Reclaim Trigger Time', 'VWAP Reclaim Trigger Price', 'VWAP Reclaim Stop Valid',
-        'VWAP Reclaim Reason',
+        'VWAP Reclaim Prior Below VWAP', 'VWAP Reclaim Reason', 'VWAP Reclaim Result Reason',
         'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
         'Fail Day', 'Latest Close', 'Setup Close', 'Setup High', 'Setup Low',
         'Current vs Setup Close', 'Max Gain from Setup Close', 'RVOL', 'Range / ATR14', '1m OR Width / ATR14',
@@ -1524,7 +1524,9 @@ def test_format_section_table_exposes_vwap_reclaim_result_and_detail():
         'vwap_reclaim_trigger_time': pd.Timestamp('2026-05-01 10:10'),
         'vwap_reclaim_trigger_price': 10.4,
         'vwap_reclaim_stop_valid': True,
+        'vwap_reclaim_prior_below_vwap_observed': True,
         'vwap_reclaim_failure_reason': '',
+        'vwap_reclaim_result_reason': '',
         'notes': '',
         'current_pct': 0.01,
         'max_pct': 0.03,
@@ -1556,6 +1558,7 @@ def test_format_section_table_exposes_vwap_reclaim_result_and_detail():
     assert table.loc[0, 'VWAP Reclaim'] == 'success'
     assert table.loc[0, 'VWAP Reclaim Trigger Price'] == '10.40'
     assert table.loc[0, 'VWAP Reclaim Stop Valid'] == 'Yes'
+    assert table.loc[0, 'VWAP Reclaim Prior Below VWAP'] == 'Yes'
 
 
 def test_vwap_reclaim_fields_detect_stop_validity_from_existing_reference_low():
@@ -1580,6 +1583,7 @@ def test_vwap_reclaim_fields_detect_stop_validity_from_existing_reference_low():
     assert valid['vwap_reclaim_result'] == 'success'
     assert valid['vwap_reclaim_trigger_price'] == 10.8
     assert valid['vwap_reclaim_stop_valid'] is True
+    assert valid['vwap_reclaim_prior_below_vwap_observed'] is True
     assert invalid['vwap_reclaim_stop_valid'] is False
 
 

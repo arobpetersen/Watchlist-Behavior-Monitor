@@ -61,65 +61,61 @@ def assess_vwap_reclaim(
     bars: pd.DataFrame | None,
     min_regular_session_bars: int = 300,
 ) -> dict:
-    if bars is None or bars.empty:
+    def result(
+        value: str,
+        reclaim_time=None,
+        reclaim_bar_high=None,
+        trigger_time=None,
+        trigger_price=None,
+        failure_reason: str = '',
+        prior_below_vwap_observed: bool | None = None,
+    ) -> dict:
         return {
-            'result': 'Not Applicable',
-            'reclaim_time': None,
-            'reclaim_bar_high': None,
-            'trigger_time': None,
-            'trigger_price': None,
-            'failure_reason': 'missing intraday bars',
+            'result': value,
+            'reclaim_time': reclaim_time,
+            'reclaim_bar_high': reclaim_bar_high,
+            'trigger_time': trigger_time,
+            'trigger_price': trigger_price,
+            'failure_reason': failure_reason,
+            'result_reason': failure_reason,
+            'prior_below_vwap_observed': prior_below_vwap_observed,
         }
+
+    if bars is None or bars.empty:
+        return result('Not Applicable', failure_reason='missing intraday bars')
 
     session = regular_session_bars(bars)
     if session.empty:
-        return {
-            'result': 'Not Applicable',
-            'reclaim_time': None,
-            'reclaim_bar_high': None,
-            'trigger_time': None,
-            'trigger_price': None,
-            'failure_reason': 'missing regular-session bars',
-        }
+        return result('Not Applicable', failure_reason='missing regular-session bars')
     quality_rows = partial_intraday_sessions(
         session[['ticker', 'trading_date', 'timestamp_et']] if {'ticker', 'trading_date'}.issubset(session.columns) else pd.DataFrame(),
         min_regular_session_bars=min_regular_session_bars,
     ) if {'ticker', 'trading_date'}.issubset(session.columns) else pd.DataFrame()
     if not quality_rows.empty:
-        return {
-            'result': 'Not Applicable',
-            'reclaim_time': None,
-            'reclaim_bar_high': None,
-            'trigger_time': None,
-            'trigger_price': None,
-            'failure_reason': 'partial intraday data',
-        }
+        return result('Not Applicable', failure_reason='partial intraday data')
 
     five_minute = five_minute_bars_with_vwap(session)
     if five_minute.empty:
-        return {
-            'result': '',
-            'reclaim_time': None,
-            'reclaim_bar_high': None,
-            'trigger_time': None,
-            'trigger_price': None,
-            'failure_reason': 'no 5-minute bars',
-        }
+        return result('', failure_reason='no 5-minute bars', prior_below_vwap_observed=False)
     end_times = five_minute['end_time'].dt.time
+    close = pd.to_numeric(five_minute['close'], errors='coerce')
+    vwap = pd.to_numeric(five_minute['vwap'], errors='coerce')
+    prior_below = (close <= vwap).shift(fill_value=False).cummax()
     candidates = five_minute[
         (end_times >= pd.Timestamp('10:00').time())
         & (end_times <= pd.Timestamp('11:30').time())
-        & (pd.to_numeric(five_minute['close'], errors='coerce') > pd.to_numeric(five_minute['vwap'], errors='coerce'))
+        & (close > vwap)
+        & prior_below
     ]
     if candidates.empty:
-        return {
-            'result': '',
-            'reclaim_time': None,
-            'reclaim_bar_high': None,
-            'trigger_time': None,
-            'trigger_price': None,
-            'failure_reason': 'no qualifying 5-minute close above VWAP',
-        }
+        any_prior_below = bool(prior_below.any())
+        above_in_window = bool((
+            (end_times >= pd.Timestamp('10:00').time())
+            & (end_times <= pd.Timestamp('11:30').time())
+            & (close > vwap)
+        ).any())
+        reason = 'no prior 5-minute close below or equal to VWAP' if above_in_window and not any_prior_below else 'no true VWAP reclaim'
+        return result('', failure_reason=reason, prior_below_vwap_observed=any_prior_below)
 
     reclaim = candidates.iloc[0]
     reclaim_high = float(reclaim['high'])
@@ -127,20 +123,20 @@ def assess_vwap_reclaim(
     later = session[session['timestamp_et'] >= reclaim_end]
     trigger = later[pd.to_numeric(later['high'], errors='coerce') > reclaim_high]
     if trigger.empty:
-        return {
-            'result': 'failed',
-            'reclaim_time': _fmt_ts(reclaim_end),
-            'reclaim_bar_high': reclaim_high,
-            'trigger_time': None,
-            'trigger_price': reclaim_high,
-            'failure_reason': 'reclaim-bar high not taken out',
-        }
+        return result(
+            'failed',
+            reclaim_time=_fmt_ts(reclaim_end),
+            reclaim_bar_high=reclaim_high,
+            trigger_price=reclaim_high,
+            failure_reason='reclaim-bar high not taken out',
+            prior_below_vwap_observed=True,
+        )
     first = trigger.iloc[0]
-    return {
-        'result': 'success',
-        'reclaim_time': _fmt_ts(reclaim_end),
-        'reclaim_bar_high': reclaim_high,
-        'trigger_time': _fmt_ts(first['timestamp_et']),
-        'trigger_price': reclaim_high,
-        'failure_reason': '',
-    }
+    return result(
+        'success',
+        reclaim_time=_fmt_ts(reclaim_end),
+        reclaim_bar_high=reclaim_high,
+        trigger_time=_fmt_ts(first['timestamp_et']),
+        trigger_price=reclaim_high,
+        prior_below_vwap_observed=True,
+    )
