@@ -45,6 +45,8 @@ AUDIT_COLUMNS = [
     'Setup Date',
     'Reference Price',
     'Latest Close',
+    'Latest Status Date',
+    'Status Current',
     'Max Date',
     'D3 High',
     'Setup',
@@ -229,6 +231,13 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
     rows['_current_sort'] = _numeric(rows, ['current_pct_raw', 'Current %'])
     rows['_max_sort'] = _numeric(rows, ['max_pct_raw', 'Max %'])
     rows['_days_sort'] = _days_since(rows['Setup Date'], pd.to_datetime(latest_date) if latest_date is not None else None)
+    latest_status_dates = pd.to_datetime(
+        _first_existing(rows, ['latest_trading_date_raw', 'Latest Status Date', 'latest_trading_date']),
+        errors='coerce',
+    )
+    latest_market_date = pd.to_datetime(latest_date, errors='coerce') if latest_date is not None else pd.NaT
+    rows['_latest_status_date'] = latest_status_dates
+    rows['_status_current'] = True if pd.isna(latest_market_date) else latest_status_dates.dt.normalize().ge(latest_market_date.normalize())
 
     rows['Ticker'] = _first_existing(rows, ['Ticker', 'ticker']).apply(_display)
     rows['Trigger'] = _first_existing(rows, ['Trigger', 'trigger_type']).apply(_display)
@@ -245,7 +254,7 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
 
 
 def _active_top_movers_table(rows: pd.DataFrame) -> pd.DataFrame:
-    active_rows = rows[rows['Current Status'].eq('Active')].copy()
+    active_rows = rows[rows['Current Status'].eq('Active') & rows['_status_current'].fillna(False)].copy()
     active_rows = active_rows.sort_values(
         ['_max_sort', '_current_sort', 'Setup Date', 'Ticker'],
         ascending=[False, False, False, True],
@@ -259,6 +268,8 @@ def _audit_table(rows: pd.DataFrame) -> pd.DataFrame:
     rows = rows.copy()
     rows['Reference Price'] = _first_existing(rows, ['Trigger Level', 'Reference Price', 'base_price']).apply(_display)
     rows['Latest Close'] = _first_existing(rows, ['Latest Close', 'latest_close']).apply(_display)
+    rows['Latest Status Date'] = rows['_latest_status_date'].dt.strftime('%Y-%m-%d').fillna('-')
+    rows['Status Current'] = rows['_status_current'].apply(lambda v: 'Yes' if bool(v) else 'No')
     rows['Max Date'] = _first_existing(rows, ['Max Date', 'max_date']).apply(_display)
     rows['D3 High'] = _first_existing(rows, ['D3 High %', 'D3 High', 'd3_high_pct_raw']).apply(_display)
     rows['Setup'] = _first_existing(rows, ['Setup', 'setup']).apply(_display)

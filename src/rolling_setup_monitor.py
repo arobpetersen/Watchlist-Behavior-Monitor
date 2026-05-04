@@ -1271,6 +1271,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Reference Basis': raw['reference_basis'].apply(_blank),
         'Trigger Break Time': raw['trigger_break_time'].apply(_fmt_ts),
         'Latest Close': raw['latest_close'].apply(_fmt_price),
+        'Latest Status Date': raw.get('latest_trading_date', blank_series).apply(lambda v: '' if pd.isna(v) else pd.to_datetime(v).date().isoformat()),
         'Setup Close': raw['close_price'].apply(_fmt_price),
         'Setup High': raw['high_price'].apply(_fmt_price),
         'Setup Low': raw['low_price'].apply(_fmt_price),
@@ -1289,6 +1290,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'current_pct_raw': raw['current_pct'],
         'max_pct_raw': raw['max_pct'],
         'd3_high_pct_raw': raw['d3_high_pct'],
+        'latest_trading_date_raw': raw.get('latest_trading_date', blank_series),
     })
     return display
 
