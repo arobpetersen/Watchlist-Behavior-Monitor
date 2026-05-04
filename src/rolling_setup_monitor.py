@@ -8,7 +8,7 @@ import pandas as pd
 
 from src.dashboard_queries import _clean_display_df, _close_bucket
 from src.feature_engine import session_filter
-from src.trigger_resolution import resolve_display_triggers
+from src.trigger_resolution import resolve_display_triggers, vwap_superseded_orh_display_values
 from src.vwap_reclaim import assess_vwap_reclaim
 
 
@@ -914,7 +914,7 @@ def _badge_class(column: str, value: str) -> str:
         return f'monitor-badge trigger-{normalized}'
     if column in {'PDH', '1m ORH', '5m ORH', 'VWAP Trigger'} and value in {'success', 'failed'}:
         return f'monitor-badge result-{value}'
-    if value in {'-', 'Gap', 'Not Applicable'}:
+    if value in {'-', 'Gap', 'Not Applicable', 'superseded'}:
         return 'monitor-badge status-muted'
     return ''
 
@@ -1170,6 +1170,12 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
     display_five_min_result = raw.get('five_min_result', raw_five_min_result).apply(_blank)
     qualified_vwap_result = raw.get('vwap_qualified_trigger_result', blank_series).apply(_blank)
     qualified_vwap_result = qualified_vwap_result.mask(qualified_vwap_result.eq('') & raw['trigger_type'].eq('VWAP Reclaim'), 'success')
+    adjusted_orh = [
+        vwap_superseded_orh_display_values(row, one, five)
+        for (_, row), one, five in zip(raw.iterrows(), display_one_min_result, display_five_min_result)
+    ]
+    display_one_min_result = pd.Series([one for one, _ in adjusted_orh], index=raw.index)
+    display_five_min_result = pd.Series([five for _, five in adjusted_orh], index=raw.index)
 
     display = pd.DataFrame({
         'candidate_id': raw['candidate_id'],

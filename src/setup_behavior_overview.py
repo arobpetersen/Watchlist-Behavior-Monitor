@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 
 from src.rolling_setup_monitor import rolling_setup_monitor
-from src.trigger_resolution import resolve_display_triggers
+from src.trigger_resolution import resolve_display_triggers, vwap_superseded_orh_display_values
 from src.vwap_reclaim import assess_vwap_reclaim
 
 
@@ -283,8 +283,7 @@ def summarize_window(history: pd.DataFrame, window: OverviewWindow) -> dict:
     trigger_day = rows['Trigger Day'] if 'Trigger Day' in rows else pd.Series(dtype=object)
     trigger = rows['Trigger'] if 'Trigger' in rows else pd.Series(dtype=object)
     pdh = rows['PDH'] if 'PDH' in rows else pd.Series(dtype=object)
-    one = rows['1m ORH'] if '1m ORH' in rows else pd.Series(dtype=object)
-    five = rows['5m ORH'] if '5m ORH' in rows else pd.Series(dtype=object)
+    one, five = _visible_orh_results(rows) if not rows.empty else (pd.Series(dtype=object), pd.Series(dtype=object))
     notes = rows['Notes'] if 'Notes' in rows else pd.Series(dtype=object)
     retest = rows['Retest Day'] if 'Retest Day' in rows else pd.Series(dtype=object)
 
@@ -330,6 +329,7 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
         return pd.DataFrame(columns=DETAIL_COLUMNS)
 
     vwap_trigger = rows['VWAP Trigger'] if 'VWAP Trigger' in rows else rows['vwap_qualified_trigger_result'] if 'vwap_qualified_trigger_result' in rows else pd.Series('', index=rows.index)
+    one_min_result, five_min_result = _visible_orh_results(rows)
     out = pd.DataFrame({
         'Setup Date': pd.to_datetime(rows['Setup Date']).dt.date.astype(str),
         'Ticker': rows['Ticker'].apply(_display),
@@ -337,8 +337,8 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
         'Trigger Day': rows['Trigger Day'].apply(_display),
         'Trigger': rows['Trigger'].apply(_display),
         'PDH': rows['PDH'].apply(_display) if 'PDH' in rows else '-',
-        '1m ORH': rows['1m ORH'].apply(_display),
-        '5m ORH': rows['5m ORH'].apply(_display),
+        '1m ORH': one_min_result,
+        '5m ORH': five_min_result,
         'VWAP Trigger': vwap_trigger.apply(_display),
         'Notes': rows['Notes'].apply(_display),
         'Current': rows['Current %'].apply(_display),
@@ -464,6 +464,19 @@ def _normalized_result(series: pd.Series) -> pd.Series:
     return series.fillna('').astype(str).str.strip()
 
 
+def _visible_orh_results(rows: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    one = rows['1m ORH'].apply(_display) if '1m ORH' in rows else pd.Series('', index=rows.index)
+    five = rows['5m ORH'].apply(_display) if '5m ORH' in rows else pd.Series('', index=rows.index)
+    adjusted = [
+        vwap_superseded_orh_display_values(row, one_value, five_value)
+        for (_, row), one_value, five_value in zip(rows.iterrows(), one, five)
+    ]
+    return (
+        pd.Series([one_value for one_value, _ in adjusted], index=rows.index),
+        pd.Series([five_value for _, five_value in adjusted], index=rows.index),
+    )
+
+
 def _ineligible_trigger_mask(series: pd.Series) -> pd.Series:
     normalized = _normalized_result(series).str.casefold()
     return normalized.isin({'gap', 'n/a', 'na', 'not applicable', 'not-applicable'})
@@ -512,8 +525,7 @@ def opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=columns)
 
     total = len(rows)
-    one = rows['1m ORH'] if '1m ORH' in rows else pd.Series('', index=rows.index)
-    five = rows['5m ORH'] if '5m ORH' in rows else pd.Series('', index=rows.index)
+    one, five = _visible_orh_results(rows)
     pdh = rows['PDH'] if 'PDH' in rows else pd.Series('', index=rows.index)
     vwap = rows['VWAP Trigger'] if 'VWAP Trigger' in rows else pd.Series('', index=rows.index)
     trigger = rows['Trigger'] if 'Trigger' in rows else pd.Series('', index=rows.index)
@@ -562,9 +574,10 @@ def main_opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
         ], columns=OPENING_BEHAVIOR_MAIN_COLUMNS)
     total = len(rows)
     trigger_day = rows['Trigger Day'] if 'Trigger Day' in rows else pd.Series('', index=rows.index)
+    one, five = _visible_orh_results(rows)
     masks = {
-        '1m ORH': rows['1m ORH'].eq('success') if '1m ORH' in rows else pd.Series(False, index=rows.index),
-        '5m ORH': rows['5m ORH'].eq('success') if '5m ORH' in rows else pd.Series(False, index=rows.index),
+        '1m ORH': one.eq('success'),
+        '5m ORH': five.eq('success'),
         'VWAP Reclaim': rows['VWAP Trigger'].eq('success') if 'VWAP Trigger' in rows else pd.Series(False, index=rows.index),
         'PDH': rows['PDH'].eq('success') if 'PDH' in rows else pd.Series(False, index=rows.index),
         'Alt Required': (rows['Trigger'].eq('Alt Required') & trigger_day.eq('Success')) if 'Trigger' in rows else pd.Series(False, index=rows.index),
@@ -576,8 +589,7 @@ def main_opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
 
 
 def _opening_path_mask(rows: pd.DataFrame, path: str) -> pd.Series:
-    one = rows['1m ORH'] if '1m ORH' in rows else pd.Series('', index=rows.index)
-    five = rows['5m ORH'] if '5m ORH' in rows else pd.Series('', index=rows.index)
+    one, five = _visible_orh_results(rows)
     pdh = rows['PDH'] if 'PDH' in rows else pd.Series('', index=rows.index)
     vwap = rows['VWAP Trigger'] if 'VWAP Trigger' in rows else pd.Series('', index=rows.index)
     trigger = rows['Trigger'] if 'Trigger' in rows else pd.Series('', index=rows.index)
@@ -767,7 +779,11 @@ def _trigger_event_values(rows: pd.DataFrame, trigger_name: str) -> pd.Series:
         if 'VWAP Trigger' not in rows:
             return pd.Series('', index=rows.index)
         return _normalized_result(rows['VWAP Trigger'])
-    if trigger_name in {'1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH'}:
+    if trigger_name == '1m ORH':
+        return _normalized_result(_visible_orh_results(rows)[0])
+    if trigger_name == '5m ORH':
+        return _normalized_result(_visible_orh_results(rows)[1])
+    if trigger_name in {'VWAP Reclaim', 'PDH'}:
         if trigger_name not in rows:
             return pd.Series('', index=rows.index)
         return _normalized_result(rows[trigger_name])

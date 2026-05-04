@@ -1615,6 +1615,146 @@ def test_format_section_table_keeps_raw_vwap_success_out_of_main_when_not_qualif
     assert table.loc[0, 'Qualified VWAP Trigger Reason'] == 'PDH trigger preserved'
 
 
+def test_format_section_table_marks_5m_orh_superseded_when_vwap_is_tighter():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'AAPL',
+        'status': 'Active',
+        'trigger_type': 'VWAP Reclaim',
+        'raw_one_min_result': 'failed',
+        'raw_five_min_result': 'success',
+        'one_min_result': 'failed',
+        'five_min_result': 'success',
+        'vwap_reclaim_result': 'success',
+        'vwap_reclaim_trigger_price': 10.4,
+        'vwap_qualified_trigger_result': 'success',
+        'vwap_qualified_trigger_reason': 'VWAP trigger price lower than 5m ORH',
+        'notes': '',
+        'current_pct': 0.01,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.4,
+        'reference_low': 9.8,
+        'reference_basis': 'VWAP Reclaim',
+        'trigger_break_time': pd.Timestamp('2026-05-01 10:10'),
+        'latest_close': 10.6,
+        'close_price': 10.0,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.06,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Trigger'] == 'VWAP Reclaim'
+    assert table.loc[0, '5m ORH'] == 'superseded'
+    assert table.loc[0, '5m OR Result'] == 'success'
+    assert table.loc[0, 'VWAP Trigger'] == 'success'
+
+
+def test_format_section_table_marks_1m_orh_superseded_when_vwap_is_tighter():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'AAPL',
+        'status': 'Active',
+        'trigger_type': 'VWAP Reclaim',
+        'raw_one_min_result': 'success',
+        'raw_five_min_result': '-',
+        'one_min_result': 'success',
+        'five_min_result': '-',
+        'vwap_reclaim_result': 'success',
+        'vwap_reclaim_trigger_price': 10.4,
+        'vwap_qualified_trigger_result': 'success',
+        'vwap_qualified_trigger_reason': 'VWAP trigger price lower than 1m ORH',
+        'notes': '',
+        'current_pct': 0.01,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.4,
+        'reference_low': 9.8,
+        'reference_basis': 'VWAP Reclaim',
+        'trigger_break_time': pd.Timestamp('2026-05-01 10:10'),
+        'latest_close': 10.6,
+        'close_price': 10.0,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.06,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Trigger'] == 'VWAP Reclaim'
+    assert table.loc[0, '1m ORH'] == 'superseded'
+    assert table.loc[0, '1m OR Result'] == 'success'
+    assert table.loc[0, 'VWAP Trigger'] == 'success'
+
+
+def test_format_section_table_keeps_orh_success_when_vwap_does_not_qualify():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'AAPL',
+        'status': 'Active',
+        'trigger_type': '5m ORH',
+        'raw_one_min_result': 'failed',
+        'raw_five_min_result': 'success',
+        'one_min_result': 'failed',
+        'five_min_result': 'success',
+        'vwap_reclaim_result': 'success',
+        'vwap_reclaim_trigger_price': 11.0,
+        'vwap_qualified_trigger_result': '',
+        'vwap_qualified_trigger_reason': '5m ORH trigger price is lower or unavailable',
+        'notes': '',
+        'current_pct': 0.01,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.4,
+        'reference_low': 9.8,
+        'reference_basis': '5m ORH',
+        'trigger_break_time': pd.Timestamp('2026-05-01 09:35'),
+        'latest_close': 10.6,
+        'close_price': 10.0,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.06,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Trigger'] == '5m ORH'
+    assert table.loc[0, '5m ORH'] == 'success'
+    assert table.loc[0, 'VWAP Trigger'] == '-'
+
+
 def test_vwap_reclaim_fields_detect_stop_validity_from_existing_reference_low():
     intraday = pd.DataFrame({
         'ticker': ['AAPL'] * 390,

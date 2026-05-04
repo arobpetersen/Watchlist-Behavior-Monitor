@@ -534,6 +534,36 @@ def test_vwap_reclaim_display_trigger_appears_in_detail_rows():
     assert detail.loc[0, 'VWAP Trigger'] == 'success'
 
 
+def test_detail_rows_marks_superseded_orh_when_vwap_is_resolved_trigger():
+    history = pd.DataFrame([{
+        'Setup Date': '2026-05-08',
+        'Ticker': 'VWAP',
+        'Current Status': 'Active',
+        'Trigger Day': 'Success',
+        'Trigger': 'VWAP Reclaim',
+        '1m ORH': 'failed',
+        '5m ORH': 'success',
+        'VWAP Trigger': 'success',
+        'vwap_qualified_trigger_reason': 'VWAP trigger price lower than 5m ORH',
+        'PDH': '-',
+        'Notes': '',
+        'Current %': '4.0%',
+        'Max %': '11.0%',
+        'D3 High %': '-',
+        'Retest Day': '',
+        'Setup': '',
+        'Rating': '',
+        'current_pct_raw': 0.04,
+        'max_pct_raw': 0.11,
+    }])
+
+    detail = detail_rows(history, overview_windows(['2026-05-08'])[0])
+
+    assert detail.loc[0, 'Trigger'] == 'VWAP Reclaim'
+    assert detail.loc[0, '5m ORH'] == 'superseded'
+    assert detail.loc[0, 'VWAP Trigger'] == 'success'
+
+
 def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
     base = pd.DataFrame([
         {
@@ -846,6 +876,37 @@ def test_vwap_success_prevents_fallback_alt_required_event_count():
     assert alt['Eligible'] == 1
     assert alt['Triggered'] == 1
     assert alt['Success'] == 1
+
+
+def test_superseded_orh_is_not_counted_as_successful_trigger():
+    rows = pd.DataFrame([{
+        'Setup Date': '2026-05-08',
+        'Ticker': 'VWAP',
+        'Current Status': 'Active',
+        'Trigger Day': 'Success',
+        'Trigger': 'VWAP Reclaim',
+        '1m ORH': 'failed',
+        '5m ORH': 'success',
+        'VWAP Trigger': 'success',
+        'vwap_qualified_trigger_reason': 'VWAP trigger price lower than 5m ORH',
+        'PDH': '-',
+        'Notes': '',
+        'Retest Day': '',
+        'current_pct_raw': 0.04,
+        'max_pct_raw': 0.11,
+    }])
+    window = overview_windows(['2026-05-08'])[0]
+
+    summary = summarize_window(rows, window)
+    main = main_opening_behavior_table(rows).set_index('Trigger')
+    comparison = trigger_outcome_comparison({'Last 5 Setup Dates': rows})
+
+    assert summary['Clean 5m'] == '0 (0%)'
+    assert summary['VWAP Reclaim'] == '1 (100%)'
+    assert main.loc['5m ORH', 'Count'] == 0
+    assert main.loc['VWAP Reclaim', 'Count'] == 1
+    assert comparison[(comparison['Trigger'] == '5m ORH') & (comparison['Window'] == 'Last 5 Setup Dates')].iloc[0]['Success'] == 0
+    assert comparison[(comparison['Trigger'] == 'VWAP Reclaim') & (comparison['Window'] == 'Last 5 Setup Dates')].iloc[0]['Success'] == 1
 
 
 def test_trigger_outcome_comparison_zero_trigger_display():

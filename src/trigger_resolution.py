@@ -118,6 +118,20 @@ def qualified_vwap_trigger_fields(row: pd.Series) -> dict:
     }
 
 
+def vwap_superseded_orh_display_values(row: pd.Series, one_min_result: Any, five_min_result: Any) -> tuple[str, str]:
+    one = _text(one_min_result)
+    five = _text(five_min_result)
+    trigger = _trigger_label(row)
+    reason = _text(_first_present(row, ['vwap_qualified_trigger_reason', 'VWAP Trigger Reason', 'Qualified VWAP Trigger Reason']))
+    if trigger != 'VWAP Reclaim':
+        return one, five
+    if reason == 'VWAP trigger price lower than 1m ORH' and one == 'success':
+        one = 'superseded'
+    elif reason == 'VWAP trigger price lower than 5m ORH' and five == 'success':
+        five = 'superseded'
+    return one, five
+
+
 def resolve_display_triggers(rows: pd.DataFrame) -> pd.DataFrame:
     """Promote successful VWAP Reclaim to the displayed trigger when warranted.
 
