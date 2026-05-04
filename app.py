@@ -14,7 +14,13 @@ from src.backwatch_source import (
     scan_source_files,
 )
 from src.config import get_settings
-from src.data_maintenance import remove_sample_data
+from src.data_maintenance import (
+    find_orphaned_watchlist_sources,
+    preview_watchlist_source_removal,
+    remove_sample_data,
+    remove_watchlist_source,
+    watchlist_source_files,
+)
 from src.data_health import data_health_rows
 from src.database import get_connection
 from src.db_backup import create_db_backup
@@ -145,6 +151,33 @@ with st.expander('Maintenance / Reprocess'):
         cleanup = remove_sample_data(con)
         st.success('Sample/test cleanup complete.')
         st.dataframe(pd.DataFrame([cleanup]), width='stretch', hide_index=True)
+
+    with st.expander('Source File Cleanup', expanded=False):
+        st.caption('Remove imported candidates for one selected source file. Cached market bars are not deleted.')
+        orphan_check_folder = source_dir if source_dir.exists() else settings.watchlists_dir
+        orphaned_sources = find_orphaned_watchlist_sources(con, orphan_check_folder)
+        if orphaned_sources.empty:
+            st.info('No orphaned imported source files found in the configured source folder.')
+        else:
+            st.write('Orphaned imported source files')
+            st.dataframe(orphaned_sources, width='stretch', hide_index=True)
+
+        imported_sources = watchlist_source_files(con)
+        if imported_sources:
+            selected_cleanup_source = st.selectbox('Imported Source File', imported_sources, key='source_file_cleanup_source')
+            cleanup_preview = preview_watchlist_source_removal(con, selected_cleanup_source)
+            st.dataframe(pd.DataFrame([cleanup_preview]), width='stretch', hide_index=True)
+            confirmed_cleanup = st.checkbox(
+                'I understand this will remove candidates imported from the selected source file only.',
+                key='source_file_cleanup_confirm',
+            )
+            if st.button('Remove Selected Source File Candidates', disabled=not confirmed_cleanup):
+                cleanup = remove_watchlist_source(con, selected_cleanup_source)
+                st.cache_data.clear()
+                st.success('Selected source file candidates removed.')
+                st.dataframe(pd.DataFrame([cleanup]), width='stretch', hide_index=True)
+        else:
+            st.info('No imported source files are available for cleanup.')
 
     files = list_source_files(source_dir) if source_dir.exists() else []
     real_files = [f for f in files if not is_sample_or_test_file(f.name) and infer_setup_date(f.name)]
