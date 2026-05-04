@@ -4,6 +4,7 @@ import math
 
 import duckdb
 import pandas as pd
+import pytest
 
 from src.setup_behavior_overview import (
     COMPARISON_COLUMNS,
@@ -34,6 +35,7 @@ from src.setup_behavior_overview import (
     trigger_outcome_comparison,
     trigger_event_main_tables,
     trigger_quality_table,
+    _vwap_reclaim_defaults,
 )
 
 
@@ -1302,6 +1304,19 @@ def test_monitor_history_uses_rolling_setup_monitor_derived_rows(monkeypatch):
     assert history.loc[0, 'Trigger Day'] == 'Success'
     assert history.loc[0, 'Trigger'] == '5m ORH'
     assert history.loc[0, '5m ORH'] == 'success'
+
+
+def test_vwap_reclaim_defaults_allow_bool_assignment_into_arrow_backed_columns():
+    try:
+        prior_below = pd.Series([''], dtype='string[pyarrow]')
+    except (ImportError, TypeError):
+        pytest.skip('pyarrow string dtype is not available')
+    history = pd.DataFrame({'Raw VWAP Reclaim Prior Below VWAP': prior_below})
+
+    out = _vwap_reclaim_defaults(history)
+    out.at[0, 'Raw VWAP Reclaim Prior Below VWAP'] = True
+
+    assert out.loc[0, 'Raw VWAP Reclaim Prior Below VWAP'] is True
 
 
 def test_setup_behavior_overview_handles_zero_setup_dates():

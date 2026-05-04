@@ -189,6 +189,11 @@ def monitor_history(con) -> pd.DataFrame:
 
 def _vwap_reclaim_defaults(history: pd.DataFrame) -> pd.DataFrame:
     out = history.copy()
+    audit_columns = {
+        'Raw VWAP Reclaim Prior Below VWAP',
+        'Raw VWAP Reclaim Bar High',
+        'Raw VWAP Reclaim Trigger Price',
+    }
     for column, value in {
         'VWAP Trigger': '',
         'VWAP Trigger Reason': '',
@@ -202,6 +207,8 @@ def _vwap_reclaim_defaults(history: pd.DataFrame) -> pd.DataFrame:
     }.items():
         if column not in out:
             out[column] = value
+        if column in audit_columns:
+            out[column] = out[column].astype(object)
     return out
 
 
