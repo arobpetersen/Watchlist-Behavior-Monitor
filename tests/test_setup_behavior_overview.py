@@ -393,6 +393,7 @@ def test_vwap_reclaim_resolves_as_display_trigger_after_orh_before_alt():
             '1m ORH': 'failed',
             '5m ORH': 'failed',
             'VWAP Reclaim': 'success',
+            'VWAP Reclaim Trigger Price': 10.5,
             'PDH': '-',
         },
         {
@@ -402,6 +403,8 @@ def test_vwap_reclaim_resolves_as_display_trigger_after_orh_before_alt():
             '1m ORH': 'success',
             '5m ORH': '-',
             'VWAP Reclaim': 'success',
+            'VWAP Reclaim Trigger Price': 9.5,
+            'Trigger Level': 10.0,
             'PDH': 'Gap',
         },
         {
@@ -411,6 +414,7 @@ def test_vwap_reclaim_resolves_as_display_trigger_after_orh_before_alt():
             '1m ORH': '-',
             '5m ORH': '-',
             'VWAP Reclaim': 'success',
+            'VWAP Reclaim Trigger Price': 9.5,
             'PDH': 'success',
         },
         {
@@ -426,7 +430,44 @@ def test_vwap_reclaim_resolves_as_display_trigger_after_orh_before_alt():
 
     out = resolve_display_triggers(rows)
 
-    assert out['Trigger'].tolist() == ['VWAP Reclaim', '1m ORH', 'PDH', 'Alt Required']
+    assert out['Trigger'].tolist() == ['VWAP Reclaim', 'VWAP Reclaim', 'PDH', 'Alt Required']
+
+
+def test_vwap_reclaim_higher_price_preserves_orh_display_trigger():
+    rows = pd.DataFrame([{
+        'Ticker': 'ONE',
+        'Trigger': '1m ORH',
+        'Trigger Day': 'Success',
+        '1m ORH': 'success',
+        '5m ORH': '-',
+        'VWAP Reclaim': 'success',
+        'VWAP Reclaim Trigger Price': 10.5,
+        'Trigger Level': 10.0,
+        'PDH': 'Gap',
+    }])
+
+    out = resolve_display_triggers(rows)
+
+    assert out.loc[0, 'Trigger'] == '1m ORH'
+
+
+def test_vwap_reclaim_stop_invalid_prevents_display_trigger_promotion():
+    rows = pd.DataFrame([{
+        'Ticker': 'FIVE',
+        'Trigger': '5m ORH',
+        'Trigger Day': 'Success',
+        '1m ORH': 'failed',
+        '5m ORH': 'success',
+        'VWAP Reclaim': 'success',
+        'VWAP Reclaim Trigger Price': 10.5,
+        'VWAP Reclaim Stop Valid': False,
+        'Trigger Level': 11.0,
+        'PDH': 'Gap',
+    }])
+
+    out = resolve_display_triggers(rows)
+
+    assert out.loc[0, 'Trigger'] == '5m ORH'
 
 
 def test_vwap_reclaim_display_trigger_appears_in_detail_rows():
@@ -436,6 +477,7 @@ def test_vwap_reclaim_display_trigger_appears_in_detail_rows():
         'Current Status': 'Active',
         'Trigger Day': 'Success',
         'Trigger': 'Alt Required',
+        'VWAP Reclaim Trigger Price': 10.5,
         'PDH': '-',
         '1m ORH': 'failed',
         '5m ORH': 'failed',

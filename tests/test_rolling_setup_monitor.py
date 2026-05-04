@@ -7,6 +7,7 @@ import pandas as pd
 
 from src.rolling_setup_monitor import (
     _format_section_table,
+    _vwap_reclaim_fields,
     apply_setup_rating_updates,
     day_summary,
     derive_trigger_reference,
@@ -1343,7 +1344,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
     }])
 
     assert main_table(df).columns.tolist() == [
-        'Ticker', 'Current Status', 'Trigger Day', 'Trigger', 'PDH', '1m ORH', '5m ORH', 'Notes',
+        'Ticker', 'Current Status', 'Trigger Day', 'Trigger', 'PDH', '1m ORH', '5m ORH', 'VWAP Reclaim', 'Notes',
         'Current %', 'Max %', 'D3 High %', 'Retest Day', 'Setup', 'Rating',
     ]
     assert detail_table(df).columns.tolist() == [
@@ -1352,6 +1353,9 @@ def test_main_and_detail_table_columns_and_blank_handling():
         '1m Recovery Reference Low', '5m Recovery Qualified', '5m Recovery Break Time',
         '5m Recovery Reference Low', 'Alt Recovery Qualified',
         'PDH Trigger Break Time', 'PDH Trigger Level', 'PDH Reference Low', 'PDH Reference Basis',
+        'VWAP Reclaim Result', 'VWAP Reclaim Time', 'VWAP Reclaim Bar High',
+        'VWAP Reclaim Trigger Time', 'VWAP Reclaim Trigger Price', 'VWAP Reclaim Stop Valid',
+        'VWAP Reclaim Reason',
         'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
         'Fail Day', 'Latest Close', 'Setup Close', 'Setup High', 'Setup Low',
         'Current vs Setup Close', 'Max Gain from Setup Close', 'RVOL', 'Range / ATR14', '1m OR Width / ATR14',
@@ -1504,6 +1508,79 @@ def test_format_section_table_formats_nan_day_values_as_blank():
     assert table.loc[0, 'Retest Day'] == ''
     assert table.loc[0, 'Fail Day'] == ''
     assert table.loc[0, 'D3 High %'] == '-'
+
+
+def test_format_section_table_exposes_vwap_reclaim_result_and_detail():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'AAPL',
+        'status': 'Active',
+        'trigger_type': 'VWAP Reclaim',
+        'one_min_result': 'failed',
+        'five_min_result': 'failed',
+        'vwap_reclaim_result': 'success',
+        'vwap_reclaim_time': pd.Timestamp('2026-05-01 10:05'),
+        'vwap_reclaim_reclaim_bar_high': 10.4,
+        'vwap_reclaim_trigger_time': pd.Timestamp('2026-05-01 10:10'),
+        'vwap_reclaim_trigger_price': 10.4,
+        'vwap_reclaim_stop_valid': True,
+        'vwap_reclaim_failure_reason': '',
+        'notes': '',
+        'current_pct': 0.01,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.4,
+        'reference_low': 9.8,
+        'reference_basis': 'VWAP Reclaim',
+        'trigger_break_time': pd.Timestamp('2026-05-01 10:10'),
+        'latest_close': 10.6,
+        'close_price': 10.0,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.06,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Trigger'] == 'VWAP Reclaim'
+    assert table.loc[0, 'VWAP Reclaim'] == 'success'
+    assert table.loc[0, 'VWAP Reclaim Trigger Price'] == '10.40'
+    assert table.loc[0, 'VWAP Reclaim Stop Valid'] == 'Yes'
+
+
+def test_vwap_reclaim_fields_detect_stop_validity_from_existing_reference_low():
+    intraday = pd.DataFrame({
+        'ticker': ['AAPL'] * 390,
+        'trading_date': ['2026-05-01'] * 390,
+        'timestamp_et': pd.date_range('2026-05-01 09:30', periods=390, freq='min'),
+        'open': [10.0] * 390,
+        'high': [10.1] * 390,
+        'low': [9.9] * 390,
+        'close': [10.0] * 390,
+        'volume': [1000] * 390,
+    })
+    mask = (intraday['timestamp_et'] >= pd.Timestamp('2026-05-01 10:00')) & (intraday['timestamp_et'] < pd.Timestamp('2026-05-01 10:05'))
+    intraday.loc[mask, ['open', 'high', 'low', 'close']] = [10.6, 10.8, 10.5, 10.7]
+    intraday.loc[intraday['timestamp_et'] == pd.Timestamp('2026-05-01 10:10'), 'high'] = 10.9
+    intraday.loc[intraday['timestamp_et'] == pd.Timestamp('2026-05-01 10:11'), 'low'] = 9.4
+
+    valid = _vwap_reclaim_fields(intraday, reference_low=9.3)
+    invalid = _vwap_reclaim_fields(intraday, reference_low=9.5)
+
+    assert valid['vwap_reclaim_result'] == 'success'
+    assert valid['vwap_reclaim_trigger_price'] == 10.8
+    assert valid['vwap_reclaim_stop_valid'] is True
+    assert invalid['vwap_reclaim_stop_valid'] is False
 
 
 def test_format_section_table_derives_status_display_fields():

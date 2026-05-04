@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from src.rolling_setup_monitor import rolling_setup_monitor
+from src.trigger_resolution import resolve_display_triggers
 from src.vwap_reclaim import assess_vwap_reclaim
 
 
@@ -254,33 +255,6 @@ def _add_vwap_reclaim_events(con, history: pd.DataFrame) -> pd.DataFrame:
         history.at[idx, 'VWAP Reclaim Trigger Price'] = result.get('trigger_price')
         history.at[idx, 'VWAP Reclaim Reason'] = result.get('failure_reason') or ''
     return resolve_display_triggers(history)
-
-
-def resolve_display_triggers(history: pd.DataFrame) -> pd.DataFrame:
-    """Let successful VWAP Reclaim appear as the displayed trigger label.
-
-    Rolling Setup Monitor remains the source for the original ORH/PDH/Alt
-    classification. This display pass only promotes VWAP Reclaim when no
-    existing earlier explicit trigger already succeeded. Current PDH priority is
-    preserved because PDH is resolved inside the monitor before this overview
-    event layer runs.
-    """
-    if history.empty or 'VWAP Reclaim' not in history or 'Trigger' not in history:
-        return history
-    out = history.copy()
-    one = out['1m ORH'] if '1m ORH' in out else pd.Series('', index=out.index)
-    five = out['5m ORH'] if '5m ORH' in out else pd.Series('', index=out.index)
-    pdh = out['PDH'] if 'PDH' in out else pd.Series('', index=out.index)
-    vwap_success = _normalized_result(out['VWAP Reclaim']).eq('success')
-    earlier_display_success = (
-        _normalized_result(one).eq('success')
-        | _normalized_result(five).eq('success')
-        | _normalized_result(pdh).eq('success')
-        | out['Trigger'].isin({'1m ORH', '5m ORH', 'PDH'})
-    )
-    promote = vwap_success & ~earlier_display_success
-    out.loc[promote, 'Trigger'] = 'VWAP Reclaim'
-    return out
 
 
 def _count(series: pd.Series, value: str) -> int:

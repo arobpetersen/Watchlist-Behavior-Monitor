@@ -146,6 +146,7 @@ def test_vwap_reclaim_can_display_as_top_mover_trigger():
         '1m ORH': 'failed',
         '5m ORH': 'failed',
         'VWAP Reclaim': 'success',
+        'VWAP Reclaim Trigger Price': 10.5,
         'PDH': '-',
         'current_pct_raw': 0.06,
         'max_pct_raw': 0.14,

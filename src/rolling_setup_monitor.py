@@ -8,6 +8,8 @@ import pandas as pd
 
 from src.dashboard_queries import _clean_display_df, _close_bucket
 from src.feature_engine import session_filter
+from src.trigger_resolution import resolve_display_triggers
+from src.vwap_reclaim import assess_vwap_reclaim
 
 
 SETUP_OPTIONS = [
@@ -30,6 +32,7 @@ MAIN_COLUMNS = [
     'PDH',
     '1m ORH',
     '5m ORH',
+    'VWAP Reclaim',
     'Notes',
     'Current %',
     'Max %',
@@ -66,6 +69,13 @@ DETAIL_COLUMNS = [
     'PDH Trigger Level',
     'PDH Reference Low',
     'PDH Reference Basis',
+    'VWAP Reclaim Result',
+    'VWAP Reclaim Time',
+    'VWAP Reclaim Bar High',
+    'VWAP Reclaim Trigger Time',
+    'VWAP Reclaim Trigger Price',
+    'VWAP Reclaim Stop Valid',
+    'VWAP Reclaim Reason',
     'Trigger Level',
     'Reference Low',
     'Reference Basis',
@@ -169,6 +179,17 @@ def _fmt_compact_day(value: int | None) -> str:
 
 def _fmt_d3_pct(value) -> str:
     return '-' if value is None or pd.isna(value) else _fmt_pct(value)
+
+
+def _fmt_bool_available(value) -> str:
+    if value is None:
+        return ''
+    try:
+        if pd.isna(value):
+            return ''
+    except (TypeError, ValueError):
+        pass
+    return 'Yes' if bool(value) else 'No'
 
 
 def trigger_day_status(trigger_type: str, fail_day_value: int | None) -> str:
@@ -309,6 +330,24 @@ def day0_fail_time(intraday: pd.DataFrame, trigger_break_time, reference_low: fl
     if failures.empty:
         return None
     return _ts(failures.iloc[0]['timestamp_et'])
+
+
+def _vwap_reclaim_fields(intraday: pd.DataFrame | None, reference_low: float | None = None) -> dict:
+    assessment = assess_vwap_reclaim(intraday)
+    trigger_time = _ts(assessment.get('trigger_time'))
+    stop_valid = None
+    if assessment.get('result') == 'success' and trigger_time is not None and reference_low is not None:
+        bars = _regular_session_bars(intraday)
+        stop_valid = not day0_fail(bars, trigger_time, reference_low)
+    return {
+        'vwap_reclaim_result': assessment.get('result') or '',
+        'vwap_reclaim_time': _ts(assessment.get('reclaim_time')),
+        'vwap_reclaim_reclaim_bar_high': assessment.get('reclaim_bar_high'),
+        'vwap_reclaim_trigger_time': trigger_time,
+        'vwap_reclaim_trigger_price': assessment.get('trigger_price'),
+        'vwap_reclaim_stop_valid': stop_valid,
+        'vwap_reclaim_failure_reason': assessment.get('failure_reason') or '',
+    }
 
 
 def pdh_trigger_assessment(
@@ -785,7 +824,7 @@ def status_for(trigger_type: str, fail_day_value: int | None) -> str:
         return 'Failed'
     if fail_day_value is not None:
         return 'Failed'
-    if trigger_type in {'PDH', '1m ORH', '5m ORH', 'Alt Required'}:
+    if trigger_type in {'PDH', '1m ORH', '5m ORH', 'VWAP Reclaim', 'Alt Required'}:
         return 'Active'
     return 'Unresolved'
 
@@ -868,9 +907,9 @@ def _badge_class(column: str, value: str) -> str:
         return f'monitor-badge trigger-day-{normalized}'
     if column == 'Trigger':
         return f'monitor-badge trigger-{normalized}'
-    if column in {'PDH', '1m ORH', '5m ORH'} and value in {'success', 'failed'}:
+    if column in {'PDH', '1m ORH', '5m ORH', 'VWAP Reclaim'} and value in {'success', 'failed'}:
         return f'monitor-badge result-{value}'
-    if value in {'-', 'Gap'}:
+    if value in {'-', 'Gap', 'Not Applicable'}:
         return 'monitor-badge status-muted'
     return ''
 
@@ -958,7 +997,7 @@ def format_monitor_table_html(df: pd.DataFrame) -> str:
   background: rgba(148, 163, 184, 0.18);
   border: 1px solid rgba(148, 163, 184, 0.30);
 }}
-.trigger-pdh, .trigger-failed-pdh-trigger, .trigger-1m-orh, .trigger-5m-orh, .trigger-alt-required, .trigger-failed-or-trigger, .trigger-no-trigger {{
+.trigger-pdh, .trigger-failed-pdh-trigger, .trigger-1m-orh, .trigger-5m-orh, .trigger-vwap-reclaim, .trigger-alt-required, .trigger-failed-or-trigger, .trigger-no-trigger {{
   color: rgba(236, 244, 255, 0.92);
   background: rgba(59, 130, 246, 0.16);
   border: 1px solid rgba(96, 165, 250, 0.28);
@@ -984,6 +1023,7 @@ def format_summary_blocks_html(summary: dict) -> str:
     groups = [
         ('Overall', [('Setups', 'Setups', False), ('Day Success', 'Day Success', True), ('Day Fail', 'Day Fail', True), ('Unresolved', 'Unresolved', True), ('Active', 'Active', True), ('Later Failed', 'Later Failed', True)]),
         ('PDH', [('Gap', 'PDH Gap', True), ('Success', 'PDH', True), ('Failed', 'Failed PDH Trigger', True)]),
+        ('VWAP', [('Success', 'VWAP Reclaim', True), ('Failed', 'VWAP Failed', True)]),
         ('1m OR', [('Clean 1m', 'Clean 1m', True), ('Failed 1m', '1m Failed', True)]),
         ('5m OR', [('Clean 5m', 'Clean 5m', True), ('Failed 5m', '5m Failed', True)]),
         ('Alternate / Other', [('Alt Required', 'Alt Required', True), ('No Trigger', 'No Trigger', True), ('Retested', 'Retested', True)]),
@@ -1045,11 +1085,14 @@ def detail_table(table: pd.DataFrame) -> pd.DataFrame:
 
 def day_summary(df: pd.DataFrame) -> dict:
     pdh = df['PDH'] if 'PDH' in df else pd.Series(dtype=object)
+    vwap = df['VWAP Reclaim'] if 'VWAP Reclaim' in df else pd.Series(dtype=object)
     return {
         'Setups': len(df),
         'PDH Gap': int((pdh == 'Gap').sum()) if not df.empty else 0,
         'PDH': int((df['Trigger'] == 'PDH').sum()) if not df.empty else 0,
         'Failed PDH Trigger': int((df['Trigger'] == 'Failed PDH Trigger').sum()) if not df.empty else 0,
+        'VWAP Reclaim': int((vwap == 'success').sum()) if not df.empty else 0,
+        'VWAP Failed': int((vwap == 'failed').sum()) if not df.empty else 0,
         'Clean 1m': int((df['1m ORH'] == 'success').sum()) if not df.empty else 0,
         'Clean 5m': int((df['5m ORH'] == 'success').sum()) if not df.empty else 0,
         '1m Failed': int((df['1m ORH'] == 'failed').sum()) if not df.empty else 0,
@@ -1131,6 +1174,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'PDH': raw.get('pdh_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
         '1m ORH': display_one_min_result.apply(lambda v: '-' if v == '' else v),
         '5m ORH': display_five_min_result.apply(lambda v: '-' if v == '' else v),
+        'VWAP Reclaim': raw.get('vwap_reclaim_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
         'Notes': raw.get('notes', blank_series).apply(_blank),
         'Current %': raw['current_pct'].apply(_fmt_pct),
         'Max %': raw['max_pct'].apply(_fmt_pct),
@@ -1155,6 +1199,13 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'PDH Trigger Level': raw.get('pdh_trigger_level', blank_series).apply(_fmt_price),
         'PDH Reference Low': raw.get('pdh_reference_low', blank_series).apply(_fmt_price),
         'PDH Reference Basis': raw.get('pdh_reference_basis', blank_series).apply(_blank),
+        'VWAP Reclaim Result': raw.get('vwap_reclaim_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
+        'VWAP Reclaim Time': raw.get('vwap_reclaim_time', blank_series).apply(_fmt_ts),
+        'VWAP Reclaim Bar High': raw.get('vwap_reclaim_reclaim_bar_high', blank_series).apply(_fmt_price),
+        'VWAP Reclaim Trigger Time': raw.get('vwap_reclaim_trigger_time', blank_series).apply(_fmt_ts),
+        'VWAP Reclaim Trigger Price': raw.get('vwap_reclaim_trigger_price', blank_series).apply(_fmt_price),
+        'VWAP Reclaim Stop Valid': raw.get('vwap_reclaim_stop_valid', blank_series).apply(_fmt_bool_available),
+        'VWAP Reclaim Reason': raw.get('vwap_reclaim_failure_reason', blank_series).apply(_blank),
         'Trigger Level': raw['trigger_level'].apply(_fmt_price),
         'Reference Low': raw['reference_low'].apply(_fmt_price),
         'Reference Basis': raw['reference_basis'].apply(_blank),
@@ -1248,6 +1299,8 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
             'open_over_pdh': pdh_assessment.get('open_over_pdh'),
         })
         record.update(trigger)
+        record.update(_vwap_reclaim_fields(ticker_intraday, record.get('reference_low')))
+        record.update(resolve_display_triggers(pd.DataFrame([record])).iloc[0].to_dict())
         record.update(opening_range_width_notes(record.get('or_1m'), record.get('or_5m'), record.get('atr20')))
         record.update(_follow_through(record, daily_bars, intraday_bars))
         raw_one_min_result = opening_range_result(record.get('or_1m'), 1, record['trigger_type'], ticker_intraday, ticker_daily)
