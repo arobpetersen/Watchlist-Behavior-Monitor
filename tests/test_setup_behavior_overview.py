@@ -9,7 +9,7 @@ from src.setup_behavior_overview import (
     COMPARISON_COLUMNS,
     DETAIL_COLUMNS,
     FULL_SUMMARY_COLUMNS,
-    MAIN_OPENING_PATHS,
+    MAIN_OPENING_TRIGGERS,
     OPENING_BEHAVIOR_MAIN_COLUMNS,
     SUMMARY_COLUMNS,
     TRIGGER_EVENT_MAIN_COLUMNS,
@@ -821,7 +821,7 @@ def test_opening_behavior_classifies_failed_all_opening_triggers():
     assert table.loc['Failed All Opening Triggers', 'Active %'] == '0%'
 
 
-def test_opening_behavior_main_table_keeps_successful_paths_only():
+def test_opening_behavior_main_table_shows_successful_trigger_rows_only():
     history = pd.concat([
         _opening_behavior_history(),
         pd.DataFrame([{
@@ -836,15 +836,57 @@ def test_opening_behavior_main_table_keeps_successful_paths_only():
             'max_pct_raw': 0.07,
         }]),
     ], ignore_index=True)
-    full = opening_behavior_table(history)
-    main = main_opening_behavior_table(full)
+    main = main_opening_behavior_table(history)
 
     assert main.columns.tolist() == OPENING_BEHAVIOR_MAIN_COLUMNS
-    assert main['Path'].tolist() == MAIN_OPENING_PATHS
-    assert '1m ORH Failed, Never Recovered' not in main['Path'].tolist()
-    assert 'Failed All Opening Triggers' not in main['Path'].tolist()
-    assert main.set_index('Path').loc['Alt Required Success', 'Count'] == 1
+    assert main['Trigger'].tolist() == MAIN_OPENING_TRIGGERS
+    assert 'Clean 1m ORH Success' not in main['Trigger'].tolist()
+    assert '1m ORH Failed, Later Reclaimed' not in main['Trigger'].tolist()
+    assert '5m ORH Success After 1m Failure' not in main['Trigger'].tolist()
+    assert 'PDH Success After Early Noise' not in main['Trigger'].tolist()
+    assert 'Failed All Opening Triggers' not in main['Trigger'].tolist()
+    by_trigger = main.set_index('Trigger')
+    assert by_trigger.loc['1m ORH', 'Count'] == 1
+    assert by_trigger.loc['1m ORH', '% of Setups'] == '17%'
+    assert by_trigger.loc['1m ORH', 'Active %'] == '100%'
+    assert by_trigger.loc['1m ORH', 'Later Failed %'] == '0%'
+    assert by_trigger.loc['1m ORH', 'Median Max'] == '10.0%'
+    assert by_trigger.loc['5m ORH', 'Count'] == 1
+    assert by_trigger.loc['PDH', 'Count'] == 1
+    assert by_trigger.loc['Alt Required', 'Count'] == 1
+    assert by_trigger.loc['Alt Required', 'Median Max'] == '7.0%'
     assert 'Median Current' not in main.columns
+
+
+def test_opening_behavior_main_table_zero_count_display():
+    history = pd.DataFrame([{
+        'Ticker': 'NONE',
+        'Current Status': '—',
+        'Trigger Day': 'Unresolved',
+        'Trigger': 'No Trigger',
+        'PDH': '-',
+        '1m ORH': '-',
+        '5m ORH': '-',
+        'max_pct_raw': None,
+    }])
+
+    main = main_opening_behavior_table(history).set_index('Trigger')
+
+    assert main.loc['1m ORH', 'Count'] == 0
+    assert main.loc['1m ORH', '% of Setups'] == '0%'
+    assert main.loc['1m ORH', 'Active %'] == '-'
+    assert main.loc['1m ORH', 'Later Failed %'] == '-'
+    assert main.loc['1m ORH', 'Median Max'] == '-'
+
+
+def test_opening_behavior_detail_retains_richer_path_rows():
+    table = opening_behavior_table(_opening_behavior_history())
+
+    assert 'Clean 1m ORH Success' in table['Path'].tolist()
+    assert '1m ORH Failed, Later Reclaimed' in table['Path'].tolist()
+    assert '5m ORH Success After 1m Failure' in table['Path'].tolist()
+    assert 'PDH Success After Early Noise' in table['Path'].tolist()
+    assert 'Failed All Opening Triggers' in table['Path'].tolist()
 
 
 def test_monitor_history_uses_rolling_setup_monitor_derived_rows(monkeypatch):

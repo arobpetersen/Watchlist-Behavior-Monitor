@@ -350,20 +350,14 @@ OPENING_BEHAVIOR_COLUMNS = [
     'Median Max',
 ]
 OPENING_BEHAVIOR_MAIN_COLUMNS = [
-    'Path',
+    'Trigger',
     'Count',
     '% of Setups',
     'Active %',
     'Later Failed %',
     'Median Max',
 ]
-MAIN_OPENING_PATHS = [
-    'Clean 1m ORH Success',
-    '1m ORH Failed, Later Reclaimed',
-    '5m ORH Success After 1m Failure',
-    'PDH Success After Early Noise',
-    'Alt Required Success',
-]
+MAIN_OPENING_TRIGGERS = ['1m ORH', '5m ORH', 'PDH', 'Alt Required']
 
 
 def _count_int(value: Any) -> int:
@@ -466,14 +460,36 @@ def opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame([_opening_path_row(label, rows[mask], total) for label, mask in masks], columns=columns)
 
 
-def main_opening_behavior_table(opening_behavior: pd.DataFrame) -> pd.DataFrame:
-    if opening_behavior.empty:
-        return pd.DataFrame(columns=OPENING_BEHAVIOR_MAIN_COLUMNS)
-    rows = opening_behavior[opening_behavior['Path'].isin(MAIN_OPENING_PATHS)].copy()
-    sorter = {path: index for index, path in enumerate(MAIN_OPENING_PATHS)}
-    rows['_path_order'] = rows['Path'].map(sorter).fillna(99)
-    rows = rows.sort_values('_path_order')
-    return rows[OPENING_BEHAVIOR_MAIN_COLUMNS].reset_index(drop=True)
+def _main_opening_row(trigger_name: str, rows: pd.DataFrame, total_setups: int) -> dict:
+    count = len(rows)
+    return {
+        'Trigger': trigger_name,
+        'Count': count,
+        '% of Setups': _pct_of_rows(count, total_setups),
+        'Active %': _pct_of_rows(int(rows['Current Status'].eq('Active').sum()) if 'Current Status' in rows else 0, count),
+        'Later Failed %': _pct_of_rows(int(_is_later_failed(rows['Current Status']).sum()) if 'Current Status' in rows else 0, count),
+        'Median Max': _fmt_pct(rows['max_pct_raw'].median() if 'max_pct_raw' in rows and count else None),
+    }
+
+
+def main_opening_behavior_table(rows: pd.DataFrame) -> pd.DataFrame:
+    if rows.empty:
+        return pd.DataFrame([
+            _main_opening_row(trigger_name, rows.copy(), 0)
+            for trigger_name in MAIN_OPENING_TRIGGERS
+        ], columns=OPENING_BEHAVIOR_MAIN_COLUMNS)
+    total = len(rows)
+    trigger_day = rows['Trigger Day'] if 'Trigger Day' in rows else pd.Series('', index=rows.index)
+    masks = {
+        '1m ORH': rows['1m ORH'].eq('success') if '1m ORH' in rows else pd.Series(False, index=rows.index),
+        '5m ORH': rows['5m ORH'].eq('success') if '5m ORH' in rows else pd.Series(False, index=rows.index),
+        'PDH': rows['PDH'].eq('success') if 'PDH' in rows else pd.Series(False, index=rows.index),
+        'Alt Required': (rows['Trigger'].eq('Alt Required') & trigger_day.eq('Success')) if 'Trigger' in rows else pd.Series(False, index=rows.index),
+    }
+    return pd.DataFrame([
+        _main_opening_row(trigger_name, rows[masks[trigger_name]], total)
+        for trigger_name in MAIN_OPENING_TRIGGERS
+    ], columns=OPENING_BEHAVIOR_MAIN_COLUMNS)
 
 
 def _opening_path_mask(rows: pd.DataFrame, path: str) -> pd.Series:
@@ -923,7 +939,7 @@ def setup_behavior_overview(con) -> dict:
         'snapshot_cards': {label: snapshot_cards_html(row) for label, row in summary_by_window.items()},
         'mixes': {label: mix_tables(row) for label, row in summary_by_window.items()},
         'opening_behavior': opening_behavior,
-        'opening_behavior_main': {label: main_opening_behavior_table(table) for label, table in opening_behavior.items()},
+        'opening_behavior_main': {label: main_opening_behavior_table(history_by_window[label]) for label in summary_by_window},
         'trigger_outcome_comparison': trigger_outcomes,
         'trigger_outcome_by_window': trigger_outcome_by_window_tables(trigger_outcomes),
         'trigger_event_main_by_window': trigger_event_main_tables(trigger_outcomes),

@@ -3,6 +3,7 @@ import streamlit as st
 from src.config import get_settings
 from src.database import get_connection
 from src.setup_behavior_overview import (
+    OPENING_BEHAVIOR_MAIN_COLUMNS,
     OPENING_PATH_FILTER_OPTIONS,
     filter_detail_rows,
     main_opening_behavior_table,
@@ -15,7 +16,7 @@ from src.setup_behavior_overview import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-OVERVIEW_CACHE_VERSION = 'setup-overview-display-v2'
+OVERVIEW_CACHE_VERSION = 'setup-overview-display-v3'
 
 
 @st.cache_data(show_spinner=False)
@@ -28,8 +29,14 @@ def ensure_overview_display_tables(overview: dict) -> dict:
     if 'opening_behavior_main' not in overview:
         overview['opening_behavior_main'] = {
             label: main_opening_behavior_table(table)
-            for label, table in overview.get('opening_behavior', {}).items()
+            for label, table in overview.get('details', {}).items()
         }
+        if not overview['opening_behavior_main']:
+            overview['opening_behavior_main'] = {
+                label: main_opening_behavior_table(table)
+                for label, table in overview.get('opening_behavior', {}).items()
+                if set(OPENING_BEHAVIOR_MAIN_COLUMNS).issubset(table.columns)
+            }
     if 'trigger_event_main_by_window' not in overview:
         overview['trigger_event_main_by_window'] = trigger_event_main_tables(
             overview.get('trigger_outcome_comparison')
@@ -78,8 +85,8 @@ else:
     st.subheader('Selected Window Opening Path')
     st.dataframe(overview['opening_behavior_main'][selected_window], width='stretch', hide_index=True)
     st.caption(
-        'Path rows describe selected-window setup sequences and may overlap when an early failed trigger later succeeds '
-        'at a higher trigger level.'
+        'Main rows show selected-window setups where each trigger succeeded. Richer path detail remains in Supporting '
+        'Selected-Window Stats.'
     )
 
     st.subheader('Trigger Event Outcomes Across Windows')
