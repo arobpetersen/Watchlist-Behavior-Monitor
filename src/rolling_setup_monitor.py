@@ -31,8 +31,8 @@ MAIN_COLUMNS = [
     'Trigger',
     'PDH',
     '1m ORH',
+    'VWAP Reclaim',
     '5m ORH',
-    'VWAP Trigger',
     'Notes',
     'Current %',
     'Max %',
@@ -899,7 +899,8 @@ def main_table(table: pd.DataFrame) -> pd.DataFrame:
     for column in MAIN_COLUMNS:
         if column not in out:
             out[column] = ''
-    return _clean_display_df(out[MAIN_COLUMNS])
+    display = out[MAIN_COLUMNS].replace('superseded', '-')
+    return _clean_display_df(display)
 
 
 def _badge_class(column: str, value: str) -> str:
@@ -912,7 +913,7 @@ def _badge_class(column: str, value: str) -> str:
         return f'monitor-badge trigger-day-{normalized}'
     if column == 'Trigger':
         return f'monitor-badge trigger-{normalized}'
-    if column in {'PDH', '1m ORH', '5m ORH', 'VWAP Trigger'} and value in {'success', 'failed'}:
+    if column in {'PDH', '1m ORH', '5m ORH', 'VWAP Reclaim'} and value in {'success', 'failed'}:
         return f'monitor-badge result-{value}'
     if value in {'-', 'Gap', 'Not Applicable', 'superseded'}:
         return 'monitor-badge status-muted'
@@ -1090,7 +1091,7 @@ def detail_table(table: pd.DataFrame) -> pd.DataFrame:
 
 def day_summary(df: pd.DataFrame) -> dict:
     pdh = df['PDH'] if 'PDH' in df else pd.Series(dtype=object)
-    vwap = df['VWAP Trigger'] if 'VWAP Trigger' in df else pd.Series(dtype=object)
+    vwap = df['VWAP Reclaim'] if 'VWAP Reclaim' in df else pd.Series(dtype=object)
     return {
         'Setups': len(df),
         'PDH Gap': int((pdh == 'Gap').sum()) if not df.empty else 0,
@@ -1187,7 +1188,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'PDH': raw.get('pdh_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
         '1m ORH': display_one_min_result.apply(lambda v: '-' if v == '' else v),
         '5m ORH': display_five_min_result.apply(lambda v: '-' if v == '' else v),
-        'VWAP Trigger': qualified_vwap_result.apply(lambda v: '-' if v == '' else v),
+        'VWAP Reclaim': qualified_vwap_result.apply(lambda v: '-' if v == '' else v),
         'Notes': raw.get('notes', blank_series).apply(_blank),
         'Current %': raw['current_pct'].apply(_fmt_pct),
         'Max %': raw['max_pct'].apply(_fmt_pct),

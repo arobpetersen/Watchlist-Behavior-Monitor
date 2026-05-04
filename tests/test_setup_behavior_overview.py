@@ -236,6 +236,8 @@ def test_detail_rows_match_expected_columns_and_window_filter():
     detail = detail_rows(_history(), window)
 
     assert detail.columns.tolist() == DETAIL_COLUMNS
+    assert detail.columns.tolist()[5:9] == ['PDH', '1m ORH', 'VWAP Reclaim', '5m ORH']
+    assert 'VWAP Trigger' not in detail.columns
     assert detail['Ticker'].tolist() == ['AAA', 'EEE', 'BBB']
     assert detail.loc[0, 'D3 High'] == '-'
     assert detail.loc[1, 'Setup'] == '-'
@@ -531,10 +533,10 @@ def test_vwap_reclaim_display_trigger_appears_in_detail_rows():
     detail = detail_rows(resolved, overview_windows(['2026-05-08'])[0])
 
     assert detail.loc[0, 'Trigger'] == 'VWAP Reclaim'
-    assert detail.loc[0, 'VWAP Trigger'] == 'success'
+    assert detail.loc[0, 'VWAP Reclaim'] == 'success'
 
 
-def test_detail_rows_marks_superseded_orh_when_vwap_is_resolved_trigger():
+def test_detail_rows_hides_superseded_orh_when_vwap_is_resolved_trigger():
     history = pd.DataFrame([{
         'Setup Date': '2026-05-08',
         'Ticker': 'VWAP',
@@ -560,8 +562,8 @@ def test_detail_rows_marks_superseded_orh_when_vwap_is_resolved_trigger():
     detail = detail_rows(history, overview_windows(['2026-05-08'])[0])
 
     assert detail.loc[0, 'Trigger'] == 'VWAP Reclaim'
-    assert detail.loc[0, '5m ORH'] == 'superseded'
-    assert detail.loc[0, 'VWAP Trigger'] == 'success'
+    assert detail.loc[0, '5m ORH'] == '-'
+    assert detail.loc[0, 'VWAP Reclaim'] == 'success'
 
 
 def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
@@ -995,7 +997,7 @@ def test_filter_detail_rows_by_trigger_level_and_result():
     pdh_blank = filter_detail_rows(detail, trigger_level='PDH', trigger_result='blank')
     assert pdh_blank['Ticker'].tolist() == ['AAA', 'EEE', 'BBB', 'CCC']
 
-    vwap_success = filter_detail_rows(detail.assign(**{'VWAP Trigger': ['success', '', '', '']}), trigger_level='VWAP Reclaim', trigger_result='success')
+    vwap_success = filter_detail_rows(detail.assign(**{'VWAP Reclaim': ['success', '', '', '']}), trigger_level='VWAP Reclaim', trigger_result='success')
     assert vwap_success['Ticker'].tolist() == ['AAA']
 
 

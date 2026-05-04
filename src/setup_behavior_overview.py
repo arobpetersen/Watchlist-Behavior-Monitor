@@ -62,8 +62,8 @@ DETAIL_COLUMNS = [
     'Trigger',
     'PDH',
     '1m ORH',
+    'VWAP Reclaim',
     '5m ORH',
-    'VWAP Trigger',
     'Notes',
     'Current',
     'Max',
@@ -337,9 +337,9 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
         'Trigger Day': rows['Trigger Day'].apply(_display),
         'Trigger': rows['Trigger'].apply(_display),
         'PDH': rows['PDH'].apply(_display) if 'PDH' in rows else '-',
-        '1m ORH': one_min_result,
-        '5m ORH': five_min_result,
-        'VWAP Trigger': vwap_trigger.apply(_display),
+        '1m ORH': one_min_result.replace('superseded', '-'),
+        'VWAP Reclaim': vwap_trigger.apply(_display),
+        '5m ORH': five_min_result.replace('superseded', '-'),
         'Notes': rows['Notes'].apply(_display),
         'Current': rows['Current %'].apply(_display),
         'Max': rows['Max %'].apply(_display),
@@ -776,9 +776,11 @@ def _trigger_event_values(rows: pd.DataFrame, trigger_name: str) -> pd.Series:
     if rows.empty:
         return pd.Series('', index=rows.index)
     if trigger_name == 'VWAP Reclaim':
-        if 'VWAP Trigger' not in rows:
-            return pd.Series('', index=rows.index)
-        return _normalized_result(rows['VWAP Trigger'])
+        if 'VWAP Trigger' in rows:
+            return _normalized_result(rows['VWAP Trigger'])
+        if 'VWAP Reclaim' in rows:
+            return _normalized_result(rows['VWAP Reclaim'])
+        return pd.Series('', index=rows.index)
     if trigger_name == '1m ORH':
         return _normalized_result(_visible_orh_results(rows)[0])
     if trigger_name == '5m ORH':

@@ -1344,9 +1344,10 @@ def test_main_and_detail_table_columns_and_blank_handling():
     }])
 
     assert main_table(df).columns.tolist() == [
-        'Ticker', 'Current Status', 'Trigger Day', 'Trigger', 'PDH', '1m ORH', '5m ORH', 'VWAP Trigger', 'Notes',
+        'Ticker', 'Current Status', 'Trigger Day', 'Trigger', 'PDH', '1m ORH', 'VWAP Reclaim', '5m ORH', 'Notes',
         'Current %', 'Max %', 'D3 High %', 'Retest Day', 'Setup', 'Rating',
     ]
+    assert 'VWAP Trigger' not in main_table(df).columns
     assert detail_table(df).columns.tolist() == [
         'Ticker', 'Prior Day High', 'Setup Day Open', 'Open Over PDH', 'PDH Result',
         'PDH Fail Time', '1m Recovery Qualified', '1m Recovery Break Time',
@@ -1557,7 +1558,7 @@ def test_format_section_table_exposes_vwap_reclaim_result_and_detail():
     table = _format_section_table(raw)
 
     assert table.loc[0, 'Trigger'] == 'VWAP Reclaim'
-    assert table.loc[0, 'VWAP Trigger'] == 'success'
+    assert table.loc[0, 'VWAP Reclaim'] == 'success'
     assert table.loc[0, 'Raw VWAP Reclaim Result'] == 'success'
     assert table.loc[0, 'Raw VWAP Reclaim Trigger Price'] == '10.40'
     assert table.loc[0, 'Raw VWAP Reclaim Stop Valid'] == 'Yes'
@@ -1610,7 +1611,7 @@ def test_format_section_table_keeps_raw_vwap_success_out_of_main_when_not_qualif
 
     table = _format_section_table(raw)
 
-    assert table.loc[0, 'VWAP Trigger'] == '-'
+    assert table.loc[0, 'VWAP Reclaim'] == '-'
     assert table.loc[0, 'Raw VWAP Reclaim Result'] == 'success'
     assert table.loc[0, 'Qualified VWAP Trigger Reason'] == 'PDH trigger preserved'
 
@@ -1659,7 +1660,8 @@ def test_format_section_table_marks_5m_orh_superseded_when_vwap_is_tighter():
     assert table.loc[0, 'Trigger'] == 'VWAP Reclaim'
     assert table.loc[0, '5m ORH'] == 'superseded'
     assert table.loc[0, '5m OR Result'] == 'success'
-    assert table.loc[0, 'VWAP Trigger'] == 'success'
+    assert table.loc[0, 'VWAP Reclaim'] == 'success'
+    assert main_table(table).loc[0, '5m ORH'] == '-'
 
 
 def test_format_section_table_marks_1m_orh_superseded_when_vwap_is_tighter():
@@ -1706,7 +1708,8 @@ def test_format_section_table_marks_1m_orh_superseded_when_vwap_is_tighter():
     assert table.loc[0, 'Trigger'] == 'VWAP Reclaim'
     assert table.loc[0, '1m ORH'] == 'superseded'
     assert table.loc[0, '1m OR Result'] == 'success'
-    assert table.loc[0, 'VWAP Trigger'] == 'success'
+    assert table.loc[0, 'VWAP Reclaim'] == 'success'
+    assert main_table(table).loc[0, '1m ORH'] == '-'
 
 
 def test_format_section_table_keeps_orh_success_when_vwap_does_not_qualify():
@@ -1752,7 +1755,7 @@ def test_format_section_table_keeps_orh_success_when_vwap_does_not_qualify():
 
     assert table.loc[0, 'Trigger'] == '5m ORH'
     assert table.loc[0, '5m ORH'] == 'success'
-    assert table.loc[0, 'VWAP Trigger'] == '-'
+    assert table.loc[0, 'VWAP Reclaim'] == '-'
 
 
 def test_vwap_reclaim_fields_detect_stop_validity_from_existing_reference_low():
