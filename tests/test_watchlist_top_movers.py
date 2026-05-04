@@ -81,10 +81,23 @@ def test_page_groups_active_table_outside_setup_window_filters():
     page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
 
     active_heading = page.index("st.subheader('Top 10 Active Watchlist Movers')")
+    active_table = page.index("st.dataframe(all_active_result.active_table")
     filter_heading = page.index("st.subheader('Top Triggered Watchlist Movers')")
     filter_widget = page.index("st.selectbox(\n            'Setup Window'")
-    assert active_heading < filter_heading < filter_widget
+    assert active_heading < active_table < filter_heading < filter_widget
     assert 'Uses all available setup dates and is not affected by the setup-window filter below.' in page
+    assert "setup_window='All'" in page
+    assert 'top_n=20' in page
+
+
+def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
+    page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
+
+    assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-active-freshness-v2'" in page
+    assert "top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
+    assert 'load_watchlist_top_movers(db_path, top_movers_cache_token)' in page
+    assert "st.caption(f'Active rows: {len(all_active_result.active_table)}')" in page
+    assert 'Why empty:' in page
 
 
 def test_top_n_filtering_and_deterministic_rank_assignment():
@@ -208,6 +221,7 @@ def test_missing_optional_field_behavior_keeps_row_with_dashes():
     assert row['Retested'] == '-'
     assert row['Breakeven / D1 Eligible'] == '-'
     assert row['Notes'] == '-'
+    assert result.active_table['Ticker'].tolist() == ['MISS']
 
 
 def test_setup_date_formats_as_date_only_in_tables_and_audit():

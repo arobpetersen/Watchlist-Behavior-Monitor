@@ -16,7 +16,7 @@ from src.watchlist_top_movers import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-TOP_MOVERS_CACHE_VERSION = 'top-movers-weekend-filter-v1'
+TOP_MOVERS_CACHE_VERSION = 'top-movers-active-freshness-v2'
 
 
 @st.cache_data(show_spinner=False)
@@ -31,7 +31,8 @@ st.title('Watchlist Top Movers')
 st.caption('Top-performing ticker/setup instances from uploaded Back-Watch setup data.')
 render_data_health_indicator(load_data_health_summary(db_path, data_health_cache_token(db_path)))
 
-history, latest_date = load_watchlist_top_movers(db_path, TOP_MOVERS_CACHE_VERSION)
+top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'
+history, latest_date = load_watchlist_top_movers(db_path, top_movers_cache_token)
 
 if history.empty:
     st.info('No setup candidates yet. Process Back-Watch files to populate watchlist movers.')
@@ -46,6 +47,12 @@ else:
 
     st.subheader('Top 10 Active Watchlist Movers')
     st.caption('Uses all available setup dates and is not affected by the setup-window filter below.')
+    st.caption(f'Active rows: {len(all_active_result.active_table)}')
+    if all_active_result.active_table.empty and not all_active_result.audit.empty and 'Active Table Exclusion Reason' in all_active_result.audit:
+        reasons = all_active_result.audit['Active Table Exclusion Reason'].fillna('-').astype(str)
+        reasons = reasons[reasons.ne('-')].value_counts().head(3)
+        if not reasons.empty:
+            st.caption('Why empty: ' + '; '.join(f'{reason}: {count}' for reason, count in reasons.items()))
     st.dataframe(all_active_result.active_table, width='stretch', hide_index=True)
 
     st.subheader('Top Triggered Watchlist Movers')
