@@ -10,6 +10,7 @@ from src.data_quality import (
     partial_intraday_sessions_from_db,
 )
 from src.database import get_connection
+from src.setup_behavior_overview import setup_dates
 
 
 def test_duplicate_candidate_keys_detects_natural_key_duplicates():
@@ -161,6 +162,130 @@ def test_data_health_summary_ok_when_core_data_has_no_obvious_issues():
     assert summary.candidate_rows == 1
     assert summary.duplicate_candidate_key_count == 0
     assert summary.partial_intraday_session_count == 0
+    assert summary.reason == ''
+
+
+def test_data_health_latest_setup_matches_latest_candidate_date():
+    con = get_connection(':memory:')
+    _insert_full_market_data(con)
+    con.execute("""
+        insert into watchlist_candidates
+        values (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+    """)
+    con.execute("""
+        insert into daily_bars
+        values ('MSFT', '2026-05-04', 1, 1, 1, 1, 1, null, 'test', current_timestamp)
+    """)
+    rows = [
+        ('MSFT', '2026-05-04', f'2026-05-04 09:{minute:02d}:00', 1, 1, 1, 1, 1, 'test')
+        for minute in range(30, 60)
+    ] + [
+        ('MSFT', '2026-05-04', f'2026-05-04 10:{minute:02d}:00', 1, 1, 1, 1, 1, 'test')
+        for minute in range(0, 60)
+    ] + [
+        ('MSFT', '2026-05-04', f'2026-05-04 11:{minute:02d}:00', 1, 1, 1, 1, 1, 'test')
+        for minute in range(0, 60)
+    ] + [
+        ('MSFT', '2026-05-04', f'2026-05-04 12:{minute:02d}:00', 1, 1, 1, 1, 1, 'test')
+        for minute in range(0, 60)
+    ] + [
+        ('MSFT', '2026-05-04', f'2026-05-04 13:{minute:02d}:00', 1, 1, 1, 1, 1, 'test')
+        for minute in range(0, 60)
+    ] + [
+        ('MSFT', '2026-05-04', f'2026-05-04 14:{minute:02d}:00', 1, 1, 1, 1, 1, 'test')
+        for minute in range(0, 60)
+    ] + [
+        ('MSFT', '2026-05-04', f'2026-05-04 15:{minute:02d}:00', 1, 1, 1, 1, 1, 'test')
+        for minute in range(0, 60)
+    ]
+    con.executemany(
+        """
+        insert into intraday_bars_1m
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
+        """,
+        rows,
+    )
+
+    summary = build_data_health_summary(con)
+
+    assert summary.latest_setup_date == '2026-05-04'
+    assert summary.candidate_rows == 2
+
+
+def test_data_health_flags_setup_newer_than_daily_bars():
+    con = get_connection(':memory:')
+    _insert_full_market_data(con)
+    con.execute("""
+        insert into watchlist_candidates
+        values (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+    """)
+
+    summary = build_data_health_summary(con)
+
+    assert summary.status == 'Check Data'
+    assert summary.latest_setup_date == '2026-05-04'
+    assert summary.latest_daily_bar_date == '2026-05-01'
+    assert 'latest setup date newer than latest daily bars' in summary.reason
+
+
+def test_data_health_flags_setup_newer_than_intraday_bars():
+    con = get_connection(':memory:')
+    _insert_full_market_data(con)
+    con.execute("""
+        insert into watchlist_candidates
+        values (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+    """)
+    con.execute("""
+        insert into daily_bars
+        values ('MSFT', '2026-05-04', 1, 1, 1, 1, 1, null, 'test', current_timestamp)
+    """)
+
+    summary = build_data_health_summary(con)
+
+    assert summary.status == 'Check Data'
+    assert summary.latest_intraday_bar_date == '2026-05-01'
+    assert 'latest setup date newer than latest intraday bars' in summary.reason
+
+
+def test_data_health_candidate_rows_match_watchlist_candidates_count():
+    con = get_connection(':memory:')
+    _insert_full_market_data(con)
+    con.execute("""
+        insert into watchlist_candidates
+        values
+        (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp),
+        (3, '2026-05-04', 'NVDA', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+    """)
+
+    summary = build_data_health_summary(con)
+
+    assert summary.candidate_rows == con.execute('select count(*) from watchlist_candidates').fetchone()[0]
+
+
+def test_data_health_latest_setup_updates_after_new_candidate_insert():
+    con = get_connection(':memory:')
+    _insert_full_market_data(con)
+    assert build_data_health_summary(con).latest_setup_date == '2026-05-01'
+    con.execute("""
+        insert into watchlist_candidates
+        values (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+    """)
+
+    assert build_data_health_summary(con).latest_setup_date == '2026-05-04'
+
+
+def test_data_health_latest_setup_matches_setup_behavior_setup_dates_source():
+    con = get_connection(':memory:')
+    _insert_full_market_data(con)
+    con.execute("""
+        insert into watchlist_candidates
+        values (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+    """)
+
+    summary = build_data_health_summary(con)
+    overview_latest = max(setup_dates(con)).date().isoformat()
+
+    assert summary.latest_setup_date == overview_latest
 
 
 def test_data_health_summary_check_data_when_duplicate_candidate_keys_exist():
@@ -196,6 +321,7 @@ def test_data_health_summary_check_data_when_partial_intraday_sessions_exist():
 
     assert summary.status == 'Check Data'
     assert summary.partial_intraday_session_count == 1
+    assert 'partial intraday sessions detected' in summary.reason
 
 
 def test_data_health_summary_handles_missing_optional_market_tables_gracefully():
@@ -211,6 +337,8 @@ def test_data_health_summary_handles_missing_optional_market_tables_gracefully()
     assert summary.latest_setup_date == '2026-05-01'
     assert summary.latest_daily_bar_date == '-'
     assert summary.latest_intraday_bar_date == '-'
+    assert 'daily bars unavailable' in summary.reason
+    assert 'intraday bars unavailable' in summary.reason
 
 
 def test_data_health_summary_handles_missing_setup_candidates_gracefully():
@@ -232,3 +360,16 @@ def test_data_health_line_formats_dates_as_yyyy_mm_dd():
     assert 'Latest Setup: 2026-05-01' in line
     assert 'Daily Bars: 2026-05-01' in line
     assert 'Intraday: 2026-05-01' in line
+
+
+def test_data_health_line_includes_reason_when_check_data():
+    con = get_connection(':memory:')
+    _insert_full_market_data(con)
+    con.execute("""
+        insert into watchlist_candidates
+        values (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+    """)
+
+    line = data_health_line(build_data_health_summary(con))
+
+    assert 'Reason: latest setup date newer than latest daily bars' in line

@@ -35,6 +35,7 @@ class DataHealthSummary:
     candidate_rows: int
     duplicate_candidate_key_count: int
     partial_intraday_session_count: int
+    reason: str = ''
 
 
 def duplicate_candidate_keys(con) -> pd.DataFrame:
@@ -157,6 +158,14 @@ def _fmt_date(value: Any) -> str:
     return parsed.strftime('%Y-%m-%d')
 
 
+def _is_newer(left: Any, right: Any) -> bool:
+    left_date = pd.to_datetime(left, errors='coerce')
+    right_date = pd.to_datetime(right, errors='coerce')
+    if pd.isna(left_date) or pd.isna(right_date):
+        return False
+    return left_date.date() > right_date.date()
+
+
 def build_data_health_summary(con) -> DataHealthSummary:
     latest_setup = _scalar(con, 'select max(watchlist_date) from watchlist_candidates')
     latest_daily = _scalar(con, 'select max(trading_date) from daily_bars')
@@ -172,12 +181,30 @@ def build_data_health_summary(con) -> DataHealthSummary:
     except Exception:
         partial_count = 0
 
+    reasons = []
+    if candidate_rows == 0 or latest_setup is None:
+        reasons.append('no setup candidates')
+    if duplicate_count > 0:
+        reasons.append('duplicate candidate keys detected')
+    if partial_count > 0:
+        reasons.append('partial intraday sessions detected')
+    if candidate_rows > 0 and latest_daily is None:
+        reasons.append('daily bars unavailable')
+    elif _is_newer(latest_setup, latest_daily):
+        reasons.append('latest setup date newer than latest daily bars')
+    if candidate_rows > 0 and latest_intraday is None:
+        reasons.append('intraday bars unavailable')
+    elif _is_newer(latest_setup, latest_intraday):
+        reasons.append('latest setup date newer than latest intraday bars')
+
     check_data = (
         candidate_rows == 0
         or latest_setup is None
         or duplicate_count > 0
         or partial_count > 0
         or (candidate_rows > 0 and (latest_daily is None or latest_intraday is None))
+        or _is_newer(latest_setup, latest_daily)
+        or _is_newer(latest_setup, latest_intraday)
     )
     return DataHealthSummary(
         status='Check Data' if check_data else 'OK',
@@ -187,6 +214,7 @@ def build_data_health_summary(con) -> DataHealthSummary:
         candidate_rows=candidate_rows,
         duplicate_candidate_key_count=duplicate_count,
         partial_intraday_session_count=partial_count,
+        reason='; '.join(reasons),
     )
 
 
@@ -199,4 +227,5 @@ def data_health_line(summary: DataHealthSummary) -> str:
         f'Candidates: {summary.candidate_rows} | '
         f'Duplicates: {summary.duplicate_candidate_key_count} | '
         f'Partial Sessions: {summary.partial_intraday_session_count}'
+        + (f' | Reason: {summary.reason}' if summary.reason else '')
     )

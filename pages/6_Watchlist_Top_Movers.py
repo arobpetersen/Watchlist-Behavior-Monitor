@@ -1,7 +1,7 @@
 import streamlit as st
 
 from src.config import get_settings
-from src.data_health_indicator import load_data_health_summary, render_data_health_indicator
+from src.data_health_indicator import data_health_cache_token, load_data_health_summary, render_data_health_indicator
 from src.database import get_connection
 from src.watchlist_top_movers import (
     DEFAULT_SETUP_WINDOW,
@@ -29,7 +29,7 @@ db_path = str(get_settings().db_path)
 
 st.title('Watchlist Top Movers')
 st.caption('Top-performing ticker/setup instances from uploaded Back-Watch setup data.')
-render_data_health_indicator(load_data_health_summary(db_path))
+render_data_health_indicator(load_data_health_summary(db_path, data_health_cache_token(db_path)))
 
 history, latest_date = load_watchlist_top_movers(db_path, TOP_MOVERS_CACHE_VERSION)
 
