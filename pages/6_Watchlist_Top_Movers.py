@@ -31,6 +31,20 @@ history, latest_date = load_watchlist_top_movers(db_path)
 if history.empty:
     st.info('No setup candidates yet. Process Back-Watch files to populate watchlist movers.')
 else:
+    all_active_result = top_movers_from_history(
+        history,
+        latest_date=latest_date,
+        setup_window='All',
+        top_n=20,
+        sort_by='Max %',
+    )
+
+    st.subheader('Top 10 Active Watchlist Movers')
+    st.caption('Uses all available setup dates and is not affected by the setup-window filter below.')
+    st.dataframe(all_active_result.active_table, width='stretch', hide_index=True)
+
+    st.subheader('Top Triggered Watchlist Movers')
+    st.caption('Filters below apply only to this triggered movers table and its Details / Audit view.')
     filter_cols = st.columns([1.4, 0.8, 1.0])
     with filter_cols[0]:
         setup_window = st.selectbox(
@@ -62,10 +76,6 @@ else:
         sort_by=sort_by,
     )
 
-    st.subheader('Top 10 Active Watchlist Movers')
-    st.dataframe(result.active_table, width='stretch', hide_index=True)
-
-    st.subheader('Top Triggered Watchlist Movers')
     st.dataframe(result.table, width='stretch', hide_index=True)
 
     with st.expander('Details / Audit', expanded=False):

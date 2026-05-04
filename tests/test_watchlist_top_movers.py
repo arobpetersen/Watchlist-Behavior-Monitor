@@ -74,6 +74,16 @@ def test_default_setup_window_is_all():
     assert 'index=SETUP_WINDOW_OPTIONS.index(DEFAULT_SETUP_WINDOW)' in page
 
 
+def test_page_groups_active_table_outside_setup_window_filters():
+    page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
+
+    active_heading = page.index("st.subheader('Top 10 Active Watchlist Movers')")
+    filter_heading = page.index("st.subheader('Top Triggered Watchlist Movers')")
+    filter_widget = page.index("st.selectbox(\n            'Setup Window'")
+    assert active_heading < filter_heading < filter_widget
+    assert 'Uses all available setup dates and is not affected by the setup-window filter below.' in page
+
+
 def test_top_n_filtering_and_deterministic_rank_assignment():
     result = top_movers_from_history(_history(), latest_date='2026-04-30', top_n=3, sort_by='Max %')
 
