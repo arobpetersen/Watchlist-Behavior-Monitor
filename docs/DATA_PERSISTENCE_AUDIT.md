@@ -105,6 +105,21 @@ Important nuance:
 - The import ledger table `watchlist_files` is not unique by source file. Repeated scans can append additional ledger rows with the same `source_file`, often with `rows_inserted = 0`.
 - This does not duplicate candidate rows, but it means `watchlist_files` should be treated as an import-event ledger, not a unique source-file registry.
 
+### Candidate Idempotency Guard
+
+The natural candidate key is:
+
+```text
+(watchlist_date, ticker, source_file)
+```
+
+The current hardening remains helper/test based rather than a database unique constraint. That choice avoids a risky schema migration on an existing DuckDB file while preserving the current import path behavior. The normal ingestion path prevents duplicate candidates by checking that natural key before insert, and tests now cover both:
+
+- re-importing the same file does not duplicate candidates
+- importing a new setup date preserves prior setup dates
+
+The diagnostic helper `duplicate_candidate_keys(con)` reports any existing duplicate natural keys so future maintenance can surface silent quality issues without changing import behavior.
+
 ## Price/History Data Incrementality
 
 ### Intraday Bars
@@ -118,6 +133,18 @@ select count(*) from intraday_bars_1m where ticker=? and trading_date=?
 If any row exists, it skips fetching that ticker/date. This prevents duplicate inserts and avoids refetching complete intraday data during normal refresh.
 
 Risk/limitation: if a ticker/date has partial intraday rows, the current check treats it as complete and will not repair missing minutes automatically.
+
+### Partial Intraday Detection
+
+The helper `partial_intraday_sessions_from_db(con)` now identifies cached ticker/date sessions that look incomplete. It is diagnostic only and does not refetch or repair data.
+
+Current deterministic checks:
+
+- very low bar count, defaulting to fewer than 300 cached bars for the ticker/date
+- missing open-period bars from 09:30 through before 09:35
+- missing late-session bars from 15:55 through 16:00
+
+This helps identify cases where the normal fetch skip rule may have treated a partial session as complete. Provider fetching behavior has not been changed.
 
 ### Daily Bars
 
@@ -214,9 +241,11 @@ No `DROP TABLE`, `TRUNCATE`, or `CREATE OR REPLACE` operations were found in app
 2. Candidate idempotency is enforced in code, not by a DuckDB unique constraint.
    - Current import logic checks `(watchlist_date, ticker, source_file)` before insert.
    - A future import path that bypasses `ingest_watchlists` could create duplicates.
+   - `duplicate_candidate_keys(con)` can detect this condition after the fact.
 
 3. Intraday refresh treats any existing ticker/date rows as complete.
    - This avoids refetching, but it can leave partial data uncorrected unless rows are manually removed or a repair mode is added.
+   - `partial_intraday_sessions_from_db(con)` can flag suspicious cached sessions, but it does not repair them.
 
 4. Daily refresh prevents duplicate inserts, but provider calls are broader than strictly missing rows.
    - It fetches the full candidate date window and filters existing bars after the response.
@@ -225,6 +254,7 @@ No `DROP TABLE`, `TRUNCATE`, or `CREATE OR REPLACE` operations were found in app
 5. Reprocess All Source Files is intentionally destructive for candidates/features/labels.
    - It is manual and keeps bars.
    - Consider creating a backup automatically before this action if the workflow becomes frequent.
+   - Intended usage is correction/rebuild of the uploaded setup universe when source files are wrong, not a routine refresh step.
 
 ## Recommended Next Actions
 
@@ -233,8 +263,7 @@ No urgent persistence fix is required before continuing feature work.
 Small future hardening options:
 
 1. Treat `watchlist_files` explicitly as an import-event ledger in docs/UI, or add a unique source registry if needed later.
-2. Add database-level uniqueness checks or dedupe tests around `(watchlist_date, ticker, source_file)` for candidates and `(ticker, trading_date)` for daily bars.
-3. Add an optional intraday repair mode that detects partial ticker/date sessions before skipping fetches.
+2. Consider a future database-level uniqueness migration around `(watchlist_date, ticker, source_file)` only after validating existing data and DuckDB migration behavior.
+3. Add an optional intraday repair mode that uses partial-session detection before skipping fetches.
 4. Add automatic DB backup before `Reprocess All Source Files`.
 5. Scope daily API calls to missing date ranges if API usage becomes a concern.
-
