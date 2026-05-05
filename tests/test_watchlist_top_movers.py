@@ -5,6 +5,7 @@ import pandas as pd
 from src.watchlist_top_movers import (
     ACTIVE_VISIBLE_COLUMNS,
     DEFAULT_SETUP_WINDOW,
+    PORTFOLIO_VISIBLE_COLUMNS,
     VISIBLE_COLUMNS,
     filter_setup_window,
     top_movers_from_history,
@@ -81,11 +82,14 @@ def test_default_setup_window_is_all():
 def test_page_groups_active_table_outside_setup_window_filters():
     page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
 
+    portfolio_heading = page.index("st.subheader('Hypothetical Optimal Portfolio')")
+    portfolio_table = page.index("st.dataframe(all_active_result.portfolio_table")
     active_heading = page.index("st.subheader('Top 10 Active Watchlist Movers')")
     active_table = page.index("st.dataframe(all_active_result.active_table")
     filter_heading = page.index("st.subheader('Top Triggered Watchlist Movers')")
     filter_widget = page.index("st.selectbox(\n            'Setup Window'")
-    assert active_heading < active_table < filter_heading < filter_widget
+    assert portfolio_heading < portfolio_table < active_heading < active_table < filter_heading < filter_widget
+    assert 'No active 4–5 star names currently qualify.' in page
     assert 'Uses all available setup dates and is not affected by the setup-window filter below.' in page
     assert "setup_window='All'" in page
     assert 'top_n=20' in page
@@ -94,7 +98,7 @@ def test_page_groups_active_table_outside_setup_window_filters():
 def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
     page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
 
-    assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-close-below-be-status-v1'" in page
+    assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-hypothetical-portfolio-v2'" in page
     assert "top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_watchlist_top_movers(db_path, top_movers_cache_token)' in page
     assert "PerfTimer('Watchlist Top Movers')" in page
@@ -293,6 +297,56 @@ def test_active_table_filters_active_only_and_omits_current_status():
     assert 'Breakeven / D1 Eligible' not in result.active_table.columns
     assert 'Close < BE' in result.active_table.columns
     assert result.active_table['Ticker'].tolist() == ['T11', 'T09', 'T07', 'T05', 'T03', 'T01']
+
+
+def _portfolio_history() -> pd.DataFrame:
+    return pd.DataFrame([
+        {'Ticker': 'BEST', 'Setup Date': '2026-04-07', 'Trigger': '1m ORH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.30, 'max_pct_raw': 0.50, 'Close < BE': 'No', 'Retests': 'D1', 'Setup': 'Pullback'},
+        {'Ticker': 'TIE_NEW', 'Setup Date': '2026-04-08', 'Trigger': '5m ORH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.20, 'max_pct_raw': 0.40, 'Close < BE': 'No', 'Retests': '', 'Setup': 'EP'},
+        {'Ticker': 'TIE_OLD', 'Setup Date': '2026-04-06', 'Trigger': '5m ORH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.20, 'max_pct_raw': 0.40, 'Close < BE': 'No', 'Retests': '', 'Setup': 'Flag'},
+        {'Ticker': 'FOUR', 'Setup Date': '2026-04-09', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.40, 'max_pct_raw': 0.60, 'Close < BE': 'No', 'Retests': '', 'Setup': 'Flag'},
+        {'Ticker': 'FAILED', 'Setup Date': '2026-04-10', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.90, 'max_pct_raw': 1.00, 'Close < BE': 'No', 'Setup': 'Flag'},
+        {'Ticker': 'STALE', 'Setup Date': '2026-04-11', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-29', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.80, 'max_pct_raw': 0.90, 'Close < BE': 'No', 'Setup': 'Flag'},
+        {'Ticker': 'LOWRATE', 'Setup Date': '2026-04-12', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 3, 'current_pct_raw': 0.70, 'max_pct_raw': 0.80, 'Close < BE': 'No', 'Setup': 'Flag'},
+        {'Ticker': 'NORATE', 'Setup Date': '2026-04-13', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': '', 'current_pct_raw': 0.60, 'max_pct_raw': 0.70, 'Close < BE': 'No', 'Setup': 'Flag'},
+        {'Ticker': 'BELOWBE', 'Setup Date': '2026-04-14', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.55, 'max_pct_raw': 0.65, 'Close < BE': 'Yes', 'Setup': 'Flag'},
+        {'Ticker': 'NOCUR', 'Setup Date': '2026-04-15', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': None, 'max_pct_raw': 0.65, 'Close < BE': 'No', 'Setup': 'Flag'},
+        {'Ticker': 'NOMAX', 'Setup Date': '2026-04-16', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.55, 'max_pct_raw': None, 'Close < BE': 'No', 'Setup': 'Flag'},
+    ])
+
+
+def test_hypothetical_portfolio_filters_and_ranks_candidates():
+    result = top_movers_from_history(_portfolio_history(), latest_date='2026-04-30', setup_window='All')
+
+    assert result.portfolio_table.columns.tolist() == PORTFOLIO_VISIBLE_COLUMNS
+    assert result.portfolio_table['Ticker'].tolist() == ['BEST', 'TIE_NEW', 'TIE_OLD', 'FOUR']
+    assert result.portfolio_table['Rank'].tolist() == [1, 2, 3, 4]
+    assert result.portfolio_table.loc[0, 'Setup'] == 'Pullback'
+    assert result.portfolio_table.loc[0, 'Retests'] == 'D1'
+    assert result.table['Ticker'].tolist() != result.portfolio_table['Ticker'].tolist()
+    assert set(result.audit['Portfolio Eligible'].unique()) == {'Yes', 'No'}
+    stale_reason = result.audit.set_index('Ticker').loc['STALE', 'Portfolio Exclusion Reason']
+    assert 'latest status date older than ticker latest bar date' in stale_reason
+
+
+def test_hypothetical_portfolio_limits_to_8_rows():
+    rows = pd.DataFrame([
+        {'Ticker': f'P{i:02d}', 'Setup Date': f'2026-04-{i:02d}', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': i / 100, 'max_pct_raw': (i + 1) / 100, 'Close < BE': 'No', 'Setup': ''}
+        for i in range(1, 12)
+    ])
+
+    result = top_movers_from_history(rows, latest_date='2026-04-30')
+
+    assert len(result.portfolio_table) == 8
+    assert result.portfolio_table['Rank'].tolist() == list(range(1, 9))
+    assert result.portfolio_table['Ticker'].tolist() == ['P11', 'P10', 'P09', 'P08', 'P07', 'P06', 'P05', 'P04']
+
+
+def test_hypothetical_portfolio_empty_when_no_rows_qualify():
+    result = top_movers_from_history(_history(), latest_date='2026-04-30')
+
+    assert result.portfolio_table.empty
+    assert result.portfolio_table.columns.tolist() == PORTFOLIO_VISIBLE_COLUMNS
 
 
 def test_active_table_excludes_close_below_be_later_failed_rows():

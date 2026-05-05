@@ -17,7 +17,7 @@ from src.watchlist_top_movers import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-TOP_MOVERS_CACHE_VERSION = 'top-movers-close-below-be-status-v1'
+TOP_MOVERS_CACHE_VERSION = 'top-movers-hypothetical-portfolio-v2'
 
 
 @st.cache_data(show_spinner=False)
@@ -50,6 +50,13 @@ else:
             top_n=20,
             sort_by='Max %',
         )
+
+    st.subheader('Hypothetical Optimal Portfolio')
+    st.caption('Descriptive view of currently active 4-5 star names from all available setup dates.')
+    if all_active_result.portfolio_table.empty:
+        st.info('No active 4–5 star names currently qualify.')
+    else:
+        st.dataframe(all_active_result.portfolio_table, width='stretch', hide_index=True)
 
     st.subheader('Top 10 Active Watchlist Movers')
     st.caption('Uses all available setup dates and is not affected by the setup-window filter below.')

@@ -18,6 +18,7 @@ SETUP_OPTIONS = [
     'High Tight Pivot',
     'High Tight Flag',
     'High Tight Compression',
+    'Pullback',
     'Stage 2 Continuation Breakout',
     
 ]

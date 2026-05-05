@@ -37,6 +37,18 @@ ACTIVE_VISIBLE_COLUMNS = [
     'Retests',
     'Notes',
 ]
+PORTFOLIO_VISIBLE_COLUMNS = [
+    'Rank',
+    'Ticker',
+    'Setup Date',
+    'Trigger',
+    'Rating',
+    'Current %',
+    'Max %',
+    'Close < BE',
+    'Retests',
+    'Setup',
+]
 AUDIT_COLUMNS = [
     'Rank',
     'Ticker',
@@ -50,6 +62,8 @@ AUDIT_COLUMNS = [
     'Global Latest Bar Date',
     'Status Current',
     'Active Table Exclusion Reason',
+    'Portfolio Eligible',
+    'Portfolio Exclusion Reason',
     'Retest Count',
     'Retest Days Raw',
     'Retest Dates Raw',
@@ -64,6 +78,7 @@ AUDIT_COLUMNS = [
 
 @dataclass(frozen=True)
 class TopMoverResult:
+    portfolio_table: pd.DataFrame
     active_table: pd.DataFrame
     table: pd.DataFrame
     audit: pd.DataFrame
@@ -217,6 +232,50 @@ def _active_exclusion_reasons(rows: pd.DataFrame) -> pd.Series:
     return pd.Series(reasons, index=rows.index)
 
 
+def _rating_numeric(rows: pd.DataFrame) -> pd.Series:
+    return pd.to_numeric(_first_existing(rows, ['Rating', 'rating']), errors='coerce')
+
+
+def _portfolio_exclusion_reasons(rows: pd.DataFrame) -> pd.Series:
+    reasons = []
+    for _, row in rows.iterrows():
+        row_reasons = []
+        status = _display(row.get('Current Status'))
+        rating = row.get('_rating_sort')
+        if status != 'Active':
+            row_reasons.append(f'not active: {status}')
+        if not bool(row.get('_status_current')):
+            active_reason = _display(row.get('Active Table Exclusion Reason'))
+            row_reasons.append('not fresh' if active_reason == '-' else active_reason)
+        if pd.isna(rating):
+            row_reasons.append('missing rating')
+        elif float(rating) < 4:
+            row_reasons.append('rating below 4')
+        if _display(row.get('Close < BE')) == 'Yes':
+            row_reasons.append('close below breakeven')
+        if pd.isna(row.get('_current_sort')):
+            row_reasons.append('missing Current %')
+        if pd.isna(row.get('_max_sort')):
+            row_reasons.append('missing Max %')
+        reasons.append('; '.join(dict.fromkeys(row_reasons)) if row_reasons else '-')
+    return pd.Series(reasons, index=rows.index)
+
+
+def hypothetical_optimal_portfolio(rows: pd.DataFrame, limit: int = 8) -> pd.DataFrame:
+    if rows.empty:
+        return pd.DataFrame(columns=PORTFOLIO_VISIBLE_COLUMNS)
+    out = rows[rows.get('Portfolio Eligible', pd.Series('', index=rows.index)).eq('Yes')].copy()
+    if out.empty:
+        return pd.DataFrame(columns=PORTFOLIO_VISIBLE_COLUMNS)
+    out = out.sort_values(
+        ['_rating_sort', '_current_sort', '_max_sort', 'Setup Date', 'Ticker'],
+        ascending=[False, False, False, False, True],
+        na_position='last',
+    ).head(int(limit)).copy()
+    out.insert(0, 'Rank', range(1, len(out) + 1))
+    return out[PORTFOLIO_VISIBLE_COLUMNS].reset_index(drop=True)
+
+
 def top_movers_from_history(
     history: pd.DataFrame,
     latest_date: pd.Timestamp | str | None = None,
@@ -226,17 +285,20 @@ def top_movers_from_history(
 ) -> TopMoverResult:
     if history.empty:
         return TopMoverResult(
+            pd.DataFrame(columns=PORTFOLIO_VISIBLE_COLUMNS),
             pd.DataFrame(columns=ACTIVE_VISIBLE_COLUMNS),
             pd.DataFrame(columns=VISIBLE_COLUMNS),
             pd.DataFrame(columns=AUDIT_COLUMNS),
         )
 
     all_rows = _mapped_top_mover_rows(history, latest_date)
+    portfolio_table = hypothetical_optimal_portfolio(all_rows)
     active_table = _active_top_movers_table(all_rows)
 
     rows = filter_setup_window(history, setup_window).copy()
     if rows.empty:
         return TopMoverResult(
+            portfolio_table.reset_index(drop=True),
             active_table.reset_index(drop=True),
             pd.DataFrame(columns=VISIBLE_COLUMNS),
             pd.DataFrame(columns=AUDIT_COLUMNS),
@@ -258,7 +320,7 @@ def top_movers_from_history(
 
     table = rows[VISIBLE_COLUMNS].copy()
     audit = _audit_table(rows)
-    return TopMoverResult(active_table.reset_index(drop=True), table.reset_index(drop=True), audit.reset_index(drop=True))
+    return TopMoverResult(portfolio_table.reset_index(drop=True), active_table.reset_index(drop=True), table.reset_index(drop=True), audit.reset_index(drop=True))
 
 
 def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str | None) -> pd.DataFrame:
@@ -293,6 +355,7 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
     rows['_status_matches_ticker_latest'] = _date_equal(latest_status_dates, ticker_latest_dates)
     rows['_ticker_current_to_global'] = _date_equal(ticker_latest_dates, global_latest_dates)
     rows['_status_current'] = rows['_status_matches_ticker_latest'] & rows['_ticker_current_to_global']
+    rows['_rating_sort'] = _rating_numeric(rows)
 
     rows['Ticker'] = _first_existing(rows, ['Ticker', 'ticker']).apply(_display)
     rows['Trigger'] = _first_existing(rows, ['Trigger', 'trigger_type']).apply(_display)
@@ -305,7 +368,12 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
     rows['Retests'] = _first_existing(rows, ['Retests', 'Retested', 'Retest', 'Retest Day', 'retest_day']).apply(_display)
     rows['Breakeven / D1 Eligible'] = _breakeven_or_d1(rows).apply(_display)
     rows['Notes'] = _first_existing(rows, ['Notes', 'notes']).apply(_display)
+    rows['Setup'] = _first_existing(rows, ['Setup', 'setup']).apply(_display)
+    rows['Rating'] = _first_existing(rows, ['Rating', 'rating']).apply(_display)
     rows['Setup Date'] = rows['_setup_date_display']
+    rows['Active Table Exclusion Reason'] = _active_exclusion_reasons(rows)
+    rows['Portfolio Exclusion Reason'] = _portfolio_exclusion_reasons(rows)
+    rows['Portfolio Eligible'] = rows['Portfolio Exclusion Reason'].eq('-').map(lambda value: 'Yes' if value else 'No')
     return rows
 
 
@@ -330,7 +398,9 @@ def _audit_table(rows: pd.DataFrame) -> pd.DataFrame:
     rows['Ticker Latest Bar Date'] = _date_display(rows['_ticker_latest_bar_date'])
     rows['Global Latest Bar Date'] = _date_display(rows['_global_latest_bar_date'])
     rows['Status Current'] = rows['_status_current'].apply(lambda v: 'Yes' if bool(v) else 'No')
-    rows['Active Table Exclusion Reason'] = _active_exclusion_reasons(rows)
+    rows['Active Table Exclusion Reason'] = _first_existing(rows, ['Active Table Exclusion Reason']).apply(_display)
+    rows['Portfolio Eligible'] = _first_existing(rows, ['Portfolio Eligible']).apply(_display)
+    rows['Portfolio Exclusion Reason'] = _first_existing(rows, ['Portfolio Exclusion Reason']).apply(_display)
     rows['Retest Count'] = _first_existing(rows, ['Retest Count', 'retest_count']).apply(_display)
     rows['Retest Days Raw'] = _first_existing(rows, ['Retest Days Raw', 'retest_days_raw']).apply(_display)
     rows['Retest Dates Raw'] = _first_existing(rows, ['Retest Dates Raw', 'retest_dates_raw']).apply(_display)

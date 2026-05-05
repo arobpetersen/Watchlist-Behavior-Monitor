@@ -1833,7 +1833,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'D3 High %': '-',
         'Retests': '',
         'Fail Day': '',
-        'Setup': '',
+        'Setup': 'Pullback',
         'Rating': '',
         'Trigger Level': '10.50',
         'Reference Low': '9.80',
@@ -1886,6 +1886,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
         '5m ORH Broke After Range', '1m Follow-Through / ATR14',
     ]
     assert main_table(df).loc[0, 'Rating'] == ''
+    assert main_table(df).loc[0, 'Setup'] == 'Pullback'
 
 
 def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
@@ -2622,6 +2623,7 @@ def test_sort_monitor_rows_current_status_then_current_pct():
 def test_setup_dropdown_preserves_unknown_existing_value():
     df = pd.DataFrame({'Setup': ['Custom Pattern', 'EP'], 'Rating': ['7', '1']})
 
+    assert 'Pullback' in setup_dropdown_options(df)
     assert 'Custom Pattern' in setup_dropdown_options(df)
     assert '7' in rating_dropdown_options(df)
 
@@ -2631,10 +2633,10 @@ def test_apply_setup_rating_updates_only_manual_fields():
     con.execute('create table watchlist_candidates (candidate_id bigint, setup text, rating double, ticker text)')
     con.execute("insert into watchlist_candidates values (1, 'EP', 2, 'AAPL')")
     original = pd.DataFrame([{'candidate_id': 1, 'Setup': 'EP', 'Rating': '2', 'Status': 'Active'}])
-    edited = pd.DataFrame([{'candidate_id': 1, 'Setup': 'Breakout', 'Rating': '3', 'Status': 'Failed'}])
+    edited = pd.DataFrame([{'candidate_id': 1, 'Setup': 'Pullback', 'Rating': '3', 'Status': 'Failed'}])
 
     changed = apply_setup_rating_updates(con, original, edited)
     row = con.execute('select setup,rating,ticker from watchlist_candidates where candidate_id=1').fetchone()
 
     assert changed == 1
-    assert row == ('Breakout', 3.0, 'AAPL')
+    assert row == ('Pullback', 3.0, 'AAPL')

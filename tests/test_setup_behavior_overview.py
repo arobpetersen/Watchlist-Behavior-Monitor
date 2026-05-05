@@ -297,6 +297,12 @@ def test_detail_rows_match_expected_columns_and_window_filter():
     assert detail.loc[1, 'Rating'] == '-'
 
 
+def test_detail_rows_display_pullback_setup_label():
+    detail = detail_rows(_history(), _window('Last 20 Setup Dates', ['2026-04-10', '2026-04-28', '2026-05-02', '2026-05-08']))
+
+    assert detail[detail['Ticker'].eq('CCC')].iloc[0]['Setup'] == 'Pullback'
+
+
 def test_detail_rows_sort_by_date_status_priority_and_current():
     window = overview_windows(['2026-05-02', '2026-05-08'])[0]
     detail = detail_rows(_history(), window)
