@@ -1872,6 +1872,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'Raw VWAP Reclaim Trigger Time', 'Raw VWAP Reclaim Trigger Price',
         'Raw VWAP Reclaim Stop Valid', 'Raw VWAP Reclaim Result Reason',
         'Qualified VWAP Trigger Result', 'Qualified VWAP Trigger Reason',
+        'VWAP Success Later Failed',
         'ORH Display Suppression', '1m ORH Trigger Price', '5m ORH Trigger Price',
         'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
         '1m Low Swept Before Trigger', '1m ORH Reference Low', '1m ORH Reference Basis',
@@ -2142,6 +2143,100 @@ def test_format_section_table_keeps_raw_vwap_success_out_of_main_when_not_qualif
     assert table.loc[0, 'VWAP Reclaim'] == '-'
     assert table.loc[0, 'Raw VWAP Reclaim Result'] == 'success'
     assert table.loc[0, 'Qualified VWAP Trigger Reason'] == 'PDH trigger preserved'
+
+
+def test_format_section_table_preserves_raw_vwap_failure_without_qualified_failure():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'AAPL',
+        'status': 'Active',
+        'trigger_type': '1m ORH',
+        'raw_one_min_result': 'success',
+        'raw_five_min_result': '-',
+        'one_min_result': 'success',
+        'five_min_result': '-',
+        'vwap_reclaim_result': 'failed',
+        'vwap_reclaim_result_reason': 'reclaim-bar high not taken out',
+        'vwap_qualified_trigger_result': '',
+        'vwap_qualified_trigger_reason': 'raw VWAP Reclaim is failed',
+        'notes': '',
+        'current_pct': 0.01,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.5,
+        'reference_low': 9.8,
+        'reference_basis': '1m ORH',
+        'trigger_break_time': pd.Timestamp('2026-05-01 09:31'),
+        'latest_close': 10.6,
+        'close_price': 10.0,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.06,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'VWAP Reclaim'] == '-'
+    assert table.loc[0, 'Raw VWAP Reclaim Result'] == 'failed'
+    assert table.loc[0, 'Raw VWAP Reclaim Result Reason'] == 'reclaim-bar high not taken out'
+    assert table.loc[0, 'Qualified VWAP Trigger Result'] == '-'
+    assert table.loc[0, 'Qualified VWAP Trigger Reason'] == 'raw VWAP Reclaim is failed'
+
+
+def test_format_section_table_flags_vwap_success_later_failed_in_detail_only():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'AAPL',
+        'status': 'Failed',
+        'trigger_type': 'VWAP Reclaim',
+        'raw_one_min_result': 'failed',
+        'raw_five_min_result': 'failed',
+        'one_min_result': 'failed',
+        'five_min_result': 'failed',
+        'vwap_reclaim_result': 'success',
+        'vwap_qualified_trigger_result': 'success',
+        'vwap_qualified_trigger_reason': 'VWAP selected over fallback trigger',
+        'notes': '',
+        'current_pct': -0.01,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': 1,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.4,
+        'reference_low': 9.8,
+        'reference_basis': 'VWAP Reclaim',
+        'trigger_break_time': pd.Timestamp('2026-05-01 10:10'),
+        'latest_close': 10.3,
+        'close_price': 10.0,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.03,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'VWAP Reclaim'] == 'success'
+    assert table.loc[0, 'Current Status'] == 'Failed D1'
+    assert table.loc[0, 'VWAP Success Later Failed'] == 'Yes'
+    assert 'VWAP Success Later Failed' not in main_table(table).columns
 
 
 def test_format_section_table_marks_5m_orh_superseded_when_vwap_is_tighter():

@@ -79,6 +79,7 @@ DETAIL_COLUMNS = [
     'Raw VWAP Reclaim Result Reason',
     'Qualified VWAP Trigger Result',
     'Qualified VWAP Trigger Reason',
+    'VWAP Success Later Failed',
     'ORH Display Suppression',
     '1m ORH Trigger Price',
     '5m ORH Trigger Price',
@@ -1478,6 +1479,13 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
     ]
     display_one_min_result = pd.Series([one for one, _ in adjusted_orh], index=raw.index)
     display_five_min_result = pd.Series([five for _, five in adjusted_orh], index=raw.index)
+    vwap_success_later_failed = pd.Series(
+        [
+            bool(trigger == 'VWAP Reclaim' and qualified == 'success' and str(status).startswith('Failed'))
+            for trigger, qualified, status in zip(raw['trigger_type'], qualified_vwap_result, current_statuses)
+        ],
+        index=raw.index,
+    )
 
     display = pd.DataFrame({
         'candidate_id': raw['candidate_id'],
@@ -1537,6 +1545,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Raw VWAP Reclaim Result Reason': raw.get('vwap_reclaim_result_reason', blank_series).apply(_blank),
         'Qualified VWAP Trigger Result': raw.get('vwap_qualified_trigger_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
         'Qualified VWAP Trigger Reason': raw.get('vwap_qualified_trigger_reason', blank_series).apply(_blank),
+        'VWAP Success Later Failed': vwap_success_later_failed.apply(lambda v: 'Yes' if v else ''),
         'ORH Display Suppression': orh_suppression_reason,
         '1m ORH Trigger Price': raw.get('or_1m', blank_series).apply(lambda v: _fmt_price(_loads(v).get('orh'))),
         '5m ORH Trigger Price': raw.get('or_5m', blank_series).apply(lambda v: _fmt_price(_loads(v).get('orh'))),

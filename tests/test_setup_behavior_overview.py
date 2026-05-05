@@ -479,6 +479,74 @@ def test_snapshot_cards_include_qualified_vwap_success_mix_and_failure_rates():
     assert 'PDH</span><strong>-</strong>' in html
 
 
+def test_trigger_outcomes_vwap_uses_qualified_result_not_raw_result():
+    rows = pd.DataFrame([
+        {
+            'Ticker': 'RAWFAIL',
+            'Current Status': 'Active',
+            'Trigger': '1m ORH',
+            'Trigger Day': 'Success',
+            'VWAP Reclaim': '-',
+            'Raw VWAP Reclaim Result': 'failed',
+            'Qualified VWAP Trigger Result': '',
+            'current_pct_raw': 0.01,
+            'max_pct_raw': 0.03,
+        },
+        {
+            'Ticker': 'QUALFAIL',
+            'Current Status': 'Active',
+            'Trigger': 'VWAP Reclaim',
+            'Trigger Day': 'Fail',
+            'VWAP Reclaim': 'failed',
+            'Raw VWAP Reclaim Result': 'success',
+            'Qualified VWAP Trigger Result': 'failed',
+            'current_pct_raw': -0.01,
+            'max_pct_raw': 0.02,
+        },
+        {
+            'Ticker': 'QUALSUCCESS',
+            'Current Status': 'Failed D1',
+            'Trigger': 'VWAP Reclaim',
+            'Trigger Day': 'Success',
+            'VWAP Reclaim': 'success',
+            'Raw VWAP Reclaim Result': 'success',
+            'Qualified VWAP Trigger Result': 'success',
+            'current_pct_raw': 0.01,
+            'max_pct_raw': 0.05,
+        },
+    ])
+
+    comparison = trigger_outcome_comparison({'Last 5 Setup Dates': rows})
+    vwap = comparison[(comparison['Trigger'] == 'VWAP Reclaim') & (comparison['Window'] == 'Last 5 Setup Dates')].iloc[0]
+
+    assert vwap['Triggered'] == 2
+    assert vwap['Success'] == 1
+    assert vwap['Failed'] == 1
+    assert vwap['Later Failed Count'] == 1
+    assert vwap['Active Count'] == 0
+
+
+def test_vwap_success_later_failed_is_success_not_trigger_failure():
+    rows = pd.DataFrame([{
+        'Ticker': 'VWAP',
+        'Current Status': 'Failed D1',
+        'Trigger': 'VWAP Reclaim',
+        'Trigger Day': 'Success',
+        'VWAP Reclaim': 'success',
+        'Qualified VWAP Trigger Result': 'success',
+        'current_pct_raw': -0.02,
+        'max_pct_raw': 0.06,
+    }])
+
+    comparison = trigger_outcome_comparison({'Last 5 Setup Dates': rows})
+    vwap = comparison[(comparison['Trigger'] == 'VWAP Reclaim') & (comparison['Window'] == 'Last 5 Setup Dates')].iloc[0]
+
+    assert vwap['Triggered'] == 1
+    assert vwap['Success'] == 1
+    assert vwap['Failed'] == 0
+    assert vwap['Later Failed Count'] == 1
+
+
 def test_mix_tables_include_objective_selected_window_mixes():
     summary = summarize_window(_history(), _window('Last 10 Setup Dates', ['2026-04-28', '2026-05-02', '2026-05-08']))
     mixes = mix_tables(summary)
