@@ -797,6 +797,56 @@ def test_trigger_outcome_includes_qualified_vwap_trigger_rows():
     assert vwap_last_10['Median Max'] == '8.0%'
 
 
+def test_trigger_outcome_counts_qualified_vwap_when_legacy_vwap_trigger_is_blank():
+    rows = pd.DataFrame([{
+        'Ticker': 'VWAP',
+        'Current Status': 'Failed D0',
+        'Trigger': 'VWAP Reclaim',
+        'Trigger Day': 'Success',
+        '1m ORH': 'failed',
+        '5m ORH': 'failed',
+        'VWAP Trigger': '',
+        'Qualified VWAP Trigger Result': 'success',
+        'VWAP Reclaim': 'success',
+        'Raw VWAP Reclaim Result': 'success',
+        'PDH': '-',
+        'current_pct_raw': -0.04,
+        'max_pct_raw': 0.06,
+    }])
+
+    comparison = trigger_outcome_comparison({'Last 5 Setup Dates': rows})
+    vwap = comparison[(comparison['Trigger'] == 'VWAP Reclaim') & (comparison['Window'] == 'Last 5 Setup Dates')].iloc[0]
+
+    assert vwap['Eligible'] == 1
+    assert vwap['Triggered'] == 1
+    assert vwap['Success'] == 1
+    assert vwap['Later Failed Count'] == 1
+
+
+def test_trigger_outcome_does_not_count_raw_vwap_when_not_qualified():
+    rows = pd.DataFrame([{
+        'Ticker': 'RAW',
+        'Current Status': 'Active',
+        'Trigger': 'PDH',
+        'Trigger Day': 'Success',
+        '1m ORH': '-',
+        '5m ORH': '-',
+        'VWAP Trigger': '',
+        'VWAP Reclaim': '',
+        'Raw VWAP Reclaim Result': 'success',
+        'PDH': 'success',
+        'current_pct_raw': 0.02,
+        'max_pct_raw': 0.05,
+    }])
+
+    comparison = trigger_outcome_comparison({'Last 5 Setup Dates': rows})
+    vwap = comparison[(comparison['Trigger'] == 'VWAP Reclaim') & (comparison['Window'] == 'Last 5 Setup Dates')].iloc[0]
+
+    assert vwap['Eligible'] == 1
+    assert vwap['Triggered'] == 0
+    assert vwap['Success'] == 0
+
+
 def test_trigger_outcome_pdh_gap_is_ineligible_for_trigger_rate():
     comparison = trigger_outcome_comparison(_trigger_comparison_history())
 
@@ -1274,6 +1324,27 @@ def test_opening_behavior_main_table_includes_vwap_reclaim_success_row():
     assert main.loc['VWAP Reclaim', 'Currently Active'] == '0 (0%)'
     assert main.loc['VWAP Reclaim', 'Later Failed'] == '1 (100%)'
     assert main.loc['VWAP Reclaim', 'Median Max'] == '12.0%'
+
+
+def test_opening_behavior_main_counts_qualified_vwap_when_legacy_vwap_trigger_is_blank():
+    history = pd.DataFrame([{
+        'Ticker': 'VWAP',
+        'Current Status': 'Failed D0',
+        'Trigger Day': 'Success',
+        'Trigger': 'VWAP Reclaim',
+        'PDH': '-',
+        '1m ORH': 'failed',
+        '5m ORH': 'failed',
+        'VWAP Trigger': '',
+        'Qualified VWAP Trigger Result': 'success',
+        'VWAP Reclaim': 'success',
+        'max_pct_raw': 0.06,
+    }])
+
+    main = main_opening_behavior_table(history).set_index('Trigger')
+
+    assert main.loc['VWAP Reclaim', 'Count'] == 1
+    assert main.loc['VWAP Reclaim', 'Later Failed'] == '1 (100%)'
 
 
 def test_setup_behavior_page_uses_successful_triggers_section_title():

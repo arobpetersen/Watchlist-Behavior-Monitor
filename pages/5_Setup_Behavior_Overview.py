@@ -17,7 +17,7 @@ from src.setup_behavior_overview import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-OVERVIEW_CACHE_VERSION = 'setup-overview-close-below-be-status-v1'
+OVERVIEW_CACHE_VERSION = 'setup-overview-qualified-vwap-events-v1'
 
 
 @st.cache_data(show_spinner=False)
