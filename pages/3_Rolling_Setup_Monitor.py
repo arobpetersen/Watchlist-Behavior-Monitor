@@ -1,8 +1,10 @@
 import streamlit as st
 
 from src.config import get_settings
+from src.data_health_indicator import data_health_cache_token
 from src.database import get_connection
 from src.or_trigger_audit import audit_for_candidate, setup_dates, tickers_for_setup_date
+from src.performance import PerfTimer, render_perf_debug
 from src.rolling_setup_monitor import (
     apply_setup_rating_updates,
     detail_table,
@@ -16,7 +18,19 @@ from src.rolling_setup_monitor import (
 
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
-con = get_connection(str(get_settings().db_path))
+ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-performance-cache-v1'
+
+
+@st.cache_data(show_spinner=False)
+def load_rolling_setup_sections(db_path: str, cache_version: str):
+    con = get_connection(db_path)
+    return rolling_setup_monitor(con, setup_dates=5)
+
+
+perf = PerfTimer('Rolling Setup Monitor')
+db_path = str(get_settings().db_path)
+with perf.measure('DB connection/open'):
+    con = get_connection(db_path)
 st.title('Rolling Setup Monitor')
 
 with st.expander('Definitions / Logic', expanded=False):
@@ -59,7 +73,9 @@ with st.expander('Audit OR Trigger', expanded=False):
             st.subheader('Strict OR Break Rows')
             st.dataframe(audit['break_bars'], width='stretch', height='auto', hide_index=True)
 
-sections = rolling_setup_monitor(con, setup_dates=5)
+rolling_cache_token = f'{ROLLING_MONITOR_CACHE_VERSION}:{data_health_cache_token(db_path)}'
+with perf.measure('Rolling Setup Monitor data build'):
+    sections = load_rolling_setup_sections(db_path, rolling_cache_token)
 if not sections:
     st.info('No setup candidates yet.')
 else:
@@ -69,8 +85,10 @@ else:
         st.markdown(format_summary_blocks_html(section['summary']), unsafe_allow_html=True)
 
         table = section['table']
-        display = main_table(table)
-        st.markdown(format_monitor_table_html(display), unsafe_allow_html=True)
+        with perf.measure(f"{section['setup_date']} display preparation"):
+            display = main_table(table)
+            display_html = format_monitor_table_html(display)
+        st.markdown(display_html, unsafe_allow_html=True)
 
         with st.expander('Edit Setup / Rating', expanded=False):
             editable = display[['Ticker', 'Setup', 'Rating']].copy()
@@ -106,4 +124,8 @@ else:
                     st.info('No Setup/Rating changes to save.')
 
         with st.expander('Show full detail table', expanded=False):
-            st.dataframe(detail_table(table), width='stretch', hide_index=True)
+            with perf.measure(f"{section['setup_date']} detail table preparation"):
+                detail = detail_table(table)
+            st.dataframe(detail, width='stretch', hide_index=True)
+
+render_perf_debug(st, perf)

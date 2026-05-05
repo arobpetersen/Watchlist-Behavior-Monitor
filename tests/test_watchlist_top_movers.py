@@ -97,6 +97,8 @@ def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
     assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-close-below-be-status-v1'" in page
     assert "top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_watchlist_top_movers(db_path, top_movers_cache_token)' in page
+    assert "PerfTimer('Watchlist Top Movers')" in page
+    assert 'render_perf_debug(st, perf)' in page
     assert "st.caption(f'Active rows: {len(all_active_result.active_table)}')" in page
     assert 'Why empty:' in page
 

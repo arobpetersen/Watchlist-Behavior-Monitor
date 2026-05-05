@@ -3,6 +3,7 @@ import streamlit as st
 from src.config import get_settings
 from src.data_health_indicator import data_health_cache_token, load_data_health_summary, render_data_health_indicator
 from src.database import get_connection
+from src.performance import PerfTimer, render_perf_debug
 from src.watchlist_top_movers import (
     DEFAULT_SETUP_WINDOW,
     SETUP_WINDOW_OPTIONS,
@@ -26,24 +27,29 @@ def load_watchlist_top_movers(db_path: str, cache_version: str):
 
 
 db_path = str(get_settings().db_path)
+perf = PerfTimer('Watchlist Top Movers')
 
 st.title('Watchlist Top Movers')
 st.caption('Top-performing ticker/setup instances from uploaded Back-Watch setup data.')
-render_data_health_indicator(load_data_health_summary(db_path, data_health_cache_token(db_path)))
+with perf.measure('Data Health load'):
+    health_summary = load_data_health_summary(db_path, data_health_cache_token(db_path))
+render_data_health_indicator(health_summary)
 
 top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'
-history, latest_date = load_watchlist_top_movers(db_path, top_movers_cache_token)
+with perf.measure('Watchlist Top Movers data build'):
+    history, latest_date = load_watchlist_top_movers(db_path, top_movers_cache_token)
 
 if history.empty:
     st.info('No setup candidates yet. Process Back-Watch files to populate watchlist movers.')
 else:
-    all_active_result = top_movers_from_history(
-        history,
-        latest_date=latest_date,
-        setup_window='All',
-        top_n=20,
-        sort_by='Max %',
-    )
+    with perf.measure('active table preparation'):
+        all_active_result = top_movers_from_history(
+            history,
+            latest_date=latest_date,
+            setup_window='All',
+            top_n=20,
+            sort_by='Max %',
+        )
 
     st.subheader('Top 10 Active Watchlist Movers')
     st.caption('Uses all available setup dates and is not affected by the setup-window filter below.')
@@ -80,15 +86,18 @@ else:
             key='top_movers_sort_by',
         )
 
-    result = top_movers_from_history(
-        history,
-        latest_date=latest_date,
-        setup_window=setup_window,
-        top_n=top_n,
-        sort_by=sort_by,
-    )
+    with perf.measure('triggered movers display preparation'):
+        result = top_movers_from_history(
+            history,
+            latest_date=latest_date,
+            setup_window=setup_window,
+            top_n=top_n,
+            sort_by=sort_by,
+        )
 
     st.dataframe(result.table, width='stretch', hide_index=True)
 
     with st.expander('Details / Audit', expanded=False):
         st.dataframe(result.audit, width='stretch', hide_index=True)
+
+render_perf_debug(st, perf)

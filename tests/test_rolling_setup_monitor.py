@@ -1818,6 +1818,16 @@ def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
     assert 'overflow-y: auto' not in html
 
 
+def test_rolling_setup_monitor_page_uses_db_backed_cache_token_and_perf_debug():
+    page = open('pages/3_Rolling_Setup_Monitor.py', encoding='utf-8').read()
+
+    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-performance-cache-v1'" in page
+    assert "rolling_cache_token = f'{ROLLING_MONITOR_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
+    assert 'load_rolling_setup_sections(db_path, rolling_cache_token)' in page
+    assert "PerfTimer('Rolling Setup Monitor')" in page
+    assert 'render_perf_debug(st, perf)' in page
+
+
 def test_format_summary_blocks_html_includes_group_titles():
     summary = {
         'Setups': 3,

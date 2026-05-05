@@ -3,6 +3,7 @@ import streamlit as st
 from src.config import get_settings
 from src.data_health_indicator import data_health_cache_token, load_data_health_summary, render_data_health_indicator
 from src.database import get_connection
+from src.performance import PerfTimer, render_perf_debug
 from src.setup_behavior_overview import (
     OPENING_BEHAVIOR_MAIN_COLUMNS,
     OPENING_PATH_FILTER_OPTIONS,
@@ -17,7 +18,7 @@ from src.setup_behavior_overview import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-OVERVIEW_CACHE_VERSION = 'setup-overview-snapshot-cards-v2'
+OVERVIEW_CACHE_VERSION = 'setup-overview-performance-cache-v1'
 
 
 @st.cache_data(show_spinner=False)
@@ -46,11 +47,15 @@ def ensure_overview_display_tables(overview: dict) -> dict:
 
 
 db_path = str(get_settings().db_path)
+perf = PerfTimer('Setup Behavior Overview')
 
 st.title('Setup Behavior Overview')
 st.caption('Rolling summary of Back-Watch setup behavior across recent setup-date windows.')
 st.caption('D3 High only includes setups with completed D3 data.')
-render_data_health_indicator(load_data_health_summary(db_path, data_health_cache_token(db_path)))
+overview_cache_token = f'{OVERVIEW_CACHE_VERSION}:{data_health_cache_token(db_path)}'
+with perf.measure('Data Health load'):
+    health_summary = load_data_health_summary(db_path, data_health_cache_token(db_path))
+render_data_health_indicator(health_summary)
 
 with st.expander('Definitions / Logic', expanded=False):
     st.markdown(
@@ -68,7 +73,8 @@ with st.expander('Definitions / Logic', expanded=False):
         """
     )
 
-overview = ensure_overview_display_tables(load_setup_behavior_overview(db_path, OVERVIEW_CACHE_VERSION))
+with perf.measure('Setup Behavior Overview data build'):
+    overview = ensure_overview_display_tables(load_setup_behavior_overview(db_path, overview_cache_token))
 
 if overview['summary'].empty:
     st.info('No setup candidates yet. Process Back-Watch files to populate setup behavior history.')
@@ -82,7 +88,9 @@ else:
     selected_window = st.selectbox('Selected Window', labels, key='setup_behavior_selected_window')
 
     st.subheader('Selected Window Snapshot')
-    st.markdown(overview['snapshot_cards'][selected_window], unsafe_allow_html=True)
+    with perf.measure('snapshot display preparation'):
+        snapshot_html = overview['snapshot_cards'][selected_window]
+    st.markdown(snapshot_html, unsafe_allow_html=True)
     st.write(overview['reads'][selected_window])
 
     st.subheader('Selected Window Successful Triggers')
@@ -126,6 +134,8 @@ else:
         st.caption(
             'This groups setups by their final/primary trigger label. For per-trigger success/failure, use Trigger Event Outcomes Across Windows.'
         )
+
+render_perf_debug(st, perf)
 
 
     st.subheader('Selected Window Ticker Detail')
