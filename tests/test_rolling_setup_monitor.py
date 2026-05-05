@@ -20,6 +20,7 @@ from src.rolling_setup_monitor import (
     main_table,
     opening_range_result,
     opening_range_width_notes,
+    orh_trigger_assessment,
     apply_one_min_quality_notes,
     one_min_follow_through_atr,
     pdh_trigger_assessment,
@@ -928,7 +929,7 @@ def test_missing_pdh_falls_back_to_orh_stack():
     assert out['pdh_governed'] is False
 
 
-def test_1m_orl_break_before_orh_late_orh_is_failed():
+def test_1m_orl_break_before_orh_late_orh_can_succeed():
     intraday = _flush_then_trigger_intraday(after_low=9.6)
     out = derive_trigger_reference(
         _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:32', orl_break_time='2026-05-01 09:31'),
@@ -938,19 +939,25 @@ def test_1m_orl_break_before_orh_late_orh_is_failed():
         intraday,
     )
     failure = fail_day(intraday, _daily(lows=[10.1, 10.0, 10.2, 10.3]), out['trigger_break_time'], out['reference_low'])
+    assessment = orh_trigger_assessment(
+        _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:32', orl_break_time='2026-05-01 09:31'),
+        1,
+        intraday,
+    )
 
-    assert out['trigger_type'] == 'Failed OR Trigger'
-    assert out['failed_framework'] == '1m ORH'
+    assert out['trigger_type'] == '1m ORH'
     assert out['reference_low'] == 9.5
-    assert out['reference_basis'] == 'Failed LOD at 1m Trigger'
+    assert out['reference_basis'] == 'LOD at 1m Trigger'
+    assert assessment['low_swept_before_trigger'] is True
+    assert assessment['post_trigger_stop_breached'] is False
     assert opening_range_result(
         _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=10.5, orl=9.8, orh_break_time='2026-05-01 09:32', orl_break_time='2026-05-01 09:31'),
         1,
         out['trigger_type'],
         intraday,
-    ) == 'failed'
+    ) == 'success'
     assert failure is None
-    assert status_for(out['trigger_type'], out['framework_fail_day']) == 'Failed'
+    assert status_for(out['trigger_type'], failure) == 'Active'
 
 
 def test_1m_flush_then_orh_trigger_fails_when_trigger_time_low_breaks_afterward():
@@ -1015,10 +1022,17 @@ def test_5m_flush_then_orh_trigger_uses_trigger_time_low_and_stays_active():
         intraday,
     )
     failure = fail_day(intraday, _daily(lows=[10.1, 10.0, 10.2, 10.3]), out['trigger_break_time'], out['reference_low'])
+    assessment = orh_trigger_assessment(
+        _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=11.0, orl=9.6, orh_break_time='2026-05-01 09:35', orl_break_time='2026-05-01 09:32'),
+        5,
+        intraday,
+    )
 
     assert out['trigger_type'] == '5m ORH'
     assert out['reference_low'] == 9.4
     assert out['reference_basis'] == 'LOD at 5m Trigger'
+    assert assessment['low_swept_before_trigger'] is True
+    assert assessment['post_trigger_stop_breached'] is False
     assert opening_range_result(
         _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=11.0, orl=9.6, orh_break_time='2026-05-01 09:35', orl_break_time='2026-05-01 09:32'),
         5,
@@ -1183,7 +1197,7 @@ def test_crml_style_failed_1m_5m_then_15m_break_selects_alt_required():
     assert out['reference_low'] == 12.06
 
 
-def test_lar_style_5m_success_can_fail_d1():
+def test_lar_style_5m_post_trigger_d1_failure_can_use_alt_required():
     intraday = pd.DataFrame({
         'ticker': ['LAR'] * 6,
         'trading_date': pd.to_datetime(['2026-04-27'] * 6),
@@ -1247,12 +1261,12 @@ def test_lar_style_5m_success_can_fail_d1():
         'close_location': 0.90,
     }]))
 
-    assert out['trigger_type'] == '5m ORH'
-    assert out['reference_low'] == 9.34
+    assert out['trigger_type'] == 'Alt Required'
+    assert out['reference_low'] == 9.41
     assert failure == 1
     assert table.loc[0, 'Trigger Day'] == 'Success'
     assert table.loc[0, 'Current Status'] == 'Failed D1'
-    assert table.loc[0, '5m ORH'] == 'success'
+    assert table.loc[0, '5m ORH'] == 'failed'
 
 
 def test_alt_required_failed_if_15m_reference_low_breaks_after_trigger():
@@ -1344,7 +1358,7 @@ def test_failed_or_trigger_uses_daily_fail_from_primary_framework():
     assert out['framework_fail_day'] == 1
 
 
-def test_twlo_style_1m_fails_but_5m_trigger_succeeds_after_pretrigger_flush():
+def test_docn_style_pretrigger_flush_resolves_as_1m_orh_success():
     intraday = pd.DataFrame({
         'ticker': ['TWLO'] * 7,
         'trading_date': pd.to_datetime(['2026-05-01'] * 7),
@@ -1369,14 +1383,14 @@ def test_twlo_style_1m_fails_but_5m_trigger_succeeds_after_pretrigger_flush():
         intraday,
     )
 
-    assert out['trigger_type'] == '5m ORH'
+    assert out['trigger_type'] == '1m ORH'
     assert out['reference_low'] == 171.01
     assert opening_range_result(
         _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=179.47, orl=177.28, orh_break_time='2026-05-01 13:03', orl_break_time='2026-05-01 09:31'),
         1,
         out['trigger_type'],
         intraday,
-    ) == 'failed'
+    ) == 'success'
     assert opening_range_result(
         _or(broke_orh=True, broke_orl=True, orh_then_orl=False, orl_then_orh=True, orh=179.47, orl=173.33, orh_break_time='2026-05-01 13:03', orl_break_time='2026-05-01 09:35'),
         5,

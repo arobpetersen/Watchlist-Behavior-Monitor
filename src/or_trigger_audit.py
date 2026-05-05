@@ -12,6 +12,7 @@ from src.rolling_setup_monitor import (
     fail_day,
     one_min_follow_through_atr,
     opening_range_result,
+    orh_trigger_assessment,
     pdh_trigger_assessment,
     retest_day,
     status_for,
@@ -28,6 +29,10 @@ AUDIT_COLUMNS = [
     '1m OR End',
     '1m ORH Break Time',
     '1m ORL Break After ORH Time',
+    '1m Low Swept Before Trigger',
+    '1m ORH Reference Low',
+    '1m ORH Reference Basis',
+    '1m Post-Trigger Stop Breach',
     '1m ORH Attempted',
     'Displayed 1m ORH',
     'Raw 1m ORH Result',
@@ -54,6 +59,10 @@ AUDIT_COLUMNS = [
     '5m OR End',
     '5m ORH Break Time',
     '5m ORL Break After ORH Time',
+    '5m Low Swept Before Trigger',
+    '5m ORH Reference Low',
+    '5m ORH Reference Basis',
+    '5m Post-Trigger Stop Breach',
     '5m ORH Attempted',
     'Displayed 5m ORH',
     'Raw 5m ORH Result',
@@ -269,6 +278,8 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
     prior_high = _prior_day_high(daily_all, setup_day)
     daily = daily_all[pd.to_datetime(daily_all['trading_date']).dt.date >= setup_day].copy() if not daily_all.empty else daily_all
     pdh = pdh_trigger_assessment(prior_high, record.get('open_price'), intraday, daily)
+    one_assessment = orh_trigger_assessment(record.get('or_1m'), 1, intraday, daily)
+    five_assessment = orh_trigger_assessment(record.get('or_5m'), 5, intraday, daily)
     trigger = derive_trigger_reference(
         record.get('or_1m'),
         record.get('or_5m'),
@@ -301,6 +312,10 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
         '1m OR End': _fmt_ts(_session_timestamp(setup_day, 9, 31)),
         '1m ORH Break Time': _fmt_ts(one.get('orh_break_time')),
         '1m ORL Break After ORH Time': _orl_after_orh_time(one),
+        '1m Low Swept Before Trigger': 'Yes' if one_assessment.get('low_swept_before_trigger') else '',
+        '1m ORH Reference Low': _fmt_price(one_assessment.get('reference_low')),
+        '1m ORH Reference Basis': one_assessment.get('reference_basis') or '',
+        '1m Post-Trigger Stop Breach': 'Yes' if one_assessment.get('post_trigger_stop_breached') else '',
         '1m ORH Attempted': 'Yes' if one.get('broke_orh') else '',
         'Displayed 1m ORH': displayed_one,
         'Raw 1m ORH Result': raw_one_result,
@@ -327,6 +342,10 @@ def audit_for_candidate(con, setup_date, ticker: str) -> dict:
         '5m OR End': _fmt_ts(_session_timestamp(setup_day, 9, 35)),
         '5m ORH Break Time': _fmt_ts(five.get('orh_break_time')),
         '5m ORL Break After ORH Time': _orl_after_orh_time(five),
+        '5m Low Swept Before Trigger': 'Yes' if five_assessment.get('low_swept_before_trigger') else '',
+        '5m ORH Reference Low': _fmt_price(five_assessment.get('reference_low')),
+        '5m ORH Reference Basis': five_assessment.get('reference_basis') or '',
+        '5m Post-Trigger Stop Breach': 'Yes' if five_assessment.get('post_trigger_stop_breached') else '',
         '5m ORH Attempted': 'Yes' if five.get('broke_orh') else '',
         'Displayed 5m ORH': displayed_five,
         'Raw 5m ORH Result': raw_five_result,
