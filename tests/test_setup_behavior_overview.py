@@ -373,15 +373,36 @@ def test_selected_window_snapshot_contains_key_metrics():
 
 def test_snapshot_cards_html_prioritizes_key_metrics():
     summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
-    html = snapshot_cards_html(summary)
+    rows = _history()[pd.to_datetime(_history()['Setup Date']).dt.date.isin({pd.Timestamp('2026-04-28').date(), pd.Timestamp('2026-05-02').date(), pd.Timestamp('2026-05-08').date()})]
+    outcomes = trigger_outcome_comparison({'Last 10 Setup Dates': rows})
+    html = snapshot_cards_html(summary, rows, outcomes)
 
-    assert 'Scope' in html
-    assert 'Trigger Day' in html
-    assert 'Current Outcome' in html
-    assert 'Follow-Through' in html
-    assert '75%' in html
-    assert '1.5%' in html
-    assert '7.0%' in html
+    assert 'Current Status' in html
+    assert 'Triggered' in html
+    assert 'Successful Trigger Mix' in html
+    assert 'Failure Rate by Trigger' in html
+    assert '25% (1 / 4)' in html
+    assert '50% (2 / 4)' in html
+    assert '4 / 4' in html
+    assert '100% of setups' in html
+
+
+def test_snapshot_cards_include_qualified_vwap_success_mix_and_failure_rates():
+    rows = pd.DataFrame([
+        {'Ticker': 'VWAP', 'Setup Date': '2026-05-01', 'Current Status': 'Active', 'Trigger': 'VWAP Reclaim', 'Trigger Day': 'Success', '1m ORH': 'failed', '5m ORH': 'failed', 'VWAP Trigger': '', 'Qualified VWAP Trigger Result': 'success', 'VWAP Reclaim': 'success', 'Raw VWAP Reclaim Result': 'success', 'PDH': '-', 'current_pct_raw': 0.02, 'max_pct_raw': 0.08},
+        {'Ticker': 'ONE', 'Setup Date': '2026-05-01', 'Current Status': 'Failed D1', 'Trigger': 'Failed OR Trigger', 'Trigger Day': 'Success', '1m ORH': 'failed', '5m ORH': '', 'VWAP Trigger': '', 'Raw VWAP Reclaim Result': 'success', 'PDH': '-', 'current_pct_raw': -0.01, 'max_pct_raw': 0.03},
+        {'Ticker': 'MISS', 'Setup Date': '2026-05-01', 'Current Status': '—', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved', '1m ORH': '', '5m ORH': '', 'VWAP Trigger': '', 'PDH': '-', 'current_pct_raw': None, 'max_pct_raw': None},
+    ])
+    summary = summarize_window(rows.assign(**{'Setup Date': '2026-05-01', 'Current %': '', 'Max %': '', 'D3 High %': '-', 'Notes': '', 'Setup': '', 'Rating': ''}), overview_windows(['2026-05-01'])[0])
+    outcomes = trigger_outcome_comparison({'Last 5 Setup Dates': rows})
+
+    html = snapshot_cards_html(summary, rows, outcomes)
+
+    assert 'VWAP' in html
+    assert '100%' in html
+    assert '1m' in html
+    assert '100%' in html
+    assert 'PDH</span><strong>-</strong>' in html
 
 
 def test_mix_tables_include_objective_selected_window_mixes():

@@ -551,6 +551,10 @@ def _fmt_rate(count: int, denominator: int) -> str:
     return f'{round((count / denominator) * 100)}%'
 
 
+def _count_and_pct(count: int, denominator: int) -> tuple[str, str]:
+    return f'{count} / {denominator}', _fmt_rate(count, denominator)
+
+
 def _opening_path_row(path: str, rows: pd.DataFrame, total_setups: int) -> dict:
     count = len(rows)
     return {
@@ -704,14 +708,97 @@ def selected_window_snapshot(window_summary: dict) -> str:
     )
 
 
-def snapshot_cards_html(window_summary: dict) -> str:
-    setups = escape(str(window_summary.get('Setups', 0)))
-    setup_dates_count = escape(str(window_summary.get('Setup Dates', 0)))
-    day_success_pct = escape(_pct_from_count_text(window_summary.get('Day Success', '-')))
-    active_pct = escape(_pct_from_count_text(window_summary.get('Active', '-')))
-    later_failed_pct = escape(_pct_from_count_text(window_summary.get('Later Failed', '-')))
-    median_current = escape(str(window_summary.get('Median Current', '-')))
-    median_max = escape(str(window_summary.get('Median Max', '-')))
+def _triggered_setup_count(rows: pd.DataFrame) -> int:
+    if rows.empty:
+        return 0
+    triggered = pd.Series(False, index=rows.index)
+    for trigger_name in MAIN_OPENING_TRIGGERS:
+        values = _trigger_event_values(rows, trigger_name)
+        triggered |= values.isin({'success', 'failed'})
+    return int(triggered.sum())
+
+
+def _successful_trigger_mix(rows: pd.DataFrame) -> list[tuple[str, str]]:
+    if rows.empty or 'Trigger' not in rows:
+        return []
+    trigger_day = rows['Trigger Day'] if 'Trigger Day' in rows else pd.Series('', index=rows.index)
+    successful = rows[rows['Trigger'].isin(MAIN_OPENING_TRIGGERS) & trigger_day.eq('Success')]
+    total = len(successful)
+    if total <= 0:
+        return []
+    labels = {
+        '1m ORH': '1m',
+        '5m ORH': '5m',
+        'VWAP Reclaim': 'VWAP',
+        'PDH': 'PDH',
+        'Alt Required': 'Alt',
+    }
+    out = []
+    for trigger_name in MAIN_OPENING_TRIGGERS:
+        count = int(successful['Trigger'].eq(trigger_name).sum())
+        if count:
+            out.append((labels[trigger_name], _fmt_rate(count, total)))
+    return out
+
+
+def _failure_rate_rows(window_trigger_outcomes: pd.DataFrame | None) -> list[tuple[str, str]]:
+    labels = {
+        '1m ORH': '1m',
+        '5m ORH': '5m',
+        'VWAP Reclaim': 'VWAP',
+        'PDH': 'PDH',
+        'Alt Required': 'Alt',
+    }
+    if window_trigger_outcomes is None or window_trigger_outcomes.empty:
+        return [(labels[name], '-') for name in MAIN_OPENING_TRIGGERS]
+    indexed = window_trigger_outcomes.set_index('Trigger')
+    out = []
+    for trigger_name in MAIN_OPENING_TRIGGERS:
+        if trigger_name not in indexed.index:
+            out.append((labels[trigger_name], '-'))
+            continue
+        row = indexed.loc[trigger_name]
+        triggered = _count_int(row.get('Triggered'))
+        failed = _count_int(row.get('Failed'))
+        out.append((labels[trigger_name], _fmt_rate(failed, triggered)))
+    return out
+
+
+def _snapshot_lines(items: list[tuple[str, str]]) -> str:
+    if not items:
+        return '<div class="snapshot-line"><span>-</span><strong>-</strong></div>'
+    return ''.join(
+        f'<div class="snapshot-line"><span>{escape(label)}</span><strong>{escape(value)}</strong></div>'
+        for label, value in items
+    )
+
+
+def snapshot_cards_html(
+    window_summary: dict,
+    rows: pd.DataFrame | None = None,
+    trigger_outcomes: pd.DataFrame | None = None,
+) -> str:
+    total = int(window_summary.get('Setups', 0) or 0)
+    if rows is not None and not rows.empty:
+        total = len(rows)
+        current_status = rows['Current Status'] if 'Current Status' in rows else pd.Series('', index=rows.index)
+        active_count = int(current_status.eq('Active').sum())
+        failed_count = int(_is_later_failed(current_status).sum())
+        unresolved_count = max(total - active_count - failed_count, 0)
+        triggered_count = _triggered_setup_count(rows)
+        success_mix = _successful_trigger_mix(rows)
+    else:
+        active_count = _count_int(window_summary.get('Active', 0))
+        failed_count = _count_int(window_summary.get('Later Failed', 0))
+        unresolved_count = _count_int(window_summary.get('Unresolved', 0))
+        triggered_count = _count_int(window_summary.get('Day Success', 0)) + _count_int(window_summary.get('Day Fail', 0))
+        success_mix = []
+
+    active_count_text, active_pct = _count_and_pct(active_count, total)
+    failed_count_text, failed_pct = _count_and_pct(failed_count, total)
+    unresolved_count_text, unresolved_pct = _count_and_pct(unresolved_count, total)
+    triggered_count_text, triggered_pct = _count_and_pct(triggered_count, total)
+    failure_rates = _failure_rate_rows(trigger_outcomes)
     return f'''
 <style>
 .snapshot-grid {{
@@ -742,12 +829,29 @@ def snapshot_cards_html(window_summary: dict) -> str:
   font-size: 0.86rem;
   margin-top: 0.28rem;
 }}
+.snapshot-line {{
+  display: flex;
+  justify-content: space-between;
+  gap: 0.85rem;
+  color: rgba(250, 250, 250, 0.72);
+  font-size: 0.88rem;
+  padding: 0.08rem 0;
+}}
+.snapshot-line strong {{
+  color: rgba(250, 250, 250, 0.96);
+  font-weight: 750;
+  white-space: nowrap;
+}}
 </style>
 <div class="snapshot-grid">
-  <section class="snapshot-card"><div class="snapshot-label">Scope</div><div class="snapshot-value">{setups}</div><div class="snapshot-sub">{setup_dates_count} setup dates</div></section>
-  <section class="snapshot-card"><div class="snapshot-label">Trigger Day</div><div class="snapshot-value">{day_success_pct}</div><div class="snapshot-sub">Day Success</div></section>
-  <section class="snapshot-card"><div class="snapshot-label">Current Outcome</div><div class="snapshot-value">{active_pct}</div><div class="snapshot-sub">{later_failed_pct} later failed</div></section>
-  <section class="snapshot-card"><div class="snapshot-label">Follow-Through</div><div class="snapshot-value">{median_max}</div><div class="snapshot-sub">Median Max; current {median_current}</div></section>
+  <section class="snapshot-card"><div class="snapshot-label">Current Status</div>{_snapshot_lines([
+      ('Active', f'{active_pct} ({active_count_text})'),
+      ('Failed', f'{failed_pct} ({failed_count_text})'),
+      ('Unresolved', f'{unresolved_pct} ({unresolved_count_text})'),
+  ])}</section>
+  <section class="snapshot-card"><div class="snapshot-label">Triggered</div><div class="snapshot-value">{escape(triggered_count_text)}</div><div class="snapshot-sub">{escape(triggered_pct)} of setups</div></section>
+  <section class="snapshot-card"><div class="snapshot-label">Successful Trigger Mix</div>{_snapshot_lines(success_mix)}</section>
+  <section class="snapshot-card"><div class="snapshot-label">Failure Rate by Trigger</div>{_snapshot_lines(failure_rates)}</section>
 </div>
 '''
 
@@ -1098,7 +1202,14 @@ def setup_behavior_overview(con) -> dict:
         'breakdowns': {label: selected_window_metrics(row) for label, row in summary_by_window.items()},
         'reads': {label: factual_read(row, opening_behavior[label]) for label, row in summary_by_window.items()},
         'snapshots': {label: selected_window_snapshot(row) for label, row in summary_by_window.items()},
-        'snapshot_cards': {label: snapshot_cards_html(row) for label, row in summary_by_window.items()},
+        'snapshot_cards': {
+            label: snapshot_cards_html(
+                row,
+                history_by_window[label],
+                trigger_outcomes[trigger_outcomes['Window'].eq(label)] if not trigger_outcomes.empty else pd.DataFrame(),
+            )
+            for label, row in summary_by_window.items()
+        },
         'mixes': {label: mix_tables(row) for label, row in summary_by_window.items()},
         'opening_behavior': opening_behavior,
         'opening_behavior_main': {label: main_opening_behavior_table(history_by_window[label]) for label in summary_by_window},
