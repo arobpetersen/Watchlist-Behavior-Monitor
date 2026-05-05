@@ -11,6 +11,8 @@ from src.setup_behavior_overview import (
     main_opening_behavior_table,
     metric_cards_html,
     setup_behavior_overview,
+    style_trigger_event_table,
+    trigger_event_shift_highlights,
     trigger_event_main_tables,
 )
 
@@ -18,7 +20,7 @@ from src.setup_behavior_overview import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-OVERVIEW_CACHE_VERSION = 'setup-overview-previous-window-v1'
+OVERVIEW_CACHE_VERSION = 'setup-overview-trigger-shifts-v1'
 
 
 @st.cache_data(show_spinner=False)
@@ -41,6 +43,10 @@ def ensure_overview_display_tables(overview: dict) -> dict:
             }
     if 'trigger_event_main_by_window' not in overview:
         overview['trigger_event_main_by_window'] = trigger_event_main_tables(
+            overview.get('trigger_outcome_comparison')
+        )
+    if 'trigger_event_shift_highlights' not in overview:
+        overview['trigger_event_shift_highlights'] = trigger_event_shift_highlights(
             overview.get('trigger_outcome_comparison')
         )
     return overview
@@ -101,13 +107,15 @@ else:
     )
 
     st.subheader('Trigger Event Outcomes Across Windows')
+    shift_highlights = overview.get('trigger_event_shift_highlights', {})
     for window_label, table in overview['trigger_event_main_by_window'].items():
         st.markdown(f'**{window_label}**')
-        st.dataframe(table, width='stretch', hide_index=True)
+        st.dataframe(style_trigger_event_table(table, window_label, shift_highlights), width='stretch', hide_index=True)
     st.caption(
         'Triggered % uses eligible setups. Failed % and Success % use triggered setups. Currently Active, Later Failed, '
         'and Median Max use successful trigger setups only.'
     )
+    st.caption('Highlighted cells mark notable Last 5 vs Previous 5 shifts.')
 
     st.subheader('Supporting Stats / Primary Trigger Outcome')
     with st.expander('Supporting Selected-Window Stats', expanded=False):

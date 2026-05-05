@@ -30,7 +30,9 @@ from src.setup_behavior_overview import (
     selected_window_snapshot,
     snapshot_cards_html,
     setup_behavior_overview,
+    trigger_event_highlight_styles,
     summarize_window,
+    trigger_event_shift_highlights,
     trigger_outcome_by_window_tables,
     trigger_outcome_comparison,
     trigger_event_main_tables,
@@ -741,6 +743,7 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
     ])
     return {
         'Last 5 Setup Dates': base.iloc[:2].copy(),
+        'Previous 5 Setup Dates': base.iloc[[2]].copy(),
         'Last 10 Setup Dates': base.copy(),
         'Last 20 Setup Dates': base.iloc[[3]].copy(),
     }
@@ -752,18 +755,23 @@ def test_trigger_outcome_comparison_rows_and_denominators():
     assert comparison.columns.tolist() == TRIGGER_COMPARISON_COLUMNS
     assert comparison[['Trigger', 'Window']].values.tolist() == [
         ['1m ORH', 'Last 5 Setup Dates'],
+        ['1m ORH', 'Previous 5 Setup Dates'],
         ['1m ORH', 'Last 10 Setup Dates'],
         ['1m ORH', 'Last 20 Setup Dates'],
         ['5m ORH', 'Last 5 Setup Dates'],
+        ['5m ORH', 'Previous 5 Setup Dates'],
         ['5m ORH', 'Last 10 Setup Dates'],
         ['5m ORH', 'Last 20 Setup Dates'],
         ['VWAP Reclaim', 'Last 5 Setup Dates'],
+        ['VWAP Reclaim', 'Previous 5 Setup Dates'],
         ['VWAP Reclaim', 'Last 10 Setup Dates'],
         ['VWAP Reclaim', 'Last 20 Setup Dates'],
         ['PDH', 'Last 5 Setup Dates'],
+        ['PDH', 'Previous 5 Setup Dates'],
         ['PDH', 'Last 10 Setup Dates'],
         ['PDH', 'Last 20 Setup Dates'],
         ['Alt Required', 'Last 5 Setup Dates'],
+        ['Alt Required', 'Previous 5 Setup Dates'],
         ['Alt Required', 'Last 10 Setup Dates'],
         ['Alt Required', 'Last 20 Setup Dates'],
     ]
@@ -784,7 +792,7 @@ def test_trigger_outcome_by_window_tables_drop_window_column_and_group_triggers(
     comparison = trigger_outcome_comparison(_trigger_comparison_history())
     by_window = trigger_outcome_by_window_tables(comparison)
 
-    assert list(by_window) == ['Last 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
+    assert list(by_window) == ['Last 5 Setup Dates', 'Previous 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
     last_10 = by_window['Last 10 Setup Dates']
     assert last_10.columns.tolist() == TRIGGER_COMPARISON_BY_WINDOW_COLUMNS
     assert 'Window' not in last_10.columns
@@ -804,6 +812,7 @@ def test_trigger_event_main_tables_use_compact_count_percent_columns():
     main = trigger_event_main_tables(comparison)
     last_10 = main['Last 10 Setup Dates']
 
+    assert list(main) == ['Last 5 Setup Dates', 'Previous 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
     assert last_10.columns.tolist() == TRIGGER_EVENT_MAIN_COLUMNS
     assert last_10['Trigger'].tolist() == ['1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH', 'Alt Required']
     assert last_10.loc[0, 'Eligible'] == 4
@@ -819,24 +828,148 @@ def test_trigger_event_main_tables_use_compact_count_percent_columns():
     assert 'Later Failed %' not in last_10.columns
 
 
+def _shift_row(
+    window: str,
+    trigger: str,
+    *,
+    fail_pct: str = '0%',
+    success_pct: str = '0%',
+    active_pct: str = '0%',
+    median_max: str = '0.0%',
+) -> dict:
+    return {
+        'Trigger': trigger,
+        'Window': window,
+        'Setups': 1,
+        'Eligible': 1,
+        'Ineligible': 0,
+        'Triggered': 1,
+        'Trigger Rate': '100%',
+        'Failed': 0,
+        'Fail %': fail_pct,
+        'Success': 1,
+        'Success %': success_pct,
+        'Later Failed Count': 0,
+        'Later Failed %': '0%',
+        'Active Count': 1,
+        'Active %': active_pct,
+        'Median Current': '0.0%',
+        'Median Max': median_max,
+    }
+
+
+def _shift_comparison(
+    trigger: str,
+    *,
+    last_fail: str = '0%',
+    previous_fail: str = '0%',
+    last_success: str = '0%',
+    previous_success: str = '0%',
+    last_active: str = '0%',
+    previous_active: str = '0%',
+    last_median_max: str = '0.0%',
+    previous_median_max: str = '0.0%',
+) -> pd.DataFrame:
+    return pd.DataFrame([
+        _shift_row('Last 5 Setup Dates', trigger, fail_pct=last_fail, success_pct=last_success, active_pct=last_active, median_max=last_median_max),
+        _shift_row('Previous 5 Setup Dates', trigger, fail_pct=previous_fail, success_pct=previous_success, active_pct=previous_active, median_max=previous_median_max),
+        _shift_row('Last 10 Setup Dates', trigger, fail_pct='100%', success_pct='100%', active_pct='100%', median_max='20.0%'),
+        _shift_row('Last 20 Setup Dates', trigger, fail_pct='100%', success_pct='100%', active_pct='100%', median_max='20.0%'),
+    ], columns=TRIGGER_COMPARISON_COLUMNS)
+
+
+def test_trigger_event_shift_highlights_success_delta_for_paired_cells_only():
+    comparison = _shift_comparison('VWAP Reclaim', last_success='65%', previous_success='40%')
+    before = comparison.copy(deep=True)
+
+    highlights = trigger_event_shift_highlights(comparison)
+
+    assert highlights[('Last 5 Setup Dates', 'VWAP Reclaim', 'Success')] == 'positive'
+    assert highlights[('Previous 5 Setup Dates', 'VWAP Reclaim', 'Success')] == 'positive'
+    assert ('Last 10 Setup Dates', 'VWAP Reclaim', 'Success') not in highlights
+    assert ('Last 20 Setup Dates', 'VWAP Reclaim', 'Success') not in highlights
+    pd.testing.assert_frame_equal(comparison, before)
+
+
+def test_trigger_event_shift_highlights_failed_direction_semantics():
+    failed_up = trigger_event_shift_highlights(_shift_comparison('1m ORH', last_fail='35%', previous_fail='10%'))
+    failed_down = trigger_event_shift_highlights(_shift_comparison('5m ORH', last_fail='10%', previous_fail='30%'))
+
+    assert failed_up[('Last 5 Setup Dates', '1m ORH', 'Failed')] == 'negative'
+    assert failed_up[('Previous 5 Setup Dates', '1m ORH', 'Failed')] == 'negative'
+    assert failed_down[('Last 5 Setup Dates', '5m ORH', 'Failed')] == 'positive'
+    assert failed_down[('Previous 5 Setup Dates', '5m ORH', 'Failed')] == 'positive'
+
+
+def test_trigger_event_shift_highlights_currently_active_and_median_max():
+    comparison = pd.concat([
+        _shift_comparison('PDH', last_active='70%', previous_active='50%'),
+        _shift_comparison('Alt Required', last_median_max='4.0%', previous_median_max='8.0%'),
+    ], ignore_index=True)
+
+    highlights = trigger_event_shift_highlights(comparison)
+
+    assert highlights[('Last 5 Setup Dates', 'PDH', 'Currently Active')] == 'positive'
+    assert highlights[('Previous 5 Setup Dates', 'PDH', 'Currently Active')] == 'positive'
+    assert highlights[('Last 5 Setup Dates', 'Alt Required', 'Median Max')] == 'negative'
+    assert highlights[('Previous 5 Setup Dates', 'Alt Required', 'Median Max')] == 'negative'
+
+
+def test_trigger_event_shift_highlights_ignore_subthreshold_changes():
+    comparison = _shift_comparison(
+        'VWAP Reclaim',
+        last_fail='24%',
+        previous_fail='10%',
+        last_success='54%',
+        previous_success='40%',
+        last_active='64%',
+        previous_active='50%',
+        last_median_max='5.9%',
+        previous_median_max='3.0%',
+    )
+
+    assert trigger_event_shift_highlights(comparison) == {}
+
+
+def test_trigger_event_highlight_styles_marks_display_cells():
+    comparison = _shift_comparison('VWAP Reclaim', last_success='65%', previous_success='40%')
+    main = trigger_event_main_tables(comparison)
+    highlights = trigger_event_shift_highlights(comparison)
+
+    last_styles = trigger_event_highlight_styles(main['Last 5 Setup Dates'], 'Last 5 Setup Dates', highlights)
+    previous_styles = trigger_event_highlight_styles(main['Previous 5 Setup Dates'], 'Previous 5 Setup Dates', highlights)
+
+    last_idx = main['Last 5 Setup Dates'].index[main['Last 5 Setup Dates']['Trigger'].eq('VWAP Reclaim')][0]
+    previous_idx = main['Previous 5 Setup Dates'].index[main['Previous 5 Setup Dates']['Trigger'].eq('VWAP Reclaim')][0]
+
+    assert 'background-color' in last_styles.loc[last_idx, 'Success']
+    assert 'background-color' in previous_styles.loc[previous_idx, 'Success']
+    assert last_styles.loc[last_idx, 'Failed'] == ''
+
+
 def test_trigger_outcome_internal_table_includes_alt_required_event_rows():
     comparison = trigger_outcome_comparison(_trigger_comparison_history())
 
     assert comparison.columns.tolist() == TRIGGER_COMPARISON_COLUMNS
     assert comparison[['Trigger', 'Window']].values.tolist() == [
         ['1m ORH', 'Last 5 Setup Dates'],
+        ['1m ORH', 'Previous 5 Setup Dates'],
         ['1m ORH', 'Last 10 Setup Dates'],
         ['1m ORH', 'Last 20 Setup Dates'],
         ['5m ORH', 'Last 5 Setup Dates'],
+        ['5m ORH', 'Previous 5 Setup Dates'],
         ['5m ORH', 'Last 10 Setup Dates'],
         ['5m ORH', 'Last 20 Setup Dates'],
         ['VWAP Reclaim', 'Last 5 Setup Dates'],
+        ['VWAP Reclaim', 'Previous 5 Setup Dates'],
         ['VWAP Reclaim', 'Last 10 Setup Dates'],
         ['VWAP Reclaim', 'Last 20 Setup Dates'],
         ['PDH', 'Last 5 Setup Dates'],
+        ['PDH', 'Previous 5 Setup Dates'],
         ['PDH', 'Last 10 Setup Dates'],
         ['PDH', 'Last 20 Setup Dates'],
         ['Alt Required', 'Last 5 Setup Dates'],
+        ['Alt Required', 'Previous 5 Setup Dates'],
         ['Alt Required', 'Last 10 Setup Dates'],
         ['Alt Required', 'Last 20 Setup Dates'],
     ]
@@ -1528,5 +1661,6 @@ def test_setup_behavior_overview_handles_zero_setup_dates():
     assert out['trigger_outcome_comparison'].empty
     assert out['trigger_outcome_by_window'] == {}
     assert out['trigger_event_main_by_window'] == {}
+    assert out['trigger_event_shift_highlights'] == {}
     assert out['details'] == {}
     assert out['windows'] == []

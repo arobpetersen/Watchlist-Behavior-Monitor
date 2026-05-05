@@ -956,6 +956,22 @@ TRIGGER_EVENT_MAIN_COLUMNS = [
     'Later Failed',
     'Median Max',
 ]
+TRIGGER_EVENT_WINDOW_ORDER = [
+    'Last 5 Setup Dates',
+    'Previous 5 Setup Dates',
+    'Last 10 Setup Dates',
+    'Last 20 Setup Dates',
+]
+TRIGGER_EVENT_SHIFT_METRICS = [
+    ('Failed', 'Fail %', True, 15.0),
+    ('Success', 'Success %', False, 15.0),
+    ('Currently Active', 'Active %', False, 15.0),
+    ('Median Max', 'Median Max', False, 3.0),
+]
+TRIGGER_EVENT_HIGHLIGHT_STYLES = {
+    'positive': 'background-color: rgba(36, 164, 89, 0.16); color: #d8f5df; font-weight: 650;',
+    'negative': 'background-color: rgba(210, 74, 74, 0.16); color: #ffe0e0; font-weight: 650;',
+}
 
 
 def _trigger_event_values(rows: pd.DataFrame, trigger_name: str) -> pd.Series:
@@ -1085,10 +1101,10 @@ def filter_detail_rows(
     return out
 
 
-def trigger_outcome_by_window_tables(trigger_outcomes: pd.DataFrame) -> dict[str, pd.DataFrame]:
+def trigger_outcome_by_window_tables(trigger_outcomes: pd.DataFrame | None) -> dict[str, pd.DataFrame]:
     tables = {}
-    for window_label in ['Last 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']:
-        if trigger_outcomes.empty:
+    for window_label in TRIGGER_EVENT_WINDOW_ORDER:
+        if trigger_outcomes is None or trigger_outcomes.empty:
             tables[window_label] = pd.DataFrame(columns=TRIGGER_COMPARISON_BY_WINDOW_COLUMNS)
             continue
         rows = trigger_outcomes[trigger_outcomes['Window'] == window_label].copy()
@@ -1118,6 +1134,82 @@ def trigger_event_main_tables(trigger_outcomes: pd.DataFrame) -> dict[str, pd.Da
         })
         tables[window_label] = out[TRIGGER_EVENT_MAIN_COLUMNS]
     return tables
+
+
+def _percent_point_value(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    if not text or text == '-' or text.lower() == 'nan':
+        return None
+    if '(' in text and ')' in text:
+        text = text.split('(', 1)[1].split(')', 1)[0]
+    text = text.rstrip('%').strip()
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def trigger_event_shift_highlights(trigger_outcomes: pd.DataFrame | None) -> dict[tuple[str, str, str], str]:
+    highlights: dict[tuple[str, str, str], str] = {}
+    if trigger_outcomes is None or trigger_outcomes.empty:
+        return highlights
+    required_windows = {'Last 5 Setup Dates', 'Previous 5 Setup Dates'}
+    if not required_windows.issubset(set(trigger_outcomes['Window'])):
+        return highlights
+
+    indexed = trigger_outcomes.set_index(['Window', 'Trigger'])
+    for trigger_name in TRIGGER_COMPARISON_ORDER:
+        pair_keys = [('Last 5 Setup Dates', trigger_name), ('Previous 5 Setup Dates', trigger_name)]
+        if any(key not in indexed.index for key in pair_keys):
+            continue
+        last_row = indexed.loc[pair_keys[0]]
+        previous_row = indexed.loc[pair_keys[1]]
+        for display_column, source_column, lower_is_better, threshold in TRIGGER_EVENT_SHIFT_METRICS:
+            last_value = _percent_point_value(last_row.get(source_column))
+            previous_value = _percent_point_value(previous_row.get(source_column))
+            if last_value is None or previous_value is None:
+                continue
+            delta = last_value - previous_value
+            if abs(delta) < threshold:
+                continue
+            direction = 'positive' if (delta < 0 if lower_is_better else delta > 0) else 'negative'
+            highlights[('Last 5 Setup Dates', trigger_name, display_column)] = direction
+            highlights[('Previous 5 Setup Dates', trigger_name, display_column)] = direction
+    return highlights
+
+
+def trigger_event_highlight_styles(
+    table: pd.DataFrame,
+    window_label: str,
+    highlights: dict[tuple[str, str, str], str],
+) -> pd.DataFrame:
+    styles = pd.DataFrame('', index=table.index, columns=table.columns)
+    if table.empty or not highlights or 'Trigger' not in table:
+        return styles
+    for idx, trigger_name in table['Trigger'].items():
+        for column in table.columns:
+            direction = highlights.get((window_label, trigger_name, column))
+            if direction:
+                styles.at[idx, column] = TRIGGER_EVENT_HIGHLIGHT_STYLES[direction]
+    return styles
+
+
+def style_trigger_event_table(
+    table: pd.DataFrame,
+    window_label: str,
+    highlights: dict[tuple[str, str, str], str],
+):
+    styles = trigger_event_highlight_styles(table, window_label, highlights)
+    if styles.eq('').all().all():
+        return table
+    return table.style.apply(lambda _: styles, axis=None)
 
 
 def trigger_quality_table(rows: pd.DataFrame) -> pd.DataFrame:
@@ -1210,6 +1302,7 @@ def setup_behavior_overview(con) -> dict:
             'trigger_outcome_comparison': pd.DataFrame(columns=TRIGGER_COMPARISON_COLUMNS),
             'trigger_outcome_by_window': {},
             'trigger_event_main_by_window': {},
+            'trigger_event_shift_highlights': {},
             'trigger_quality': {},
             'details': {},
             'windows': [],
@@ -1247,6 +1340,7 @@ def setup_behavior_overview(con) -> dict:
         'trigger_outcome_comparison': trigger_outcomes,
         'trigger_outcome_by_window': trigger_outcome_by_window_tables(trigger_outcomes),
         'trigger_event_main_by_window': trigger_event_main_tables(trigger_outcomes),
+        'trigger_event_shift_highlights': trigger_event_shift_highlights(trigger_outcomes),
         'trigger_quality': {label: trigger_quality_table(history_by_window[label]) for label in summary_by_window},
         'details': details,
         'windows': windows,
