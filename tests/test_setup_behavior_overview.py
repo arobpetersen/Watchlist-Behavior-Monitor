@@ -378,13 +378,47 @@ def test_snapshot_cards_html_prioritizes_key_metrics():
     html = snapshot_cards_html(summary, rows, outcomes)
 
     assert 'Current Status' in html
-    assert 'Triggered' in html
+    assert 'Triggered' not in html
+    assert 'Follow-Through Flags' in html
     assert 'Successful Trigger Mix' in html
     assert 'Failure Rate by Trigger' in html
     assert '25% (1 / 4)' in html
     assert '50% (2 / 4)' in html
-    assert '4 / 4' in html
-    assert '100% of setups' in html
+    assert 'Failed D0' in html
+    assert 'Failed After D0' in html
+    assert 'Unresolved' in html
+
+
+def test_snapshot_current_status_splits_failed_d0_and_after_d0():
+    rows = pd.DataFrame([
+        {'Ticker': 'A', 'Current Status': 'Active', 'Trigger': 'PDH', 'Trigger Day': 'Success'},
+        {'Ticker': 'D0', 'Current Status': 'Failed D0', 'Trigger': 'PDH', 'Trigger Day': 'Success'},
+        {'Ticker': 'D1', 'Current Status': 'Failed D1', 'Trigger': 'PDH', 'Trigger Day': 'Success'},
+        {'Ticker': 'D2', 'Current Status': 'Failed D2', 'Trigger': 'PDH', 'Trigger Day': 'Success'},
+        {'Ticker': 'U', 'Current Status': '—', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved'},
+    ])
+    summary = {'Setups': 5, 'Active': '1 (20%)', 'Later Failed': '3 (60%)', 'Unresolved': '1 (20%)'}
+
+    html = snapshot_cards_html(summary, rows, pd.DataFrame())
+
+    assert 'Active</span><strong>20% (1 / 5)</strong>' in html
+    assert 'Failed D0</span><strong>20% (1 / 5)</strong>' in html
+    assert 'Failed After D0</span><strong>40% (2 / 5)</strong>' in html
+    assert 'Unresolved</span><strong>20% (1 / 5)</strong>' in html
+
+
+def test_snapshot_follow_through_flags_count_close_below_be_and_retests():
+    rows = pd.DataFrame([
+        {'Ticker': 'A', 'Current Status': 'Active', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Close < BE': 'Yes', 'Retests': 'D0'},
+        {'Ticker': 'B', 'Current Status': 'Active', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Close < BE': 'No', 'Retests': 'D1, D3'},
+        {'Ticker': 'C', 'Current Status': '—', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved', 'Close < BE': '-', 'Retests': '-'},
+    ])
+    summary = {'Setups': 3}
+
+    html = snapshot_cards_html(summary, rows, pd.DataFrame())
+
+    assert 'Close &lt; BE</span><strong>33% (1 / 3)</strong>' in html
+    assert 'Retested</span><strong>67% (2 / 3)</strong>' in html
 
 
 def test_snapshot_cards_include_qualified_vwap_success_mix_and_failure_rates():
@@ -399,9 +433,11 @@ def test_snapshot_cards_include_qualified_vwap_success_mix_and_failure_rates():
     html = snapshot_cards_html(summary, rows, outcomes)
 
     assert 'VWAP' in html
-    assert '100%' in html
+    assert 'VWAP</span><strong>1 (100%)</strong>' in html
     assert '1m' in html
-    assert '100%' in html
+    assert '1m</span><strong>2 / 2 (100%)</strong>' in html
+    assert '5m</span><strong>1 / 1 (100%)</strong>' in html
+    assert 'VWAP</span><strong>0 / 1 (0%)</strong>' in html
     assert 'PDH</span><strong>-</strong>' in html
 
 

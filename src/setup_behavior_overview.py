@@ -551,10 +551,6 @@ def _fmt_rate(count: int, denominator: int) -> str:
     return f'{round((count / denominator) * 100)}%'
 
 
-def _count_and_pct(count: int, denominator: int) -> tuple[str, str]:
-    return f'{count} / {denominator}', _fmt_rate(count, denominator)
-
-
 def _opening_path_row(path: str, rows: pd.DataFrame, total_setups: int) -> dict:
     count = len(rows)
     return {
@@ -708,16 +704,6 @@ def selected_window_snapshot(window_summary: dict) -> str:
     )
 
 
-def _triggered_setup_count(rows: pd.DataFrame) -> int:
-    if rows.empty:
-        return 0
-    triggered = pd.Series(False, index=rows.index)
-    for trigger_name in MAIN_OPENING_TRIGGERS:
-        values = _trigger_event_values(rows, trigger_name)
-        triggered |= values.isin({'success', 'failed'})
-    return int(triggered.sum())
-
-
 def _successful_trigger_mix(rows: pd.DataFrame) -> list[tuple[str, str]]:
     if rows.empty or 'Trigger' not in rows:
         return []
@@ -737,7 +723,8 @@ def _successful_trigger_mix(rows: pd.DataFrame) -> list[tuple[str, str]]:
     for trigger_name in MAIN_OPENING_TRIGGERS:
         count = int(successful['Trigger'].eq(trigger_name).sum())
         if count:
-            out.append((labels[trigger_name], _fmt_rate(count, total)))
+            out.append((labels[trigger_name], f'{count} ({_fmt_rate(count, total)})'))
+    out.sort(key=lambda item: _count_int(item[1]), reverse=True)
     return out
 
 
@@ -760,8 +747,41 @@ def _failure_rate_rows(window_trigger_outcomes: pd.DataFrame | None) -> list[tup
         row = indexed.loc[trigger_name]
         triggered = _count_int(row.get('Triggered'))
         failed = _count_int(row.get('Failed'))
-        out.append((labels[trigger_name], _fmt_rate(failed, triggered)))
+        out.append((labels[trigger_name], '-' if triggered <= 0 else f'{failed} / {triggered} ({_fmt_rate(failed, triggered)})'))
     return out
+
+
+def _current_status_snapshot(rows: pd.DataFrame | None, window_summary: dict, total: int) -> list[tuple[str, str]]:
+    if rows is not None and not rows.empty and 'Current Status' in rows:
+        status = rows['Current Status'].fillna('').astype(str).str.strip()
+        active_count = int(status.eq('Active').sum())
+        failed_d0_count = int(status.eq('Failed D0').sum())
+        failed_after_count = int((status.eq('Failed') | status.eq('Later Failed') | status.str.match(r'^Failed D[1-9]\d*$')).sum())
+        unresolved_count = max(total - active_count - failed_d0_count - failed_after_count, 0)
+    else:
+        active_count = _count_int(window_summary.get('Active', 0))
+        failed_d0_count = 0
+        failed_after_count = _count_int(window_summary.get('Later Failed', 0))
+        unresolved_count = _count_int(window_summary.get('Unresolved', 0))
+    return [
+        ('Active', f'{_fmt_rate(active_count, total)} ({active_count} / {total})'),
+        ('Failed D0', f'{_fmt_rate(failed_d0_count, total)} ({failed_d0_count} / {total})'),
+        ('Failed After D0', f'{_fmt_rate(failed_after_count, total)} ({failed_after_count} / {total})'),
+        ('Unresolved', f'{_fmt_rate(unresolved_count, total)} ({unresolved_count} / {total})'),
+    ]
+
+
+def _follow_through_flags(rows: pd.DataFrame | None, total: int) -> list[tuple[str, str]]:
+    if rows is None or rows.empty:
+        return [('Close < BE', '-'), ('Retested', '-')]
+    close_values = rows['Close < BE'] if 'Close < BE' in rows else pd.Series('', index=rows.index)
+    retest_values = rows['Retests'] if 'Retests' in rows else rows['Retest Day'] if 'Retest Day' in rows else pd.Series('', index=rows.index)
+    close_count = int(close_values.fillna('').astype(str).str.strip().str.casefold().eq('yes').sum())
+    retest_count = int((~_is_blank_or_dash(retest_values)).sum())
+    return [
+        ('Close < BE', f'{_fmt_rate(close_count, total)} ({close_count} / {total})'),
+        ('Retested', f'{_fmt_rate(retest_count, total)} ({retest_count} / {total})'),
+    ]
 
 
 def _snapshot_lines(items: list[tuple[str, str]]) -> str:
@@ -781,23 +801,12 @@ def snapshot_cards_html(
     total = int(window_summary.get('Setups', 0) or 0)
     if rows is not None and not rows.empty:
         total = len(rows)
-        current_status = rows['Current Status'] if 'Current Status' in rows else pd.Series('', index=rows.index)
-        active_count = int(current_status.eq('Active').sum())
-        failed_count = int(_is_later_failed(current_status).sum())
-        unresolved_count = max(total - active_count - failed_count, 0)
-        triggered_count = _triggered_setup_count(rows)
         success_mix = _successful_trigger_mix(rows)
     else:
-        active_count = _count_int(window_summary.get('Active', 0))
-        failed_count = _count_int(window_summary.get('Later Failed', 0))
-        unresolved_count = _count_int(window_summary.get('Unresolved', 0))
-        triggered_count = _count_int(window_summary.get('Day Success', 0)) + _count_int(window_summary.get('Day Fail', 0))
         success_mix = []
 
-    active_count_text, active_pct = _count_and_pct(active_count, total)
-    failed_count_text, failed_pct = _count_and_pct(failed_count, total)
-    unresolved_count_text, unresolved_pct = _count_and_pct(unresolved_count, total)
-    triggered_count_text, triggered_pct = _count_and_pct(triggered_count, total)
+    current_status_lines = _current_status_snapshot(rows, window_summary, total)
+    follow_through_lines = _follow_through_flags(rows, total)
     failure_rates = _failure_rate_rows(trigger_outcomes)
     return f'''
 <style>
@@ -844,12 +853,8 @@ def snapshot_cards_html(
 }}
 </style>
 <div class="snapshot-grid">
-  <section class="snapshot-card"><div class="snapshot-label">Current Status</div>{_snapshot_lines([
-      ('Active', f'{active_pct} ({active_count_text})'),
-      ('Failed', f'{failed_pct} ({failed_count_text})'),
-      ('Unresolved', f'{unresolved_pct} ({unresolved_count_text})'),
-  ])}</section>
-  <section class="snapshot-card"><div class="snapshot-label">Triggered</div><div class="snapshot-value">{escape(triggered_count_text)}</div><div class="snapshot-sub">{escape(triggered_pct)} of setups</div></section>
+  <section class="snapshot-card"><div class="snapshot-label">Current Status</div>{_snapshot_lines(current_status_lines)}</section>
+  <section class="snapshot-card"><div class="snapshot-label">Follow-Through Flags</div>{_snapshot_lines(follow_through_lines)}</section>
   <section class="snapshot-card"><div class="snapshot-label">Successful Trigger Mix</div>{_snapshot_lines(success_mix)}</section>
   <section class="snapshot-card"><div class="snapshot-label">Failure Rate by Trigger</div>{_snapshot_lines(failure_rates)}</section>
 </div>
