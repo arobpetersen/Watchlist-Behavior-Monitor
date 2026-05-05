@@ -18,7 +18,7 @@ from src.rolling_setup_monitor import (
 
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
-ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-performance-cache-v1'
+ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-orh-sequencing-v2'
 
 
 @st.cache_data(show_spinner=False)

@@ -83,6 +83,14 @@ DETAIL_COLUMNS = [
     'Reference Low',
     'Reference Basis',
     'Trigger Break Time',
+    '1m Low Swept Before Trigger',
+    '1m ORH Reference Low',
+    '1m ORH Reference Basis',
+    '1m Post-Trigger Stop Breach',
+    '5m Low Swept Before Trigger',
+    '5m ORH Reference Low',
+    '5m ORH Reference Basis',
+    '5m Post-Trigger Stop Breach',
     'Fail Day',
     'Retests',
     'Retest Count',
@@ -418,8 +426,14 @@ def orh_trigger_assessment(or_json: str, minutes: int, intraday: pd.DataFrame | 
     if bars.empty and trigger_break_time is None:
         broke_orh = bool(data.get('broke_orh') and not data.get('orh_then_orl') and not _same_bar_break(data))
     else:
-        broke_orh = bool(data.get('broke_orh') and not _same_bar_break(data) and trigger_break_time is not None)
-    low_swept_before_trigger = bool(broke_orh and orl_break_time is not None and trigger_break_time is not None and orl_break_time < trigger_break_time)
+        broke_orh = bool(data.get('broke_orh') and trigger_break_time is not None and (not _same_bar_break(data) or not bars.empty))
+    low_swept_before_trigger = bool(
+        broke_orh
+        and orl_break_time is not None
+        and trigger_break_time is not None
+        and orl_break_time <= trigger_break_time
+        and not data.get('orh_then_orl')
+    )
     daily_bars = daily if daily is not None else pd.DataFrame()
     trigger_failure_day = fail_day(_regular_session_bars(intraday), daily_bars, trigger_break_time, reference_low) if broke_orh else None
     trigger_day_failed = trigger_failure_day == 0
@@ -445,8 +459,8 @@ def orh_trigger_assessment(or_json: str, minutes: int, intraday: pd.DataFrame | 
 
 def orh_framework_failed(or_json: str, assessment: dict) -> bool:
     data = _loads(or_json)
-    if assessment.get('broke_orh') and assessment.get('failed'):
-        return True
+    if assessment.get('broke_orh'):
+        return bool(assessment.get('failed'))
     return bool(data.get('broke_orh') and (data.get('orh_then_orl') or _same_bar_break(data)))
 
 
@@ -1514,6 +1528,14 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Reference Low': raw['reference_low'].apply(_fmt_price),
         'Reference Basis': raw['reference_basis'].apply(_blank),
         'Trigger Break Time': raw['trigger_break_time'].apply(_fmt_ts),
+        '1m Low Swept Before Trigger': raw.get('one_min_low_swept_before_trigger', blank_series).apply(lambda v: 'Yes' if v is True else ''),
+        '1m ORH Reference Low': raw.get('one_min_reference_low', blank_series).apply(_fmt_price),
+        '1m ORH Reference Basis': raw.get('one_min_reference_basis', blank_series).apply(_blank),
+        '1m Post-Trigger Stop Breach': raw.get('one_min_post_trigger_stop_breached', blank_series).apply(lambda v: 'Yes' if v is True else ''),
+        '5m Low Swept Before Trigger': raw.get('five_min_low_swept_before_trigger', blank_series).apply(lambda v: 'Yes' if v is True else ''),
+        '5m ORH Reference Low': raw.get('five_min_reference_low', blank_series).apply(_fmt_price),
+        '5m ORH Reference Basis': raw.get('five_min_reference_basis', blank_series).apply(_blank),
+        '5m Post-Trigger Stop Breach': raw.get('five_min_post_trigger_stop_breached', blank_series).apply(lambda v: 'Yes' if v is True else ''),
         'Latest Close': raw['latest_close'].apply(_fmt_price),
         'Latest Status Date': raw.get('latest_trading_date', blank_series).apply(lambda v: '' if pd.isna(v) else pd.to_datetime(v).date().isoformat()),
         'Setup Close': raw['close_price'].apply(_fmt_price),
@@ -1598,11 +1620,21 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
             prior_day_high,
             record.get('open_price'),
         )
+        one_assessment = orh_trigger_assessment(record.get('or_1m'), 1, ticker_intraday, ticker_daily)
+        five_assessment = orh_trigger_assessment(record.get('or_5m'), 5, ticker_intraday, ticker_daily)
         pdh_assessment = pdh_trigger_assessment(prior_day_high, record.get('open_price'), ticker_intraday, ticker_daily)
         record.update({
             'prior_day_high': pdh_assessment.get('prior_day_high'),
             'setup_day_open': pdh_assessment.get('setup_day_open'),
             'open_over_pdh': pdh_assessment.get('open_over_pdh'),
+            'one_min_low_swept_before_trigger': one_assessment.get('low_swept_before_trigger'),
+            'one_min_reference_low': one_assessment.get('reference_low'),
+            'one_min_reference_basis': one_assessment.get('reference_basis'),
+            'one_min_post_trigger_stop_breached': one_assessment.get('post_trigger_stop_breached'),
+            'five_min_low_swept_before_trigger': five_assessment.get('low_swept_before_trigger'),
+            'five_min_reference_low': five_assessment.get('reference_low'),
+            'five_min_reference_basis': five_assessment.get('reference_basis'),
+            'five_min_post_trigger_stop_breached': five_assessment.get('post_trigger_stop_breached'),
         })
         record.update(trigger)
         record.update(_vwap_reclaim_fields(ticker_intraday, record.get('reference_low')))

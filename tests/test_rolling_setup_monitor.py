@@ -960,6 +960,45 @@ def test_1m_orl_break_before_orh_late_orh_can_succeed():
     assert status_for(out['trigger_type'], failure) == 'Active'
 
 
+def test_cifr_like_pretrigger_low_sweep_resolves_as_1m_orh_when_stop_holds():
+    intraday = pd.DataFrame({
+        'ticker': ['CIFR'] * 6,
+        'trading_date': pd.to_datetime(['2026-05-05'] * 6),
+        'timestamp_et': pd.to_datetime([
+            '2026-05-05 09:30',
+            '2026-05-05 09:31',
+            '2026-05-05 09:32',
+            '2026-05-05 09:34',
+            '2026-05-05 09:35',
+            '2026-05-05 09:36',
+        ]),
+        'high': [18.53, 18.10, 18.20, 18.60, 18.95, 18.80],
+        'low': [17.89, 17.70, 17.65, 18.41, 18.50, 18.55],
+        'close': [18.00, 17.80, 18.10, 18.55, 18.90, 18.70],
+    })
+    one = _or(
+        broke_orh=True,
+        broke_orl=True,
+        first_break_direction='down',
+        orh_then_orl=False,
+        orl_then_orh=True,
+        orh=18.53,
+        orl=17.89,
+        orh_break_time='2026-05-05 09:34',
+        orl_break_time='2026-05-05 09:31',
+    )
+    five = _or(broke_orh=True, broke_orl=False, orh=18.60, orl=17.65, orh_break_time='2026-05-05 09:35')
+    out = derive_trigger_reference(one, five, _or(orh=19.0, orl=17.65), 0.80, intraday)
+    assessment = orh_trigger_assessment(one, 1, intraday)
+
+    assert assessment['low_swept_before_trigger'] is True
+    assert assessment['reference_low'] == 17.65
+    assert assessment['post_trigger_stop_breached'] is False
+    assert out['trigger_type'] == '1m ORH'
+    assert opening_range_result(one, 1, out['trigger_type'], intraday) == 'success'
+    assert opening_range_result(five, 5, out['trigger_type'], intraday) == 'success'
+
+
 def test_1m_flush_then_orh_trigger_fails_when_trigger_time_low_breaks_afterward():
     intraday = _flush_then_trigger_intraday(after_low=9.4)
     out = derive_trigger_reference(
@@ -1117,6 +1156,47 @@ def test_same_bar_orh_and_orl_break_is_not_clean():
         1,
         out['trigger_type'],
     ) == 'failed'
+
+
+def test_docn_like_same_bar_low_sweep_resolves_as_1m_orh_when_stop_holds():
+    intraday = pd.DataFrame({
+        'ticker': ['DOCN'] * 5,
+        'trading_date': pd.to_datetime(['2026-05-05'] * 5),
+        'timestamp_et': pd.to_datetime([
+            '2026-05-05 09:30',
+            '2026-05-05 09:31',
+            '2026-05-05 09:32',
+            '2026-05-05 09:35',
+            '2026-05-05 09:37',
+        ]),
+        'high': [132.599, 133.00, 138.00, 142.00, 143.50],
+        'low': [130.20, 129.51, 134.37, 139.00, 141.00],
+        'close': [132.00, 132.90, 137.50, 141.50, 143.00],
+    })
+    one = _or(
+        broke_orh=True,
+        broke_orl=True,
+        first_break_direction='none',
+        same_bar_orh_orl_break=True,
+        orh_then_orl=False,
+        orl_then_orh=False,
+        orh=132.599,
+        orl=130.20,
+        orh_break_time='2026-05-05 09:31',
+        orl_break_time='2026-05-05 09:31',
+    )
+    five = _or(broke_orh=True, broke_orl=False, orh=143.0, orl=129.51, orh_break_time='2026-05-05 09:37')
+    out = derive_trigger_reference(one, five, _or(orh=144.0, orl=129.51), 0.85, intraday)
+    assessment = orh_trigger_assessment(one, 1, intraday)
+
+    assert assessment['broke_orh'] is True
+    assert assessment['low_swept_before_trigger'] is True
+    assert assessment['reference_low'] == 129.51
+    assert assessment['post_trigger_stop_breached'] is False
+    assert out['trigger_type'] == '1m ORH'
+    assert out['reference_low'] == 129.51
+    assert opening_range_result(one, 1, out['trigger_type'], intraday) == 'success'
+    assert opening_range_result(five, 5, out['trigger_type'], intraday) == 'success'
 
 
 def test_alt_required_uses_15m_references():
@@ -1793,6 +1873,9 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'Raw VWAP Reclaim Stop Valid', 'Raw VWAP Reclaim Result Reason',
         'Qualified VWAP Trigger Result', 'Qualified VWAP Trigger Reason',
         'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
+        '1m Low Swept Before Trigger', '1m ORH Reference Low', '1m ORH Reference Basis',
+        '1m Post-Trigger Stop Breach', '5m Low Swept Before Trigger',
+        '5m ORH Reference Low', '5m ORH Reference Basis', '5m Post-Trigger Stop Breach',
         'Fail Day', 'Retests', 'Retest Count', 'Retest Days Raw', 'Retest Dates Raw',
         'Latest Close', 'Setup Close', 'Setup High', 'Setup Low',
         'Current vs Setup Close', 'Max Gain from Setup Close', 'RVOL', 'Range / ATR14', '1m OR Width / ATR14',
@@ -1835,7 +1918,7 @@ def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
 def test_rolling_setup_monitor_page_uses_db_backed_cache_token_and_perf_debug():
     page = open('pages/3_Rolling_Setup_Monitor.py', encoding='utf-8').read()
 
-    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-performance-cache-v1'" in page
+    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-orh-sequencing-v2'" in page
     assert "rolling_cache_token = f'{ROLLING_MONITOR_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_rolling_setup_sections(db_path, rolling_cache_token)' in page
     assert "PerfTimer('Rolling Setup Monitor')" in page
