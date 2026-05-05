@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from html import escape
+import re
 from typing import Any
 
 import pandas as pd
@@ -176,6 +177,7 @@ def overview_windows(setup_date_values) -> list[OverviewWindow]:
         dates = sorted({_date(value) for value in setup_date_values})
     return [
         OverviewWindow('Last 5 Setup Dates', tuple(dates[-5:])),
+        OverviewWindow('Previous 5 Setup Dates', tuple(dates[-10:-5])),
         OverviewWindow('Last 10 Setup Dates', tuple(dates[-10:])),
         OverviewWindow('Last 20 Setup Dates', tuple(dates[-20:])),
     ]
@@ -773,15 +775,39 @@ def _current_status_snapshot(rows: pd.DataFrame | None, window_summary: dict, to
 
 def _follow_through_flags(rows: pd.DataFrame | None, total: int) -> list[tuple[str, str]]:
     if rows is None or rows.empty:
-        return [('Close < BE', '-'), ('Retested', '-')]
+        return [('Close < BE', '-'), ('Retested D0 Only', '-'), ('Retested After D0', '-')]
     close_values = rows['Close < BE'] if 'Close < BE' in rows else pd.Series('', index=rows.index)
-    retest_values = rows['Retests'] if 'Retests' in rows else rows['Retest Day'] if 'Retest Day' in rows else pd.Series('', index=rows.index)
+    if 'Retest Days Raw' in rows:
+        retest_values = rows['Retest Days Raw']
+    elif 'Retests' in rows:
+        retest_values = rows['Retests']
+    elif 'Retest Day' in rows:
+        retest_values = rows['Retest Day']
+    else:
+        retest_values = pd.Series('', index=rows.index)
     close_count = int(close_values.fillna('').astype(str).str.strip().str.casefold().eq('yes').sum())
-    retest_count = int((~_is_blank_or_dash(retest_values)).sum())
+    retest_days = retest_values.apply(_retest_day_numbers)
+    d0_only_count = int(retest_days.apply(lambda days: 0 in days and not any(day > 0 for day in days)).sum())
+    after_d0_count = int(retest_days.apply(lambda days: any(day > 0 for day in days)).sum())
     return [
         ('Close < BE', f'{_fmt_rate(close_count, total)} ({close_count} / {total})'),
-        ('Retested', f'{_fmt_rate(retest_count, total)} ({retest_count} / {total})'),
+        ('Retested D0 Only', f'{_fmt_rate(d0_only_count, total)} ({d0_only_count} / {total})'),
+        ('Retested After D0', f'{_fmt_rate(after_d0_count, total)} ({after_d0_count} / {total})'),
     ]
+
+
+def _retest_day_numbers(value: Any) -> set[int]:
+    if value is None:
+        return set()
+    try:
+        if pd.isna(value):
+            return set()
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    if not text or text == '-' or text.lower() == 'nan':
+        return set()
+    return {int(match) for match in re.findall(r'D(\d+)', text)}
 
 
 def _snapshot_lines(items: list[tuple[str, str]]) -> str:

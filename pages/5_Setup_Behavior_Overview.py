@@ -18,7 +18,7 @@ from src.setup_behavior_overview import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-OVERVIEW_CACHE_VERSION = 'setup-overview-performance-cache-v1'
+OVERVIEW_CACHE_VERSION = 'setup-overview-previous-window-v1'
 
 
 @st.cache_data(show_spinner=False)

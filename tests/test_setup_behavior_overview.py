@@ -143,14 +143,42 @@ def _history() -> pd.DataFrame:
     ])
 
 
+def _window(label: str, setup_date_values) -> object:
+    return next(window for window in overview_windows(setup_date_values) if window.label == label)
+
+
 def test_overview_windows_use_actual_setup_dates_not_calendar_days():
     windows = overview_windows(['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30', '2026-05-01'])
 
     assert [(w.label, [d.date().isoformat() for d in w.setup_dates]) for w in windows] == [
         ('Last 5 Setup Dates', ['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30', '2026-05-01']),
+        ('Previous 5 Setup Dates', []),
         ('Last 10 Setup Dates', ['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30', '2026-05-01']),
         ('Last 20 Setup Dates', ['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30', '2026-05-01']),
     ]
+
+
+def test_overview_windows_include_previous_five_setup_dates():
+    dates = pd.date_range('2026-04-01', periods=10, freq='B')
+    windows = overview_windows(dates)
+
+    assert [window.label for window in windows] == [
+        'Last 5 Setup Dates',
+        'Previous 5 Setup Dates',
+        'Last 10 Setup Dates',
+        'Last 20 Setup Dates',
+    ]
+    assert _window('Last 5 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates[-5:])
+    assert _window('Previous 5 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates[:5])
+    assert _window('Last 10 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates)
+
+
+def test_overview_windows_previous_five_handles_fewer_than_ten_setup_dates():
+    dates = pd.date_range('2026-04-01', periods=7, freq='B')
+
+    assert _window('Last 5 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates[-5:])
+    assert _window('Previous 5 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates[:2])
+    assert _window('Last 10 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates)
 
 
 def test_overview_windows_keep_only_latest_n_setup_dates():
@@ -158,14 +186,15 @@ def test_overview_windows_keep_only_latest_n_setup_dates():
     windows = overview_windows(dates)
 
     assert len(windows[0].setup_dates) == 5
-    assert len(windows[1].setup_dates) == 10
-    assert len(windows[2].setup_dates) == 20
+    assert len(windows[1].setup_dates) == 5
+    assert len(windows[2].setup_dates) == 10
+    assert len(windows[3].setup_dates) == 20
     assert windows[0].setup_dates[0] == pd.Timestamp('2026-04-29')
     assert windows[0].setup_dates[-1] == pd.Timestamp('2026-05-05')
 
 
 def test_summarize_window_counts_percentages_and_medians():
-    window = overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1]
+    window = _window('Last 10 Setup Dates', ['2026-04-28', '2026-05-02', '2026-05-08'])
     out = summarize_window(_history(), window)
 
     assert out['Window'] == 'Last 10 Setup Dates'
@@ -196,7 +225,7 @@ def test_summarize_window_counts_percentages_and_medians():
 def test_summarize_window_counts_close_below_be_later_failed_status():
     history = _history().copy()
     history.loc[history['Ticker'].eq('AAA'), 'Current Status'] = 'Failed D0'
-    window = overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1]
+    window = _window('Last 10 Setup Dates', ['2026-04-28', '2026-05-02', '2026-05-08'])
 
     out = summarize_window(history, window)
 
@@ -209,7 +238,12 @@ def test_comparison_rows_exclude_secondary_diagnostics():
     comparison = comparison_rows(full)
 
     assert comparison.columns.tolist() == COMPARISON_COLUMNS
-    assert comparison['Window'].tolist() == ['Last 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
+    assert comparison['Window'].tolist() == [
+        'Last 5 Setup Dates',
+        'Previous 5 Setup Dates',
+        'Last 10 Setup Dates',
+        'Last 20 Setup Dates',
+    ]
     assert comparison.columns.tolist() == [
         'Window',
         'Dates',
@@ -283,7 +317,7 @@ def test_detail_rows_preserve_multiple_retests_display():
 
 
 def test_selected_window_metrics_group_diagnostics_separately():
-    summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
+    summary = summarize_window(_history(), _window('Last 10 Setup Dates', ['2026-04-28', '2026-05-02', '2026-05-08']))
     groups = selected_window_metrics(summary)
 
     assert [group['title'] for group in groups] == [
@@ -344,7 +378,7 @@ def test_overview_5m_counts_exclude_selected_1m_rows_with_5m_display_hidden():
 
 
 def test_factual_read_is_objective_and_contains_key_metrics():
-    summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
+    summary = summarize_window(_history(), _window('Last 10 Setup Dates', ['2026-04-28', '2026-05-02', '2026-05-08']))
     text = factual_read(summary, opening_behavior_table(_history().iloc[:4]))
 
     assert text == (
@@ -360,7 +394,7 @@ def test_factual_read_is_objective_and_contains_key_metrics():
 
 
 def test_selected_window_snapshot_contains_key_metrics():
-    summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
+    summary = summarize_window(_history(), _window('Last 10 Setup Dates', ['2026-04-28', '2026-05-02', '2026-05-08']))
     text = selected_window_snapshot(summary)
 
     assert '4 setups across 3 setup dates' in text
@@ -372,7 +406,7 @@ def test_selected_window_snapshot_contains_key_metrics():
 
 
 def test_snapshot_cards_html_prioritizes_key_metrics():
-    summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
+    summary = summarize_window(_history(), _window('Last 10 Setup Dates', ['2026-04-28', '2026-05-02', '2026-05-08']))
     rows = _history()[pd.to_datetime(_history()['Setup Date']).dt.date.isin({pd.Timestamp('2026-04-28').date(), pd.Timestamp('2026-05-02').date(), pd.Timestamp('2026-05-08').date()})]
     outcomes = trigger_outcome_comparison({'Last 10 Setup Dates': rows})
     html = snapshot_cards_html(summary, rows, outcomes)
@@ -411,14 +445,16 @@ def test_snapshot_follow_through_flags_count_close_below_be_and_retests():
     rows = pd.DataFrame([
         {'Ticker': 'A', 'Current Status': 'Active', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Close < BE': 'Yes', 'Retests': 'D0'},
         {'Ticker': 'B', 'Current Status': 'Active', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Close < BE': 'No', 'Retests': 'D1, D3'},
+        {'Ticker': 'D', 'Current Status': 'Active', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Close < BE': 'No', 'Retests': 'D0, D2'},
         {'Ticker': 'C', 'Current Status': '—', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved', 'Close < BE': '-', 'Retests': '-'},
     ])
-    summary = {'Setups': 3}
+    summary = {'Setups': 4}
 
     html = snapshot_cards_html(summary, rows, pd.DataFrame())
 
-    assert 'Close &lt; BE</span><strong>33% (1 / 3)</strong>' in html
-    assert 'Retested</span><strong>67% (2 / 3)</strong>' in html
+    assert 'Close &lt; BE</span><strong>25% (1 / 4)</strong>' in html
+    assert 'Retested D0 Only</span><strong>25% (1 / 4)</strong>' in html
+    assert 'Retested After D0</span><strong>50% (2 / 4)</strong>' in html
 
 
 def test_snapshot_cards_include_qualified_vwap_success_mix_and_failure_rates():
@@ -442,7 +478,7 @@ def test_snapshot_cards_include_qualified_vwap_success_mix_and_failure_rates():
 
 
 def test_mix_tables_include_objective_selected_window_mixes():
-    summary = summarize_window(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1])
+    summary = summarize_window(_history(), _window('Last 10 Setup Dates', ['2026-04-28', '2026-05-02', '2026-05-08']))
     mixes = mix_tables(summary)
 
     assert list(mixes) == ['Outcome Mix', 'Current Mix', 'Trigger Mix']
