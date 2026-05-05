@@ -668,6 +668,8 @@ def test_detail_rows_hides_superseded_orh_when_vwap_is_resolved_trigger():
         '1m ORH': 'failed',
         '5m ORH': 'success',
         'VWAP Trigger': 'success',
+        'Raw VWAP Reclaim Trigger Price': '10.40',
+        '5m ORH Trigger Price': '10.80',
         'vwap_qualified_trigger_reason': 'VWAP trigger price lower than 5m ORH',
         'PDH': '-',
         'Notes': '',
@@ -1195,6 +1197,8 @@ def test_superseded_orh_is_not_counted_as_successful_trigger():
         '1m ORH': 'failed',
         '5m ORH': 'success',
         'VWAP Trigger': 'success',
+        'Raw VWAP Reclaim Trigger Price': '10.40',
+        '5m ORH Trigger Price': '10.80',
         'vwap_qualified_trigger_reason': 'VWAP trigger price lower than 5m ORH',
         'PDH': '-',
         'Notes': '',
@@ -1579,6 +1583,7 @@ def test_setup_behavior_page_uses_successful_triggers_section_title():
     assert "st.subheader('Selected Window Successful Triggers')" in page
     assert "st.subheader('Selected Window Opening Path')" not in page
     assert "'VWAP Reclaim'" in page
+    assert "OVERVIEW_CACHE_VERSION = 'setup-overview-vwap-actionable-display-v2'" in page
     assert "overview_cache_token = f'{OVERVIEW_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert "PerfTimer('Setup Behavior Overview')" in page
     assert 'render_perf_debug(st, perf)' in page

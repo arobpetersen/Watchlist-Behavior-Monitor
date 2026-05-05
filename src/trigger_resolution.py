@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pandas as pd
@@ -53,6 +54,39 @@ def _vwap_result(row: pd.Series) -> str:
 
 def _vwap_price(row: pd.Series) -> float | None:
     return _num(_first_present(row, ['vwap_reclaim_trigger_price', 'Raw VWAP Reclaim Trigger Price', 'VWAP Reclaim Trigger Price']))
+
+
+def _json_field(value: Any, field: str) -> Any:
+    if isinstance(value, str) and value:
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(parsed, dict):
+            return parsed.get(field)
+    return None
+
+
+def _orh_price(row: pd.Series, minutes: int) -> float | None:
+    label = f'{minutes}m ORH'
+    value = _first_present(
+        row,
+        [
+            f'{label} Trigger Price',
+            f'{label} Price',
+            f'{label} Level',
+            f'{label}',
+            f'or_{minutes}m_orh',
+        ],
+    )
+    if value is not None:
+        price = _num(value)
+        if price is not None:
+            return price
+    json_column = f'or_{minutes}m'
+    if json_column in row:
+        return _num(_json_field(row.get(json_column), 'orh'))
+    return None
 
 
 def _resolved_trigger_price(row: pd.Series) -> float | None:
@@ -122,14 +156,30 @@ def vwap_superseded_orh_display_values(row: pd.Series, one_min_result: Any, five
     one = _text(one_min_result)
     five = _text(five_min_result)
     trigger = _trigger_label(row)
-    reason = _text(_first_present(row, ['vwap_qualified_trigger_reason', 'VWAP Trigger Reason', 'Qualified VWAP Trigger Reason']))
     if trigger != 'VWAP Reclaim':
         return one, five
-    if reason == 'VWAP trigger price lower than 1m ORH' and one == 'success':
+    vwap_price = _vwap_price(row)
+    if vwap_price is None:
+        return one, five
+    one_price = _orh_price(row, 1)
+    five_price = _orh_price(row, 5)
+    if one == 'success' and one_price is not None and one_price >= vwap_price:
         one = 'superseded'
-    elif reason == 'VWAP trigger price lower than 5m ORH' and five == 'success':
+    if five == 'success' and five_price is not None and five_price >= vwap_price:
         five = 'superseded'
     return one, five
+
+
+def vwap_orh_suppression_reason(row: pd.Series, one_min_result: Any, five_min_result: Any) -> str:
+    one, five = vwap_superseded_orh_display_values(row, one_min_result, five_min_result)
+    labels = []
+    if one == 'superseded':
+        labels.append('1m ORH')
+    if five == 'superseded':
+        labels.append('5m ORH')
+    if not labels:
+        return ''
+    return f"{', '.join(labels)} hidden because VWAP Reclaim trigger price is lower or equal"
 
 
 def resolve_display_triggers(rows: pd.DataFrame) -> pd.DataFrame:

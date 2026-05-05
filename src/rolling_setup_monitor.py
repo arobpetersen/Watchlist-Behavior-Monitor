@@ -8,7 +8,7 @@ import pandas as pd
 
 from src.dashboard_queries import _clean_display_df, _close_bucket
 from src.feature_engine import session_filter
-from src.trigger_resolution import resolve_display_triggers, vwap_superseded_orh_display_values
+from src.trigger_resolution import resolve_display_triggers, vwap_orh_suppression_reason, vwap_superseded_orh_display_values
 from src.vwap_reclaim import assess_vwap_reclaim
 
 
@@ -79,6 +79,9 @@ DETAIL_COLUMNS = [
     'Raw VWAP Reclaim Result Reason',
     'Qualified VWAP Trigger Result',
     'Qualified VWAP Trigger Reason',
+    'ORH Display Suppression',
+    '1m ORH Trigger Price',
+    '5m ORH Trigger Price',
     'Trigger Level',
     'Reference Low',
     'Reference Basis',
@@ -1457,8 +1460,18 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
     raw_five_min_result = raw.get('raw_five_min_result', raw.get('five_min_result', blank_series)).apply(_blank)
     display_one_min_result = raw.get('one_min_result', raw_one_min_result).apply(_blank)
     display_five_min_result = raw.get('five_min_result', raw_five_min_result).apply(_blank)
+    vwap_selected = raw['trigger_type'].eq('VWAP Reclaim') if 'trigger_type' in raw else pd.Series(False, index=raw.index)
+    display_one_min_result = display_one_min_result.mask(vwap_selected, raw_one_min_result)
+    display_five_min_result = display_five_min_result.mask(vwap_selected, raw_five_min_result)
     qualified_vwap_result = raw.get('vwap_qualified_trigger_result', blank_series).apply(_blank)
     qualified_vwap_result = qualified_vwap_result.mask(qualified_vwap_result.eq('') & raw['trigger_type'].eq('VWAP Reclaim'), 'success')
+    orh_suppression_reason = pd.Series(
+        [
+            vwap_orh_suppression_reason(row, one, five)
+            for (_, row), one, five in zip(raw.iterrows(), display_one_min_result, display_five_min_result)
+        ],
+        index=raw.index,
+    )
     adjusted_orh = [
         vwap_superseded_orh_display_values(row, one, five)
         for (_, row), one, five in zip(raw.iterrows(), display_one_min_result, display_five_min_result)
@@ -1524,6 +1537,9 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Raw VWAP Reclaim Result Reason': raw.get('vwap_reclaim_result_reason', blank_series).apply(_blank),
         'Qualified VWAP Trigger Result': raw.get('vwap_qualified_trigger_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
         'Qualified VWAP Trigger Reason': raw.get('vwap_qualified_trigger_reason', blank_series).apply(_blank),
+        'ORH Display Suppression': orh_suppression_reason,
+        '1m ORH Trigger Price': raw.get('or_1m', blank_series).apply(lambda v: _fmt_price(_loads(v).get('orh'))),
+        '5m ORH Trigger Price': raw.get('or_5m', blank_series).apply(lambda v: _fmt_price(_loads(v).get('orh'))),
         'Trigger Level': raw['trigger_level'].apply(_fmt_price),
         'Reference Low': raw['reference_low'].apply(_fmt_price),
         'Reference Basis': raw['reference_basis'].apply(_blank),

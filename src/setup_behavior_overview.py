@@ -997,8 +997,7 @@ def _trigger_event_values(rows: pd.DataFrame, trigger_name: str) -> pd.Series:
     # blank so Alt Required remains the fallback event.
     trigger = rows['Trigger'] if 'Trigger' in rows else pd.Series('', index=rows.index)
     trigger_day = rows['Trigger Day'] if 'Trigger Day' in rows else pd.Series('', index=rows.index)
-    one = rows['1m ORH'] if '1m ORH' in rows else pd.Series('', index=rows.index)
-    five = rows['5m ORH'] if '5m ORH' in rows else pd.Series('', index=rows.index)
+    one, five = _visible_orh_results(rows)
     vwap = _qualified_vwap_values(rows)
     pdh = rows['PDH'] if 'PDH' in rows else pd.Series('', index=rows.index)
     lower_success = one.eq('success') | five.eq('success') | vwap.eq('success') | pdh.eq('success')

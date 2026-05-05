@@ -1872,6 +1872,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'Raw VWAP Reclaim Trigger Time', 'Raw VWAP Reclaim Trigger Price',
         'Raw VWAP Reclaim Stop Valid', 'Raw VWAP Reclaim Result Reason',
         'Qualified VWAP Trigger Result', 'Qualified VWAP Trigger Reason',
+        'ORH Display Suppression', '1m ORH Trigger Price', '5m ORH Trigger Price',
         'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
         '1m Low Swept Before Trigger', '1m ORH Reference Low', '1m ORH Reference Basis',
         '1m Post-Trigger Stop Breach', '5m Low Swept Before Trigger',
@@ -1918,7 +1919,7 @@ def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
 def test_rolling_setup_monitor_page_uses_db_backed_cache_token_and_perf_debug():
     page = open('pages/3_Rolling_Setup_Monitor.py', encoding='utf-8').read()
 
-    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-orh-sequencing-v2'" in page
+    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-actionable-display-v3'" in page
     assert "rolling_cache_token = f'{ROLLING_MONITOR_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_rolling_setup_sections(db_path, rolling_cache_token)' in page
     assert "PerfTimer('Rolling Setup Monitor')" in page
@@ -2153,6 +2154,8 @@ def test_format_section_table_marks_5m_orh_superseded_when_vwap_is_tighter():
         'raw_five_min_result': 'success',
         'one_min_result': 'failed',
         'five_min_result': 'success',
+        'or_1m': _or(orh=10.2),
+        'or_5m': _or(orh=10.8),
         'vwap_reclaim_result': 'success',
         'vwap_reclaim_trigger_price': 10.4,
         'vwap_qualified_trigger_result': 'success',
@@ -2187,6 +2190,7 @@ def test_format_section_table_marks_5m_orh_superseded_when_vwap_is_tighter():
     assert table.loc[0, 'Trigger'] == 'VWAP Reclaim'
     assert table.loc[0, '5m ORH'] == 'superseded'
     assert table.loc[0, '5m OR Result'] == 'success'
+    assert table.loc[0, 'ORH Display Suppression'] == '5m ORH hidden because VWAP Reclaim trigger price is lower or equal'
     assert table.loc[0, 'VWAP Reclaim'] == 'success'
     assert main_table(table).loc[0, '5m ORH'] == '-'
 
@@ -2201,6 +2205,8 @@ def test_format_section_table_marks_1m_orh_superseded_when_vwap_is_tighter():
         'raw_five_min_result': '-',
         'one_min_result': 'success',
         'five_min_result': '-',
+        'or_1m': _or(orh=10.8),
+        'or_5m': _or(orh=10.2),
         'vwap_reclaim_result': 'success',
         'vwap_reclaim_trigger_price': 10.4,
         'vwap_qualified_trigger_result': 'success',
@@ -2235,8 +2241,114 @@ def test_format_section_table_marks_1m_orh_superseded_when_vwap_is_tighter():
     assert table.loc[0, 'Trigger'] == 'VWAP Reclaim'
     assert table.loc[0, '1m ORH'] == 'superseded'
     assert table.loc[0, '1m OR Result'] == 'success'
+    assert table.loc[0, 'ORH Display Suppression'] == '1m ORH hidden because VWAP Reclaim trigger price is lower or equal'
     assert table.loc[0, 'VWAP Reclaim'] == 'success'
     assert main_table(table).loc[0, '1m ORH'] == '-'
+
+
+def test_format_section_table_marks_all_orh_successes_superseded_when_vwap_is_tighter():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'AAPL',
+        'status': 'Active',
+        'trigger_type': 'VWAP Reclaim',
+        'raw_one_min_result': 'success',
+        'raw_five_min_result': 'success',
+        'one_min_result': 'success',
+        'five_min_result': 'success',
+        'or_1m': _or(orh=10.8),
+        'or_5m': _or(orh=11.0),
+        'vwap_reclaim_result': 'success',
+        'vwap_reclaim_trigger_price': 10.4,
+        'vwap_qualified_trigger_result': 'success',
+        'vwap_qualified_trigger_reason': 'VWAP trigger price lower than 1m ORH',
+        'notes': '',
+        'current_pct': 0.01,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.4,
+        'reference_low': 9.8,
+        'reference_basis': 'VWAP Reclaim',
+        'trigger_break_time': pd.Timestamp('2026-05-01 10:10'),
+        'latest_close': 10.6,
+        'close_price': 10.0,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.06,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }])
+
+    table = _format_section_table(raw)
+    summary = day_summary(table)
+
+    assert table.loc[0, '1m ORH'] == 'superseded'
+    assert table.loc[0, '5m ORH'] == 'superseded'
+    assert table.loc[0, '1m OR Result'] == 'success'
+    assert table.loc[0, '5m OR Result'] == 'success'
+    assert table.loc[0, 'ORH Display Suppression'] == '1m ORH, 5m ORH hidden because VWAP Reclaim trigger price is lower or equal'
+    assert main_table(table).loc[0, '1m ORH'] == '-'
+    assert main_table(table).loc[0, '5m ORH'] == '-'
+    assert summary['VWAP Trigger'] == 1
+    assert summary['Clean 1m'] == 0
+    assert summary['Clean 5m'] == 0
+
+
+def test_format_section_table_keeps_lower_orh_success_visible_when_vwap_is_higher():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'AAPL',
+        'status': 'Active',
+        'trigger_type': 'VWAP Reclaim',
+        'raw_one_min_result': 'success',
+        'raw_five_min_result': 'success',
+        'one_min_result': 'success',
+        'five_min_result': 'success',
+        'or_1m': _or(orh=10.2),
+        'or_5m': _or(orh=10.8),
+        'vwap_reclaim_result': 'success',
+        'vwap_reclaim_trigger_price': 10.4,
+        'vwap_qualified_trigger_result': 'success',
+        'vwap_qualified_trigger_reason': 'VWAP selected over fallback trigger',
+        'notes': '',
+        'current_pct': 0.01,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': None,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 10.4,
+        'reference_low': 9.8,
+        'reference_basis': 'VWAP Reclaim',
+        'trigger_break_time': pd.Timestamp('2026-05-01 10:10'),
+        'latest_close': 10.6,
+        'close_price': 10.0,
+        'high_price': 10.8,
+        'low_price': 9.6,
+        'current_pct_from_setup_close': 0.06,
+        'max_gain_from_setup_close': 0.08,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, '1m ORH'] == 'success'
+    assert table.loc[0, '5m ORH'] == 'superseded'
+    assert main_table(table).loc[0, '1m ORH'] == 'success'
+    assert main_table(table).loc[0, '5m ORH'] == '-'
 
 
 def test_format_section_table_keeps_orh_success_when_vwap_does_not_qualify():
