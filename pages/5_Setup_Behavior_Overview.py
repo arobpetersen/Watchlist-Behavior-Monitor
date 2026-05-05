@@ -135,9 +135,6 @@ else:
             'This groups setups by their final/primary trigger label. For per-trigger success/failure, use Trigger Event Outcomes Across Windows.'
         )
 
-render_perf_debug(st, perf)
-
-
     st.subheader('Selected Window Ticker Detail')
     filter_cols = st.columns(4)
     with filter_cols[0]:
@@ -160,3 +157,5 @@ render_perf_debug(st, perf)
         opening_path_group=opening_path_group,
     )
     st.dataframe(filtered_detail, width='stretch', hide_index=True)
+
+render_perf_debug(st, perf)
