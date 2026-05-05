@@ -195,7 +195,7 @@ def test_summarize_window_counts_percentages_and_medians():
 
 def test_summarize_window_counts_close_below_be_later_failed_status():
     history = _history().copy()
-    history.loc[history['Ticker'].eq('AAA'), 'Current Status'] = 'Later Failed'
+    history.loc[history['Ticker'].eq('AAA'), 'Current Status'] = 'Failed D0'
     window = overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[1]
 
     out = summarize_window(history, window)

@@ -610,6 +610,7 @@ def test_close_below_be_for_vwap_reclaim_below_trigger_price_without_note_append
 
     assert out['notes'] == ''
     assert out['close_below_be'] is True
+    assert out['close_below_be_day'] == 0
 
 
 def test_close_below_be_for_non_vwap_trigger_below_breakeven_without_note_append():
@@ -623,6 +624,7 @@ def test_close_below_be_for_non_vwap_trigger_below_breakeven_without_note_append
 
     assert out['notes'] == ''
     assert out['close_below_be'] is True
+    assert out['close_below_be_day'] == 0
 
 
 def test_weak_close_note_skips_strong_close_failures_and_missing_inputs():
@@ -648,10 +650,13 @@ def test_weak_close_note_skips_strong_close_failures_and_missing_inputs():
 
     assert strong['notes'] == ''
     assert strong['close_below_be'] is False
+    assert strong['close_below_be_day'] is None
     assert failed['notes'] == ''
     assert failed['close_below_be'] is None
+    assert failed['close_below_be_day'] is None
     assert missing['notes'] == ''
     assert missing['close_below_be'] is None
+    assert missing['close_below_be_day'] is None
 
 
 def test_close_below_be_preserves_existing_notes_and_uses_current_return_fallback():
@@ -670,7 +675,21 @@ def test_close_below_be_preserves_existing_notes_and_uses_current_return_fallbac
 
     assert out['notes'] == 'Wide 5m OR'
     assert out['close_below_be'] is True
+    assert out['close_below_be_day'] is None
     assert duplicate['notes'] == out['notes']
+
+
+def test_close_below_be_current_return_fallback_uses_latest_day_when_available():
+    out = apply_weak_close_note({
+        'trigger_type': 'Alt Required',
+        'fail_day': None,
+        'current_pct': -0.01,
+        'latest_day': 4,
+        'notes': '',
+    })
+
+    assert out['close_below_be'] is True
+    assert out['close_below_be_day'] == 4
 
 
 def test_weak_close_column_displays_no_and_dash_states():
@@ -1552,30 +1571,47 @@ def test_trigger_day_display_values():
 
 def test_current_status_display_values():
     assert current_status_display('Success', None) == 'Active'
-    assert current_status_display('Success', None, True) == 'Later Failed'
+    assert current_status_display('Success', None, True) == 'Failed'
+    assert current_status_display('Success', None, True, 0) == 'Failed D0'
     assert current_status_display('Success', None, False) == 'Active'
+    assert current_status_display('Success', 0) == 'Failed D0'
     assert current_status_display('Success', 1) == 'Failed D1'
     assert current_status_display('Success', 2) == 'Failed D2'
     assert current_status_display('Success', 3) == 'Failed D3'
-    assert current_status_display('Fail', 0) == '—'
+    assert current_status_display('Fail', 0) == 'Failed D0'
+    assert current_status_display('Fail', None) == 'Failed'
     assert current_status_display('Unresolved', None) == '—'
 
-def test_successful_vwap_close_below_be_becomes_later_failed():
+def test_successful_vwap_close_below_be_displays_failed_day():
     raw = pd.DataFrame([{
         **_base_formatted_record(),
         'trigger_type': 'VWAP Reclaim',
         'vwap_qualified_trigger_result': 'success',
         'close_below_be': True,
+        'close_below_be_day': 0,
     }])
 
     table = _format_section_table(raw)
 
     assert table.loc[0, 'Trigger Day'] == 'Success'
-    assert table.loc[0, 'Current Status'] == 'Later Failed'
+    assert table.loc[0, 'Current Status'] == 'Failed D0'
     assert table.loc[0, 'Close < BE'] == 'Yes'
 
 
-def test_successful_non_vwap_close_below_be_becomes_later_failed():
+def test_successful_non_vwap_close_below_be_displays_failed_day():
+    raw = pd.DataFrame([{
+        **_base_formatted_record(),
+        'trigger_type': '1m ORH',
+        'close_below_be': True,
+        'close_below_be_day': 2,
+    }])
+
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Current Status'] == 'Failed D2'
+
+
+def test_close_below_be_unknown_failed_day_displays_failed():
     raw = pd.DataFrame([{
         **_base_formatted_record(),
         'trigger_type': '1m ORH',
@@ -1584,7 +1620,7 @@ def test_successful_non_vwap_close_below_be_becomes_later_failed():
 
     table = _format_section_table(raw)
 
-    assert table.loc[0, 'Current Status'] == 'Later Failed'
+    assert table.loc[0, 'Current Status'] == 'Failed'
 
 
 def test_successful_trigger_close_above_be_remains_active():
@@ -1625,7 +1661,7 @@ def test_trigger_day_failure_status_unchanged_by_close_below_be():
     table = _format_section_table(raw)
 
     assert table.loc[0, 'Trigger Day'] == 'Fail'
-    assert table.loc[0, 'Current Status'] == '—'
+    assert table.loc[0, 'Current Status'] == 'Failed D0'
 
 
 def test_hims_like_close_below_be_case_is_not_active():
@@ -1637,13 +1673,14 @@ def test_hims_like_close_below_be_case_is_not_active():
         'current_pct': -0.049,
         'max_pct': 0.005,
         'close_below_be': True,
+        'close_below_be_day': 0,
         'retest_days': [0, 1, 2, 3, 4],
     }])
 
     table = _format_section_table(raw)
 
     assert table.loc[0, 'Current Status'] != 'Active'
-    assert table.loc[0, 'Current Status'] == 'Later Failed'
+    assert table.loc[0, 'Current Status'] == 'Failed D0'
     assert table.loc[0, 'Retests'] == 'D0, D1, D2 +2'
 
 
@@ -2207,7 +2244,7 @@ def test_format_section_table_derives_status_display_fields():
     table = _format_section_table(raw)
 
     assert table['Trigger Day'].tolist() == ['Success', 'Success', 'Fail', 'Unresolved']
-    assert table['Current Status'].tolist() == ['Active', 'Failed D1', '—', '—']
+    assert table['Current Status'].tolist() == ['Active', 'Failed D1', 'Failed D0', '—']
 
 
 def test_day_summary_metrics():

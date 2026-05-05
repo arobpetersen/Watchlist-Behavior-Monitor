@@ -74,7 +74,16 @@ DETAIL_COLUMNS = [
     'Rating',
 ]
 
-CURRENT_STATUS_PRIORITY = {'Active': 0, 'Later Failed': 1, 'Failed D1': 2, 'Failed D2': 3, 'Failed D3': 4, '—': 5}
+CURRENT_STATUS_PRIORITY = {
+    'Active': 0,
+    'Failed D0': 1,
+    'Later Failed': 2,
+    'Failed': 2,
+    'Failed D1': 3,
+    'Failed D2': 4,
+    'Failed D3': 5,
+    '—': 6,
+}
 OPENING_PATH_FILTER_OPTIONS = [
     'All',
     'Clean 1m ORH Success',
@@ -144,6 +153,20 @@ def _display(value: Any) -> str:
         pass
     text = str(value)
     return '-' if text == '' or text.lower() == 'nan' else text
+
+
+def _status_priority(value: Any) -> int:
+    text = _display(value)
+    if text == 'Active':
+        return 0
+    if text.startswith('Failed D'):
+        try:
+            return 1 + int(float(text.removeprefix('Failed D')))
+        except (TypeError, ValueError):
+            return 50
+    if text in {'Failed', 'Later Failed'}:
+        return 50
+    return 99
 
 
 def overview_windows(setup_date_values) -> list[OverviewWindow]:
@@ -358,7 +381,7 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
         'Setup': rows['Setup'].apply(_display),
         'Rating': rows['Rating'].apply(_display),
     })
-    out['_status_priority'] = out['Current Status'].map(CURRENT_STATUS_PRIORITY).fillna(99)
+    out['_status_priority'] = out['Current Status'].apply(_status_priority)
     out['_current_sort'] = pd.to_numeric(out['Current'].str.rstrip('%'), errors='coerce').fillna(float('-inf'))
     out = out.sort_values(['Setup Date', '_status_priority', '_current_sort', 'Ticker'], ascending=[False, True, False, True])
     return out[DETAIL_COLUMNS]
@@ -462,7 +485,8 @@ def _count_int(value: Any) -> int:
 
 
 def _is_later_failed(series: pd.Series) -> pd.Series:
-    return series.isin({'Later Failed', 'Failed D1', 'Failed D2', 'Failed D3'})
+    normalized = series.fillna('').astype(str).str.strip()
+    return normalized.eq('Later Failed') | normalized.eq('Failed') | normalized.str.match(r'^Failed D\d+$')
 
 
 def _is_blank_or_dash(series: pd.Series) -> pd.Series:

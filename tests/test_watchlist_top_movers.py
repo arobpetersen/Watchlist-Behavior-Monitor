@@ -295,7 +295,7 @@ def test_active_table_filters_active_only_and_omits_current_status():
 
 def test_active_table_excludes_close_below_be_later_failed_rows():
     history = pd.DataFrame([
-        {'Ticker': 'HIMS', 'Setup Date': '2026-04-28', 'Trigger': 'VWAP Reclaim', 'Trigger Day': 'Success', 'Current Status': 'Later Failed', 'Close < BE': 'Yes', 'Latest Status Date': '2026-05-04', 'Ticker Latest Bar Date': '2026-05-04', 'Global Latest Bar Date': '2026-05-04', 'current_pct_raw': -0.049, 'max_pct_raw': 0.005},
+        {'Ticker': 'HIMS', 'Setup Date': '2026-04-28', 'Trigger': 'VWAP Reclaim', 'Trigger Day': 'Success', 'Current Status': 'Failed D0', 'Close < BE': 'Yes', 'Latest Status Date': '2026-05-04', 'Ticker Latest Bar Date': '2026-05-04', 'Global Latest Bar Date': '2026-05-04', 'current_pct_raw': -0.049, 'max_pct_raw': 0.005},
         {'Ticker': 'OK', 'Setup Date': '2026-04-28', 'Trigger': '1m ORH', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Close < BE': 'No', 'Latest Status Date': '2026-05-04', 'Ticker Latest Bar Date': '2026-05-04', 'Global Latest Bar Date': '2026-05-04', 'current_pct_raw': 0.02, 'max_pct_raw': 0.08},
     ])
 
@@ -347,7 +347,7 @@ def test_active_table_sorts_by_max_pct_then_current_pct():
 def test_active_table_excludes_non_active_statuses():
     history = pd.DataFrame([
         {'Ticker': 'ACTIVE', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
-        {'Ticker': 'LATER', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Current Status': 'Later Failed', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.30},
+        {'Ticker': 'LATER', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Current Status': 'Failed D2', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.30},
         {'Ticker': 'D1', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.29},
         {'Ticker': 'DAYFAIL', 'Setup Date': '2026-04-01', 'Trigger': 'Failed OR Trigger', 'Trigger Day': 'Fail', 'Current Status': '—', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.28},
         {'Ticker': 'UNRES', 'Setup Date': '2026-04-01', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved', 'Current Status': '—', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.27},

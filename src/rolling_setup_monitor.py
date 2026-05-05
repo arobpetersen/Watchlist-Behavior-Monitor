@@ -106,7 +106,16 @@ DETAIL_COLUMNS = [
     '1m Follow-Through / ATR14',
 ]
 
-STATUS_PRIORITY = {'Active': 0, 'Later Failed': 1, 'Failed D1': 2, 'Failed D2': 3, 'Failed D3': 4, '—': 5}
+STATUS_PRIORITY = {
+    'Active': 0,
+    'Failed D0': 1,
+    'Later Failed': 2,
+    'Failed': 2,
+    'Failed D1': 3,
+    'Failed D2': 4,
+    'Failed D3': 5,
+    '—': 6,
+}
 
 
 def _loads(value: Any) -> dict:
@@ -308,6 +317,18 @@ def _bool_or_none(value: Any) -> bool | None:
     return bool(value)
 
 
+def _status_priority(value: Any) -> int:
+    text = _blank(value).strip()
+    if text == 'Active':
+        return 0
+    if text.startswith('Failed D'):
+        day = _status_day(text.removeprefix('Failed D'))
+        return 1 + day if day is not None else 50
+    if text in {'Failed', 'Later Failed'}:
+        return 50
+    return 99
+
+
 def trigger_day_status(trigger_type: str, fail_day_value: int | None) -> str:
     if trigger_type == 'No Trigger':
         return 'Unresolved'
@@ -316,13 +337,36 @@ def trigger_day_status(trigger_type: str, fail_day_value: int | None) -> str:
     return 'Success'
 
 
-def current_status_display(trigger_day: str, fail_day_value: int | None, close_below_be: bool | None = None) -> str:
+def _status_day(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def current_status_display(
+    trigger_day: str,
+    fail_day_value: int | None,
+    close_below_be: bool | None = None,
+    close_below_be_day: int | None = None,
+) -> str:
+    fail_day_number = _status_day(fail_day_value)
+    if fail_day_number is not None:
+        return f'Failed D{fail_day_number}'
+    if trigger_day == 'Fail':
+        return 'Failed'
     if trigger_day != 'Success':
         return '—'
+    close_below_day_number = _status_day(close_below_be_day)
     if close_below_be is True:
-        return 'Later Failed'
-    if fail_day_value in {1, 2, 3}:
-        return f'Failed D{int(fail_day_value)}'
+        return f'Failed D{close_below_day_number}' if close_below_day_number is not None else 'Failed'
     return 'Active'
 
 
@@ -856,9 +900,9 @@ ACTIONABLE_TRIGGERS = {'VWAP Reclaim', '1m ORH', '5m ORH', 'PDH', 'Alt Required'
 def weak_close_assessment(record: dict) -> dict:
     trigger_type = _blank(record.get('trigger_type'))
     if trigger_type not in ACTIONABLE_TRIGGERS:
-        return {'close_below_be': None}
+        return {'close_below_be': None, 'close_below_be_day': None}
     if trigger_day_status(trigger_type, record.get('fail_day')) != 'Success':
-        return {'close_below_be': None}
+        return {'close_below_be': None, 'close_below_be_day': None}
 
     close = _num(record.get('close_price'))
     breakeven = _num(record.get('trigger_level'))
@@ -869,12 +913,14 @@ def weak_close_assessment(record: dict) -> dict:
             breakeven = _num(record.get(key))
 
     below_breakeven = close is not None and breakeven is not None and close < breakeven
+    close_below_be_day = 0 if below_breakeven else None
     if close is None or breakeven is None:
         current_pct = _num(record.get('current_pct'))
         if current_pct is None:
-            return {'close_below_be': None}
+            return {'close_below_be': None, 'close_below_be_day': None}
         below_breakeven = current_pct < 0
-    return {'close_below_be': bool(below_breakeven)}
+        close_below_be_day = _status_day(record.get('latest_day')) if below_breakeven else None
+    return {'close_below_be': bool(below_breakeven), 'close_below_be_day': close_below_be_day}
 
 
 def apply_weak_close_note(record: dict) -> dict:
@@ -882,6 +928,7 @@ def apply_weak_close_note(record: dict) -> dict:
     return {
         'notes': _blank(record.get('notes')),
         'close_below_be': assessment['close_below_be'],
+        'close_below_be_day': assessment['close_below_be_day'],
     }
 
 
@@ -1057,6 +1104,7 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
         base_price = trigger_level if trigger_level is not None else setup_close
         return {
             'latest_trading_date': None,
+            'latest_day': None,
             'latest_close': None,
             'current_pct': None,
             'max_pct': None,
@@ -1087,6 +1135,7 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
 
     return {
         'latest_trading_date': latest['trading_date'],
+        'latest_day': len(daily) - 1,
         'latest_close': latest_close,
         'current_pct': _change_pct(latest_close, base_price),
         'max_pct': _change_pct(max_high, base_price),
@@ -1106,7 +1155,7 @@ def sort_monitor_rows(df: pd.DataFrame) -> pd.DataFrame:
         return df.copy()
     table = df.copy()
     status_column = 'Current Status' if 'Current Status' in table else 'Status'
-    table['_status_priority'] = table[status_column].map(STATUS_PRIORITY).fillna(99)
+    table['_status_priority'] = table[status_column].apply(_status_priority)
     table['_current_sort'] = table['current_pct_raw'].fillna(float('-inf'))
     return table.sort_values(
         ['_status_priority', '_current_sort', 'Ticker'],
@@ -1215,7 +1264,7 @@ def format_monitor_table_html(df: pd.DataFrame) -> str:
   background: rgba(46, 160, 91, 0.24);
   border: 1px solid rgba(94, 218, 138, 0.36);
 }}
-.current-status-later-failed, .current-status-failed-d1, .current-status-failed-d2, .current-status-failed-d3, .trigger-day-fail, .result-failed {{
+.current-status-failed, .current-status-failed-d0, .current-status-failed-d1, .current-status-failed-d2, .current-status-failed-d3, .trigger-day-fail, .result-failed {{
   color: #ffc7c7;
   background: rgba(196, 61, 61, 0.24);
   border: 1px solid rgba(240, 112, 112, 0.35);
@@ -1331,7 +1380,7 @@ def day_summary(df: pd.DataFrame) -> dict:
         'Day Fail': int((df['Trigger Day'] == 'Fail').sum()) if not df.empty else 0,
         'Unresolved': int((df['Trigger Day'] == 'Unresolved').sum()) if not df.empty else 0,
         'Active': int((df['Current Status'] == 'Active').sum()) if not df.empty else 0,
-        'Later Failed': int(df['Current Status'].isin({'Later Failed', 'Failed D1', 'Failed D2', 'Failed D3'}).sum()) if not df.empty else 0,
+        'Later Failed': int(df['Current Status'].fillna('').astype(str).str.startswith('Failed').sum()) if not df.empty else 0,
         'Retested': int((df['Retests'] != '').sum()) if not df.empty and 'Retests' in df else 0,
         'Median Current %': _fmt_pct(df['current_pct_raw'].median()) if not df.empty else '',
         'Median Max %': _fmt_pct(df['max_pct_raw'].median()) if not df.empty else '',
@@ -1379,13 +1428,14 @@ def apply_setup_rating_updates(con, original: pd.DataFrame, edited: pd.DataFrame
 def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
     blank_series = pd.Series([None] * len(raw), index=raw.index)
     close_below_be = raw.get('close_below_be', blank_series).apply(_bool_or_none)
+    close_below_be_day = raw.get('close_below_be_day', blank_series)
     trigger_days = [
         trigger_day_status(trigger_type, fail_day_value)
         for trigger_type, fail_day_value in zip(raw['trigger_type'], raw['fail_day'])
     ]
     current_statuses = [
-        current_status_display(trigger_day, fail_day_value, close_flag)
-        for trigger_day, fail_day_value, close_flag in zip(trigger_days, raw['fail_day'], close_below_be)
+        current_status_display(trigger_day, fail_day_value, close_flag, close_day)
+        for trigger_day, fail_day_value, close_flag, close_day in zip(trigger_days, raw['fail_day'], close_below_be, close_below_be_day)
     ]
     pdh_governed = raw.get('pdh_governed', blank_series).map(lambda v: bool(v) if not pd.isna(v) else False)
     raw_one_min_result = raw.get('raw_one_min_result', raw.get('one_min_result', blank_series)).apply(_blank)
