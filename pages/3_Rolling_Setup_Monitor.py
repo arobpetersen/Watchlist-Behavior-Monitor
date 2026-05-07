@@ -8,6 +8,7 @@ from src.performance import PerfTimer, render_perf_debug
 from src.rolling_setup_monitor import (
     apply_setup_rating_updates,
     detail_table,
+    entry_tactic_dropdown_options,
     format_monitor_table_html,
     format_summary_blocks_html,
     main_table,
@@ -92,8 +93,8 @@ else:
             display_html = format_monitor_table_html(display)
         st.markdown(display_html, unsafe_allow_html=True)
 
-        with st.expander('Edit Setup / Rating', expanded=False):
-            editable = display[['Ticker', 'Setup', 'Rating']].copy()
+        with st.expander('Edit Setup / Entry Tactic / Rating', expanded=False):
+            editable = display[['Ticker', 'Setup', 'Entry Tactic', 'Rating']].copy()
             editable.insert(0, 'candidate_id', table['candidate_id'].tolist())
 
             edited = st.data_editor(
@@ -101,12 +102,16 @@ else:
                 key=f"monitor_metadata_editor_{section['setup_date']}",
                 width='stretch',
                 hide_index=True,
-                column_order=['Ticker', 'Setup', 'Rating'],
+                column_order=['Ticker', 'Setup', 'Entry Tactic', 'Rating'],
                 disabled=['Ticker'],
                 column_config={
                     'Setup': st.column_config.SelectboxColumn(
                         'Setup',
                         options=setup_dropdown_options(table),
+                    ),
+                    'Entry Tactic': st.column_config.SelectboxColumn(
+                        'Entry Tactic',
+                        options=entry_tactic_dropdown_options(table),
                     ),
                     'Rating': st.column_config.SelectboxColumn(
                         'Rating',
@@ -115,15 +120,19 @@ else:
                 },
             )
 
-            if st.button('Save Setup/Rating', key=f"save_monitor_{section['setup_date']}"):
+            if st.button('Save Manual Fields', key=f"save_monitor_{section['setup_date']}"):
                 edited_for_save = edited.copy()
                 edited_for_save['candidate_id'] = editable['candidate_id'].tolist()
-                changed = apply_setup_rating_updates(con, editable, edited_for_save)
-                if changed:
-                    st.success(f'Saved Setup/Rating for {changed} row(s).')
-                    st.rerun()
-                else:
-                    st.info('No Setup/Rating changes to save.')
+                try:
+                    changed = apply_setup_rating_updates(con, editable, edited_for_save)
+                    if changed:
+                        st.cache_data.clear()
+                        st.success('Saved setup/rating changes.')
+                        st.rerun()
+                    else:
+                        st.info('No changes to save.')
+                except Exception as exc:
+                    st.error(f'Save failed: {exc}')
 
         with st.expander('Show full detail table', expanded=False):
             with perf.measure(f"{section['setup_date']} detail table preparation"):

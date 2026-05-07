@@ -57,6 +57,7 @@ def _history() -> pd.DataFrame:
             'D3 High %': '-',
             'Retest Day': 'D1',
             'Setup': 'EP',
+            'Entry Tactic': 'Bias Flip',
             'Rating': '3',
             'current_pct_raw': 0.05,
             'max_pct_raw': 0.10,
@@ -288,10 +289,12 @@ def test_detail_rows_match_expected_columns_and_window_filter():
     assert detail.columns.tolist()[5:9] == ['PDH', '1m ORH', 'VWAP Reclaim', '5m ORH']
     assert 'VWAP Trigger' not in detail.columns
     assert 'Retests' in detail.columns
+    assert 'Entry Tactic' in detail.columns
     assert 'Retest' not in detail.columns
     assert 'Close < BE' in detail.columns
     assert detail['Ticker'].tolist() == ['AAA', 'EEE', 'BBB']
     assert detail.loc[0, 'Retests'] == 'D1'
+    assert detail.loc[0, 'Entry Tactic'] == 'Bias Flip'
     assert detail.loc[0, 'D3 High'] == '-'
     assert detail.loc[1, 'Setup'] == '-'
     assert detail.loc[1, 'Rating'] == '-'

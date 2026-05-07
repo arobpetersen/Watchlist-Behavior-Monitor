@@ -296,7 +296,7 @@ def test_db_cleanup_state_does_not_reintroduce_deleted_source_files(tmp_path: Pa
     watchlists_dir.mkdir()
     con = get_connection(':memory:')
     con.execute(
-        "insert into watchlist_candidates values (1, '2026-05-02', 'AAPL', null, '', '', null, '2026-05-02_backwatch.csv', current_timestamp)"
+        "insert into watchlist_candidates values (1, '2026-05-02', 'AAPL', null, '', null, '', null, '2026-05-02_backwatch.csv', current_timestamp)"
     )
     con.execute(
         "insert into watchlist_files values ('2026-05-02_backwatch.csv', 'hash', '2026-05-02', 1, 1, current_timestamp)"

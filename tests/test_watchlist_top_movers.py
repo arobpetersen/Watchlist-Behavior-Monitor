@@ -37,6 +37,7 @@ def _history() -> pd.DataFrame:
             'Latest Close': 15 + index,
             'D3 High %': f'{index + 3:.1f}%',
             'Setup': 'Flag',
+            'Entry Tactic': 'Gap Over Range' if index == 1 else '',
             'Rating': 3,
         })
     return pd.DataFrame(rows)
@@ -278,6 +279,13 @@ def test_setup_date_formats_as_date_only_in_tables_and_audit():
 
     assert result.table.loc[0, 'Setup Date'] == '2026-04-01'
     assert result.audit.loc[0, 'Setup Date'] == '2026-04-01'
+
+
+def test_top_movers_audit_displays_entry_tactic():
+    result = top_movers_from_history(_history().iloc[[0]], latest_date='2026-04-30')
+
+    assert 'Entry Tactic' in result.audit.columns
+    assert result.audit.loc[0, 'Entry Tactic'] == 'Gap Over Range'
     assert result.active_table.loc[0, 'Setup Date'] == '2026-04-01'
 
 

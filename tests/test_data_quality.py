@@ -18,9 +18,9 @@ def test_duplicate_candidate_keys_detects_natural_key_duplicates():
     con.execute("""
         insert into watchlist_candidates
         values
-        (1, '2026-05-01', 'AAPL', null, '', '', null, '2026-05-01_watchlist.csv', current_timestamp),
-        (2, '2026-05-01', 'AAPL', null, '', '', null, '2026-05-01_watchlist.csv', current_timestamp),
-        (3, '2026-05-01', 'MSFT', null, '', '', null, '2026-05-01_watchlist.csv', current_timestamp)
+        (1, '2026-05-01', 'AAPL', null, '', null, '', null, '2026-05-01_watchlist.csv', current_timestamp),
+        (2, '2026-05-01', 'AAPL', null, '', null, '', null, '2026-05-01_watchlist.csv', current_timestamp),
+        (3, '2026-05-01', 'MSFT', null, '', null, '', null, '2026-05-01_watchlist.csv', current_timestamp)
     """)
 
     out = duplicate_candidate_keys(con)
@@ -38,8 +38,8 @@ def test_duplicate_candidate_keys_empty_when_no_duplicates():
     con.execute("""
         insert into watchlist_candidates
         values
-        (1, '2026-05-01', 'AAPL', null, '', '', null, '2026-05-01_watchlist.csv', current_timestamp),
-        (2, '2026-05-01', 'AAPL', null, '', '', null, '2026-05-01_other.csv', current_timestamp)
+        (1, '2026-05-01', 'AAPL', null, '', null, '', null, '2026-05-01_watchlist.csv', current_timestamp),
+        (2, '2026-05-01', 'AAPL', null, '', null, '', null, '2026-05-01_other.csv', current_timestamp)
     """)
 
     out = duplicate_candidate_keys(con)
@@ -112,7 +112,7 @@ def test_partial_intraday_sessions_from_db_reads_cached_bars():
 def _insert_full_market_data(con) -> None:
     con.execute("""
         insert into watchlist_candidates
-        values (1, '2026-05-01', 'AAPL', null, '', '', null, '2026-05-01_watchlist.csv', current_timestamp)
+        values (1, '2026-05-01', 'AAPL', null, '', null, '', null, '2026-05-01_watchlist.csv', current_timestamp)
     """)
     con.execute("""
         insert into daily_bars
@@ -170,7 +170,7 @@ def test_data_health_latest_setup_matches_latest_candidate_date():
     _insert_full_market_data(con)
     con.execute("""
         insert into watchlist_candidates
-        values (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+        values (2, '2026-05-04', 'MSFT', null, '', null, '', null, '2026-05-04_watchlist.csv', current_timestamp)
     """)
     con.execute("""
         insert into daily_bars
@@ -217,7 +217,7 @@ def test_data_health_flags_setup_newer_than_daily_bars():
     _insert_full_market_data(con)
     con.execute("""
         insert into watchlist_candidates
-        values (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+        values (2, '2026-05-04', 'MSFT', null, '', null, '', null, '2026-05-04_watchlist.csv', current_timestamp)
     """)
 
     summary = build_data_health_summary(con)
@@ -233,7 +233,7 @@ def test_data_health_flags_setup_newer_than_intraday_bars():
     _insert_full_market_data(con)
     con.execute("""
         insert into watchlist_candidates
-        values (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+        values (2, '2026-05-04', 'MSFT', null, '', null, '', null, '2026-05-04_watchlist.csv', current_timestamp)
     """)
     con.execute("""
         insert into daily_bars
@@ -253,8 +253,8 @@ def test_data_health_candidate_rows_match_watchlist_candidates_count():
     con.execute("""
         insert into watchlist_candidates
         values
-        (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp),
-        (3, '2026-05-04', 'NVDA', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+        (2, '2026-05-04', 'MSFT', null, '', null, '', null, '2026-05-04_watchlist.csv', current_timestamp),
+        (3, '2026-05-04', 'NVDA', null, '', null, '', null, '2026-05-04_watchlist.csv', current_timestamp)
     """)
 
     summary = build_data_health_summary(con)
@@ -268,7 +268,7 @@ def test_data_health_latest_setup_updates_after_new_candidate_insert():
     assert build_data_health_summary(con).latest_setup_date == '2026-05-01'
     con.execute("""
         insert into watchlist_candidates
-        values (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+        values (2, '2026-05-04', 'MSFT', null, '', null, '', null, '2026-05-04_watchlist.csv', current_timestamp)
     """)
 
     assert build_data_health_summary(con).latest_setup_date == '2026-05-04'
@@ -279,7 +279,7 @@ def test_data_health_latest_setup_matches_setup_behavior_setup_dates_source():
     _insert_full_market_data(con)
     con.execute("""
         insert into watchlist_candidates
-        values (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+        values (2, '2026-05-04', 'MSFT', null, '', null, '', null, '2026-05-04_watchlist.csv', current_timestamp)
     """)
 
     summary = build_data_health_summary(con)
@@ -293,7 +293,7 @@ def test_data_health_summary_check_data_when_duplicate_candidate_keys_exist():
     _insert_full_market_data(con)
     con.execute("""
         insert into watchlist_candidates
-        values (2, '2026-05-01', 'AAPL', null, '', '', null, '2026-05-01_watchlist.csv', current_timestamp)
+        values (2, '2026-05-01', 'AAPL', null, '', null, '', null, '2026-05-01_watchlist.csv', current_timestamp)
     """)
 
     summary = build_data_health_summary(con)
@@ -306,7 +306,7 @@ def test_data_health_summary_check_data_when_partial_intraday_sessions_exist():
     con = get_connection(':memory:')
     con.execute("""
         insert into watchlist_candidates
-        values (1, '2026-05-01', 'AAPL', null, '', '', null, '2026-05-01_watchlist.csv', current_timestamp)
+        values (1, '2026-05-01', 'AAPL', null, '', null, '', null, '2026-05-01_watchlist.csv', current_timestamp)
     """)
     con.execute("""
         insert into daily_bars
@@ -328,7 +328,7 @@ def test_data_health_summary_handles_missing_optional_market_tables_gracefully()
     con = get_connection(':memory:')
     con.execute("""
         insert into watchlist_candidates
-        values (1, '2026-05-01', 'AAPL', null, '', '', null, '2026-05-01_watchlist.csv', current_timestamp)
+        values (1, '2026-05-01', 'AAPL', null, '', null, '', null, '2026-05-01_watchlist.csv', current_timestamp)
     """)
 
     summary = build_data_health_summary(con)
@@ -367,7 +367,7 @@ def test_data_health_line_includes_reason_when_check_data():
     _insert_full_market_data(con)
     con.execute("""
         insert into watchlist_candidates
-        values (2, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_watchlist.csv', current_timestamp)
+        values (2, '2026-05-04', 'MSFT', null, '', null, '', null, '2026-05-04_watchlist.csv', current_timestamp)
     """)
 
     line = data_health_line(build_data_health_summary(con))

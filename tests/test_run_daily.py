@@ -28,8 +28,8 @@ def test_read_timeout_for_one_ticker_does_not_stop_other_tickers(tmp_path: Path,
     con.execute(
         """
         insert into watchlist_candidates values
-        (1, '2026-05-06', 'OKLO', null, '', '', null, '2026-05-06_backwatch.csv', current_timestamp),
-        (2, '2026-05-06', 'MSFT', null, '', '', null, '2026-05-06_backwatch.csv', current_timestamp)
+        (1, '2026-05-06', 'OKLO', null, '', null, '', null, '2026-05-06_backwatch.csv', current_timestamp),
+        (2, '2026-05-06', 'MSFT', null, '', null, '', null, '2026-05-06_backwatch.csv', current_timestamp)
         """
     )
     con.close()

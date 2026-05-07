@@ -71,6 +71,7 @@ AUDIT_COLUMNS = [
     'Max Date',
     'D3 High',
     'Setup',
+    'Entry Tactic',
     'Rating',
     'Source',
     'Missing Data Notes',
@@ -415,6 +416,7 @@ def _audit_table(rows: pd.DataFrame) -> pd.DataFrame:
     rows['Max Date'] = _first_existing(rows, ['Max Date', 'max_date']).apply(_display)
     rows['D3 High'] = _first_existing(rows, ['D3 High %', 'D3 High', 'd3_high_pct_raw']).apply(_display)
     rows['Setup'] = _first_existing(rows, ['Setup', 'setup']).apply(_display)
+    rows['Entry Tactic'] = _first_existing(rows, ['Entry Tactic', 'entry_tactic']).apply(_display)
     rows['Rating'] = _first_existing(rows, ['Rating', 'rating']).apply(_display)
     rows['Source'] = _first_existing(rows, ['Source', 'source_file', 'Source File']).apply(_display)
     rows['Missing Data Notes'] = _missing_notes(rows)

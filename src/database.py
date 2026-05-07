@@ -18,6 +18,7 @@ create table if not exists watchlist_candidates (
   ticker text,
   rating double,
   setup text,
+  entry_tactic text,
   focus text,
   key_level double,
   source_file text,
@@ -100,6 +101,10 @@ create table if not exists behavior_labels (
 def get_connection(db_path: str):
     con = duckdb.connect(db_path)
     con.execute(SCHEMA_SQL)
+    for column, column_type in [
+        ('entry_tactic', 'text'),
+    ]:
+        con.execute(f'alter table watchlist_candidates add column if not exists {column} {column_type}')
     for column, column_type in [
         ('prior_close', 'double'),
         ('gap_pct', 'double'),

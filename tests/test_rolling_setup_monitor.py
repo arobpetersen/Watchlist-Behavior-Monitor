@@ -14,6 +14,7 @@ from src.rolling_setup_monitor import (
     day_summary,
     derive_trigger_reference,
     detail_table,
+    entry_tactic_dropdown_options,
     fail_day,
     format_monitor_table_html,
     format_summary_blocks_html,
@@ -1858,7 +1859,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
 
     assert main_table(df).columns.tolist() == [
         'Ticker', 'Current Status', 'Trigger Day', 'Trigger', 'PDH', '1m ORH', 'VWAP Reclaim', '5m ORH', 'Notes',
-        'Current %', 'Max %', 'Close < BE', 'D3 High %', 'Retests', 'Setup', 'Rating',
+        'Current %', 'Max %', 'Close < BE', 'D3 High %', 'Retests', 'Setup', 'Entry Tactic', 'Rating',
     ]
     assert 'VWAP Trigger' not in main_table(df).columns
     assert detail_table(df).columns.tolist() == [
@@ -1887,6 +1888,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
     ]
     assert main_table(df).loc[0, 'Rating'] == ''
     assert main_table(df).loc[0, 'Setup'] == 'Pullback'
+    assert main_table(df).loc[0, 'Entry Tactic'] == ''
 
 
 def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
@@ -1926,6 +1928,11 @@ def test_rolling_setup_monitor_page_uses_db_backed_cache_token_and_perf_debug():
     assert 'load_rolling_setup_sections(db_path, rolling_cache_token)' in page
     assert "PerfTimer('Rolling Setup Monitor')" in page
     assert 'render_perf_debug(st, perf)' in page
+    assert "Edit Setup / Entry Tactic / Rating" in page
+    assert "display[['Ticker', 'Setup', 'Entry Tactic', 'Rating']]" in page
+    assert 'entry_tactic_dropdown_options(table)' in page
+    assert 'st.cache_data.clear()' in page
+    assert "st.success('Saved setup/rating changes.')" in page
 
 
 def test_format_summary_blocks_html_includes_group_titles():
@@ -2621,10 +2628,12 @@ def test_sort_monitor_rows_current_status_then_current_pct():
 
 
 def test_setup_dropdown_preserves_unknown_existing_value():
-    df = pd.DataFrame({'Setup': ['Custom Pattern', 'EP'], 'Rating': ['7', '1']})
+    df = pd.DataFrame({'Setup': ['Custom Pattern', 'EP'], 'Entry Tactic': ['Bias Flip', 'Custom Tactic'], 'Rating': ['7', '1']})
 
     assert 'Pullback' in setup_dropdown_options(df)
     assert 'Custom Pattern' in setup_dropdown_options(df)
+    assert 'Bias Flip' in entry_tactic_dropdown_options(df)
+    assert 'Custom Tactic' in entry_tactic_dropdown_options(df)
     assert '7' in rating_dropdown_options(df)
 
 
@@ -2636,7 +2645,61 @@ def test_apply_setup_rating_updates_only_manual_fields():
     edited = pd.DataFrame([{'candidate_id': 1, 'Setup': 'Pullback', 'Rating': '3', 'Status': 'Failed'}])
 
     changed = apply_setup_rating_updates(con, original, edited)
-    row = con.execute('select setup,rating,ticker from watchlist_candidates where candidate_id=1').fetchone()
+    row = con.execute('select setup,entry_tactic,rating,ticker from watchlist_candidates where candidate_id=1').fetchone()
 
     assert changed == 1
-    assert row == ('Pullback', 3.0, 'AAPL')
+    assert row == ('Pullback', None, 3.0, 'AAPL')
+
+
+def test_apply_setup_rating_updates_persists_setup_entry_tactic_and_rating():
+    con = duckdb.connect(':memory:')
+    con.execute('create table watchlist_candidates (candidate_id bigint, setup text, entry_tactic text, rating double, ticker text)')
+    con.execute("insert into watchlist_candidates values (1, 'EP', null, 2, 'AAPL')")
+    original = pd.DataFrame([{'candidate_id': 1, 'Setup': 'EP', 'Entry Tactic': '', 'Rating': '2'}])
+    edited = pd.DataFrame([{'candidate_id': 1, 'Setup': 'Pullback', 'Entry Tactic': 'Bias Flip', 'Rating': '4'}])
+
+    changed = apply_setup_rating_updates(con, original, edited)
+    row = con.execute('select setup,entry_tactic,rating from watchlist_candidates where candidate_id=1').fetchone()
+
+    assert changed == 1
+    assert row == ('Pullback', 'Bias Flip', 4.0)
+
+
+def test_apply_setup_rating_updates_handles_no_change_and_blanks():
+    con = duckdb.connect(':memory:')
+    con.execute('create table watchlist_candidates (candidate_id bigint, setup text, entry_tactic text, rating double, ticker text)')
+    con.execute("insert into watchlist_candidates values (1, 'Pullback', 'Reclaim', 4, 'AAPL')")
+    original = pd.DataFrame([{'candidate_id': 1, 'Setup': 'Pullback', 'Entry Tactic': 'Reclaim', 'Rating': '4'}])
+
+    assert apply_setup_rating_updates(con, original, original.copy()) == 0
+
+    edited = pd.DataFrame([{'candidate_id': 1, 'Setup': '', 'Entry Tactic': '', 'Rating': ''}])
+    assert apply_setup_rating_updates(con, original, edited) == 1
+    assert con.execute('select setup,entry_tactic,rating from watchlist_candidates where candidate_id=1').fetchone() == (None, None, None)
+
+
+def test_apply_setup_rating_updates_all_entry_tactic_options_persist():
+    for tactic in ['Bias Flip', 'Gap Over Range', 'Micro Gap', 'OR Range Break', 'Reclaim']:
+        con = duckdb.connect(':memory:')
+        con.execute('create table watchlist_candidates (candidate_id bigint, setup text, entry_tactic text, rating double, ticker text)')
+        con.execute("insert into watchlist_candidates values (1, null, null, null, 'AAPL')")
+        original = pd.DataFrame([{'candidate_id': 1, 'Setup': '', 'Entry Tactic': '', 'Rating': ''}])
+        edited = pd.DataFrame([{'candidate_id': 1, 'Setup': '', 'Entry Tactic': tactic, 'Rating': ''}])
+
+        assert apply_setup_rating_updates(con, original, edited) == 1
+        assert con.execute('select entry_tactic from watchlist_candidates where candidate_id=1').fetchone()[0] == tactic
+
+
+def test_apply_setup_rating_updates_rejects_invalid_entry_tactic():
+    con = duckdb.connect(':memory:')
+    con.execute('create table watchlist_candidates (candidate_id bigint, setup text, entry_tactic text, rating double, ticker text)')
+    con.execute("insert into watchlist_candidates values (1, null, null, null, 'AAPL')")
+    original = pd.DataFrame([{'candidate_id': 1, 'Setup': '', 'Entry Tactic': '', 'Rating': ''}])
+    edited = pd.DataFrame([{'candidate_id': 1, 'Setup': '', 'Entry Tactic': 'Chase', 'Rating': ''}])
+
+    try:
+        apply_setup_rating_updates(con, original, edited)
+    except ValueError as exc:
+        assert 'Invalid Entry Tactic: Chase' in str(exc)
+    else:
+        raise AssertionError('Expected ValueError')

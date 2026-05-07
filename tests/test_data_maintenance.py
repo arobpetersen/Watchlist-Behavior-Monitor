@@ -13,8 +13,8 @@ def test_remove_sample_data_removes_candidates_features_labels_and_keeps_bars():
     con.execute("""
         insert into watchlist_candidates
         values
-        (1, '2026-04-30', 'AAPL', null, '', '', null, 'sample_2026-04-30_watchlist.csv', current_timestamp),
-        (2, '2026-04-30', 'MSFT', null, '', '', null, '2026-04-30_backwatch_real.csv', current_timestamp)
+        (1, '2026-04-30', 'AAPL', null, '', null, '', null, 'sample_2026-04-30_watchlist.csv', current_timestamp),
+        (2, '2026-04-30', 'MSFT', null, '', null, '', null, '2026-04-30_backwatch_real.csv', current_timestamp)
     """)
     con.execute("""
         insert into watchlist_files
@@ -45,9 +45,9 @@ def test_preview_watchlist_source_removal_shows_candidate_and_derived_counts():
     con.execute("""
         insert into watchlist_candidates
         values
-        (10, '2026-05-02', 'CRML', null, '', '', null, '2026-05-02_backwatch_stale.csv', current_timestamp),
-        (11, '2026-05-02', 'AAPL', null, '', '', null, '2026-05-02_backwatch_stale.csv', current_timestamp),
-        (12, '2026-05-04', 'MSFT', null, '', '', null, '2026-05-04_backwatch_good.csv', current_timestamp)
+        (10, '2026-05-02', 'CRML', null, '', null, '', null, '2026-05-02_backwatch_stale.csv', current_timestamp),
+        (11, '2026-05-02', 'AAPL', null, '', null, '', null, '2026-05-02_backwatch_stale.csv', current_timestamp),
+        (12, '2026-05-04', 'MSFT', null, '', null, '', null, '2026-05-04_backwatch_good.csv', current_timestamp)
     """)
     con.execute("""
         insert into watchlist_files
@@ -77,9 +77,9 @@ def test_remove_watchlist_source_deletes_only_selected_source_and_keeps_bars():
     con.execute("""
         insert into watchlist_candidates
         values
-        (20, '2026-05-02', 'CRML', null, '', '', null, '2026-05-02_backwatch_stale.csv', current_timestamp),
-        (21, '2026-05-02', 'CRML', null, '', '', null, '2026-05-02_backwatch_good.csv', current_timestamp),
-        (22, '2026-05-04', 'AAPL', null, '', '', null, '2026-05-04_backwatch_good.csv', current_timestamp)
+        (20, '2026-05-02', 'CRML', null, '', null, '', null, '2026-05-02_backwatch_stale.csv', current_timestamp),
+        (21, '2026-05-02', 'CRML', null, '', null, '', null, '2026-05-02_backwatch_good.csv', current_timestamp),
+        (22, '2026-05-04', 'AAPL', null, '', null, '', null, '2026-05-04_backwatch_good.csv', current_timestamp)
     """)
     con.execute("""
         insert into watchlist_files
@@ -138,8 +138,8 @@ def test_orphaned_watchlist_sources_find_imports_missing_from_folder(tmp_path):
     con.execute("""
         insert into watchlist_candidates
         values
-        (30, '2026-05-02', 'CRML', null, '', '', null, '2026-05-02_backwatch_missing.csv', current_timestamp),
-        (31, '2026-05-04', 'AAPL', null, '', '', null, '2026-05-04_backwatch_present.csv', current_timestamp)
+        (30, '2026-05-02', 'CRML', null, '', null, '', null, '2026-05-02_backwatch_missing.csv', current_timestamp),
+        (31, '2026-05-04', 'AAPL', null, '', null, '', null, '2026-05-04_backwatch_present.csv', current_timestamp)
     """)
     con.execute("""
         insert into watchlist_files

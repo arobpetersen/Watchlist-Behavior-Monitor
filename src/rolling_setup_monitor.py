@@ -24,6 +24,7 @@ SETUP_OPTIONS = [
     
 ]
 
+ENTRY_TACTIC_OPTIONS = ['', 'Bias Flip', 'Gap Over Range', 'Micro Gap', 'OR Range Break', 'Reclaim']
 RATING_OPTIONS = ['', '1', '2', '3', '4', '5']
 
 MAIN_COLUMNS = [
@@ -42,6 +43,7 @@ MAIN_COLUMNS = [
     'D3 High %',
     'Retests',
     'Setup',
+    'Entry Tactic',
     'Rating',
 ]
 
@@ -1421,9 +1423,20 @@ def rating_dropdown_options(table: pd.DataFrame) -> list[str]:
     return [*RATING_OPTIONS, *extras]
 
 
+def entry_tactic_dropdown_options(table: pd.DataFrame) -> list[str]:
+    values = [] if table.empty or 'Entry Tactic' not in table else [_blank(v) for v in table['Entry Tactic'].tolist()]
+    extras = sorted({v for v in values if v and v not in ENTRY_TACTIC_OPTIONS})
+    return [*ENTRY_TACTIC_OPTIONS, *extras]
+
+
+def ensure_manual_metadata_columns(con) -> None:
+    con.execute('alter table watchlist_candidates add column if not exists entry_tactic text')
+
+
 def apply_setup_rating_updates(con, original: pd.DataFrame, edited: pd.DataFrame) -> int:
     if original.empty or edited.empty:
         return 0
+    ensure_manual_metadata_columns(con)
     changed = 0
     original_by_id = original.set_index('candidate_id')
     for _, row in edited.iterrows():
@@ -1432,17 +1445,26 @@ def apply_setup_rating_updates(con, original: pd.DataFrame, edited: pd.DataFrame
             continue
         prior = original_by_id.loc[candidate_id]
         new_setup = _blank(row.get('Setup'))
+        new_entry_tactic = _blank(row.get('Entry Tactic'))
         new_rating = _blank(row.get('Rating'))
         old_setup = _blank(prior.get('Setup'))
+        old_entry_tactic = _blank(prior.get('Entry Tactic'))
         old_rating = _blank(prior.get('Rating'))
-        if new_setup == old_setup and new_rating == old_rating:
+        if new_entry_tactic and new_entry_tactic not in ENTRY_TACTIC_OPTIONS:
+            raise ValueError(f'Invalid Entry Tactic: {new_entry_tactic}')
+        if new_setup == old_setup and new_entry_tactic == old_entry_tactic and new_rating == old_rating:
             continue
         rating_value = None if new_rating == '' else float(new_rating)
         con.execute(
-            'update watchlist_candidates set setup=?, rating=? where candidate_id=?',
-            [new_setup or None, rating_value, int(candidate_id)],
+            'update watchlist_candidates set setup=?, entry_tactic=?, rating=? where candidate_id=?',
+            [new_setup or None, new_entry_tactic or None, rating_value, int(candidate_id)],
         )
         changed += 1
+    if changed:
+        try:
+            con.commit()
+        except Exception:
+            pass
     return changed
 
 
@@ -1520,6 +1542,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         ],
         'Retest Dates Raw': raw.get('retest_dates', blank_series).apply(_fmt_retest_dates_raw),
         'Setup': raw['setup'].apply(_blank),
+        'Entry Tactic': raw.get('entry_tactic', blank_series).apply(_blank),
         'Rating': raw['rating'].apply(lambda v: '' if _num(v) is None else str(int(float(v))) if float(v).is_integer() else str(float(v))),
         'Prior Day High': raw.get('prior_day_high', blank_series).apply(_fmt_price),
         'Setup Day Open': raw.get('setup_day_open', blank_series).apply(_fmt_price),
@@ -1606,7 +1629,7 @@ def rolling_setup_monitor(con, setup_dates: int = 5, perf=None) -> list[dict]:
     start = perf_counter()
     candidates = con.execute(
         f"""
-        select c.candidate_id,c.watchlist_date,c.ticker,c.rating,c.setup,c.focus,
+        select c.candidate_id,c.watchlist_date,c.ticker,c.rating,c.setup,c.entry_tactic,c.focus,
                f.high_price,f.low_price,f.close_price,f.close_location,
                f.open_price,f.or_1m,f.or_5m,f.or_15m,f.atr20,f.relative_volume_20d,f.range_vs_atr20
         from watchlist_candidates c

@@ -11,7 +11,7 @@ def _insert_candidate(con, candidate_id: int, setup_date: str, ticker: str, sour
     con.execute(
         """
         insert into watchlist_candidates
-        values (?, ?, ?, null, '', '', null, ?, current_timestamp)
+        values (?, ?, ?, null, '', null, '', null, ?, current_timestamp)
         """,
         [candidate_id, setup_date, ticker, source_file],
     )

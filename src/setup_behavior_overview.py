@@ -73,6 +73,7 @@ DETAIL_COLUMNS = [
     'D3 High',
     'Retests',
     'Setup',
+    'Entry Tactic',
     'Rating',
 ]
 
@@ -408,6 +409,7 @@ def detail_rows(history: pd.DataFrame, window: OverviewWindow) -> pd.DataFrame:
         'D3 High': rows['D3 High %'].apply(_display),
         'Retests': retests.apply(_display),
         'Setup': rows['Setup'].apply(_display),
+        'Entry Tactic': rows['Entry Tactic'].apply(_display) if 'Entry Tactic' in rows else '-',
         'Rating': rows['Rating'].apply(_display),
     })
     out['_status_priority'] = out['Current Status'].apply(_status_priority)
