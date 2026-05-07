@@ -18,6 +18,7 @@ VISIBLE_COLUMNS = [
     'Setup Date',
     'Trigger',
     'Current Status',
+    'Entry Ref',
     'Current %',
     'Max %',
     'Max High',
@@ -31,22 +32,29 @@ ACTIVE_VISIBLE_COLUMNS = [
     'Ticker',
     'Setup Date',
     'Trigger',
+    'Entry Ref',
+    'Rating',
     'Current %',
     'Max %',
     'Max High',
     'Days Since Setup',
     'Retested',
     'Breakeven / D1 Eligible',
+    'Setup',
     'Notes',
 ]
 AUDIT_COLUMNS = [
     'Rank',
     'Ticker',
     'Setup Date',
+    'Entry Ref',
     'Reference Price',
     'Latest Close',
     'Max Date',
+    'Max High',
     'D3 High',
+    'Setup Current %',
+    'Setup Max %',
     'Setup',
     'Rating',
     'Source',
@@ -82,9 +90,35 @@ def _first_existing(rows: pd.DataFrame, names: list[str], default: Any = None) -
 
 def _numeric(rows: pd.DataFrame, names: list[str]) -> pd.Series:
     values = _first_existing(rows, names)
-    text = values.astype(str)
-    numeric = pd.to_numeric(text.str.rstrip('%'), errors='coerce')
+    text = values.astype(str).str.strip()
+    cleaned = (
+        text.str.rstrip('%')
+        .str.replace('$', '', regex=False)
+        .str.replace(',', '', regex=False)
+    )
+    numeric = pd.to_numeric(cleaned, errors='coerce')
     return numeric.where(~text.str.contains('%', regex=False), numeric / 100)
+
+
+def _change_from_reference(values: pd.Series, reference: pd.Series) -> pd.Series:
+    return ((values - reference) / reference).where(reference.notna() & reference.ne(0) & values.notna())
+
+
+def _entry_reference(rows: pd.DataFrame) -> pd.Series:
+    trigger = _first_existing(rows, ['Trigger', 'trigger_type']).astype(str).str.strip()
+    trigger_level = _numeric(rows, ['Trigger Level', 'trigger_level', 'Reference Price', 'base_price'])
+    vwap_trigger = _numeric(
+        rows,
+        [
+            'VWAP Reclaim Trigger Price',
+            'Raw VWAP Reclaim Trigger Price',
+            'vwap_reclaim_trigger_price',
+        ],
+    )
+    entry_ref = trigger_level.copy()
+    entry_ref = entry_ref.where(~trigger.eq('VWAP Reclaim') | vwap_trigger.isna(), vwap_trigger)
+    no_entry_trigger = trigger.isin({'', '-', '—', 'No Trigger'})
+    return entry_ref.mask(no_entry_trigger | entry_ref.isna() | entry_ref.le(0))
 
 
 def _fmt_pct(value: Any) -> str:
@@ -168,10 +202,14 @@ def _missing_notes(rows: pd.DataFrame) -> pd.Series:
     notes = []
     for _, row in rows.iterrows():
         missing = []
+        if pd.isna(row.get('_entry_ref')):
+            missing.append('Entry Ref')
         if pd.isna(row.get('_current_sort')):
-            missing.append('Current %')
+            missing.append('Current % from entry')
         if pd.isna(row.get('_max_sort')):
-            missing.append('Max %')
+            missing.append('Max % from entry')
+        if _display(row.get('Latest Close')) == '-':
+            missing.append('Latest Close')
         if _display(row.get('Max High')) == '-':
             missing.append('Max High')
         notes.append('Missing: ' + ', '.join(missing) if missing else '-')
@@ -226,20 +264,35 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
     rows = resolve_display_triggers(rows.copy())
     rows['Setup Date'] = pd.to_datetime(rows['Setup Date'])
     rows['_setup_date_display'] = _format_setup_date(rows['Setup Date'])
-    rows['_current_sort'] = _numeric(rows, ['current_pct_raw', 'Current %'])
-    rows['_max_sort'] = _numeric(rows, ['max_pct_raw', 'Max %'])
+    rows['_setup_current_sort'] = _numeric(rows, ['current_pct_raw', 'Current %', 'Current vs Setup Close'])
+    rows['_setup_max_sort'] = _numeric(rows, ['max_pct_raw', 'Max %', 'Max Gain from Setup Close'])
+    rows['_entry_ref'] = _entry_reference(rows)
+    latest_close = _numeric(rows, ['Latest Close', 'latest_close'])
+    max_high = _numeric(rows, ['Max High', 'max_high'])
+    rows['_current_sort'] = _numeric(rows, ['current_from_entry_pct_raw', 'Current From Entry %']).combine_first(
+        _change_from_reference(latest_close, rows['_entry_ref'])
+    )
+    rows['_max_sort'] = _numeric(rows, ['max_from_entry_pct_raw', 'Max From Entry %']).combine_first(
+        _change_from_reference(max_high, rows['_entry_ref'])
+    )
     rows['_days_sort'] = _days_since(rows['Setup Date'], pd.to_datetime(latest_date) if latest_date is not None else None)
+    rows['_rating_sort'] = _numeric(rows, ['Rating', 'rating'])
 
     rows['Ticker'] = _first_existing(rows, ['Ticker', 'ticker']).apply(_display)
     rows['Trigger'] = _first_existing(rows, ['Trigger', 'trigger_type']).apply(_display)
     rows['Current Status'] = _first_existing(rows, ['Current Status', 'Status', 'status']).apply(_display)
+    rows['Entry Ref'] = rows['_entry_ref'].apply(_fmt_price)
     rows['Current %'] = rows['_current_sort'].apply(_fmt_pct)
     rows['Max %'] = rows['_max_sort'].apply(_fmt_pct)
-    rows['Max High'] = _first_existing(rows, ['Max High', 'max_high']).apply(_fmt_price)
+    rows['Setup Current %'] = rows['_setup_current_sort'].apply(_fmt_pct)
+    rows['Setup Max %'] = rows['_setup_max_sort'].apply(_fmt_pct)
+    rows['Max High'] = max_high.apply(_fmt_price)
     rows['Days Since Setup'] = rows['_days_sort'].apply(lambda v: '-' if pd.isna(v) else int(v))
     rows['Retested'] = _first_existing(rows, ['Retested', 'Retest', 'Retest Day', 'retest_day']).apply(_display)
     rows['Breakeven / D1 Eligible'] = _breakeven_or_d1(rows).apply(_display)
     rows['Notes'] = _first_existing(rows, ['Notes', 'notes']).apply(_display)
+    rows['Setup'] = _first_existing(rows, ['Setup', 'setup']).apply(_display)
+    rows['Rating'] = _first_existing(rows, ['Rating', 'rating']).apply(_display)
     rows['Setup Date'] = rows['_setup_date_display']
     return rows
 
@@ -247,8 +300,8 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
 def _active_top_movers_table(rows: pd.DataFrame) -> pd.DataFrame:
     active_rows = rows[rows['Current Status'].eq('Active')].copy()
     active_rows = active_rows.sort_values(
-        ['_max_sort', '_current_sort', 'Setup Date', 'Ticker'],
-        ascending=[False, False, False, True],
+        ['_current_sort', '_rating_sort', '_max_sort', 'Setup Date', 'Ticker'],
+        ascending=[False, False, False, False, True],
         na_position='last',
     ).head(10).copy()
     active_rows.insert(0, 'Rank', range(1, len(active_rows) + 1))
