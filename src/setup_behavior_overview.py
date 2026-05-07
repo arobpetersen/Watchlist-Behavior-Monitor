@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from html import escape
 import re
+from time import perf_counter
 from typing import Any
 
 import pandas as pd
@@ -195,11 +196,21 @@ def setup_dates(con) -> list[pd.Timestamp]:
     return [_date(r[0]) for r in rows]
 
 
-def monitor_history(con) -> pd.DataFrame:
+def monitor_history(con, perf=None) -> pd.DataFrame:
+    start = perf_counter()
     dates = setup_dates(con)
+    if perf is not None:
+        perf.add('monitor_history SQL: setup dates', perf_counter() - start)
     if not dates:
         return pd.DataFrame()
-    sections = rolling_setup_monitor(con, setup_dates=len(dates))
+    start = perf_counter()
+    try:
+        sections = rolling_setup_monitor(con, setup_dates=len(dates), perf=perf)
+    except TypeError:
+        sections = rolling_setup_monitor(con, setup_dates=len(dates))
+    if perf is not None:
+        perf.add('monitor_history rolling sections build', perf_counter() - start)
+    start = perf_counter()
     frames = []
     for section in sections:
         table = section['table'].copy()
@@ -209,7 +220,13 @@ def monitor_history(con) -> pd.DataFrame:
         return pd.DataFrame()
     history = pd.concat(frames, ignore_index=True)
     history['Setup Date'] = pd.to_datetime(history['Setup Date'])
-    return _add_vwap_reclaim_events(con, history)
+    if perf is not None:
+        perf.add('monitor_history concat/normalize', perf_counter() - start)
+    start = perf_counter()
+    history = _add_vwap_reclaim_events(con, history, perf=perf)
+    if perf is not None:
+        perf.add('monitor_history VWAP/display trigger pass', perf_counter() - start)
+    return history
 
 
 def _vwap_reclaim_defaults(history: pd.DataFrame) -> pd.DataFrame:
@@ -237,7 +254,7 @@ def _vwap_reclaim_defaults(history: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _add_vwap_reclaim_events(con, history: pd.DataFrame) -> pd.DataFrame:
+def _add_vwap_reclaim_events(con, history: pd.DataFrame, perf=None) -> pd.DataFrame:
     """Attach raw VWAP diagnostics and qualified VWAP trigger display fields."""
     history = _vwap_reclaim_defaults(history)
     if history.empty or 'Ticker' not in history or 'Setup Date' not in history:
@@ -251,6 +268,7 @@ def _add_vwap_reclaim_events(con, history: pd.DataFrame) -> pd.DataFrame:
     ticker_placeholders = ','.join(['?'] * len(tickers))
     date_placeholders = ','.join(['?'] * len(setup_dates))
     try:
+        start = perf_counter()
         bars = con.execute(
             f"""
             select ticker, trading_date, timestamp_et, open, high, low, close, volume
@@ -261,12 +279,15 @@ def _add_vwap_reclaim_events(con, history: pd.DataFrame) -> pd.DataFrame:
             """,
             tickers + setup_dates,
         ).df()
+        if perf is not None:
+            perf.add('monitor_history SQL: VWAP intraday bars', perf_counter() - start)
     except Exception:
         return history
 
     if bars.empty:
         return history
 
+    start = perf_counter()
     bars['ticker'] = bars['ticker'].astype(str)
     bars['trading_date'] = pd.to_datetime(bars['trading_date'], errors='coerce').dt.date.astype(str)
     grouped = {
@@ -287,7 +308,13 @@ def _add_vwap_reclaim_events(con, history: pd.DataFrame) -> pd.DataFrame:
         history.at[idx, 'Raw VWAP Reclaim Trigger Time'] = result.get('trigger_time') or ''
         history.at[idx, 'Raw VWAP Reclaim Trigger Price'] = result.get('trigger_price')
         history.at[idx, 'Raw VWAP Reclaim Result Reason'] = result.get('result_reason') or result.get('failure_reason') or ''
-    return resolve_display_triggers(history)
+    if perf is not None:
+        perf.add('monitor_history derivation: raw VWAP reclaim', perf_counter() - start)
+    start = perf_counter()
+    history = resolve_display_triggers(history)
+    if perf is not None:
+        perf.add('monitor_history derivation: final trigger resolution', perf_counter() - start)
+    return history
 
 
 def _count(series: pd.Series, value: str) -> int:
@@ -1285,8 +1312,11 @@ def metric_cards_html(groups: list[dict]) -> str:
 '''
 
 
-def setup_behavior_overview(con) -> dict:
+def setup_behavior_overview(con, history: pd.DataFrame | None = None, perf=None) -> dict:
+    start = perf_counter()
     dates = setup_dates(con)
+    if perf is not None:
+        perf.add('Setup Behavior SQL: setup dates', perf_counter() - start)
     if not dates:
         return {
             'summary': pd.DataFrame(columns=COMPARISON_COLUMNS),
@@ -1308,18 +1338,32 @@ def setup_behavior_overview(con) -> dict:
         }
 
     windows = overview_windows(dates)
-    history = monitor_history(con)
+    if history is None:
+        start = perf_counter()
+        history = monitor_history(con, perf=perf)
+        if perf is not None:
+            perf.add('Setup Behavior monitor_history build', perf_counter() - start)
+    start = perf_counter()
     window_summaries = pd.DataFrame([summarize_window(history, window) for window in windows], columns=FULL_SUMMARY_COLUMNS)
     summary = comparison_rows(window_summaries)
     summary_by_window = {row['Window']: row.to_dict() for _, row in window_summaries.iterrows()}
+    if perf is not None:
+        perf.add('Setup Behavior aggregation: summaries', perf_counter() - start)
+    start = perf_counter()
     details = {window.label: detail_rows(history, window) for window in windows}
+    if perf is not None:
+        perf.add('Setup Behavior formatting: detail rows', perf_counter() - start)
+    start = perf_counter()
     history_by_window = {}
     for window in windows:
         included = {date.date() for date in window.setup_dates}
         history_by_window[window.label] = history[pd.to_datetime(history['Setup Date']).dt.date.isin(included)].copy() if not history.empty else pd.DataFrame()
     opening_behavior = {label: opening_behavior_table(history_by_window[label]) for label in summary_by_window}
     trigger_outcomes = trigger_outcome_comparison(history_by_window)
-    return {
+    if perf is not None:
+        perf.add('Setup Behavior aggregation: trigger/opening tables', perf_counter() - start)
+    start = perf_counter()
+    result = {
         'summary': summary,
         'window_summaries': window_summaries,
         'breakdowns': {label: selected_window_metrics(row) for label, row in summary_by_window.items()},
@@ -1344,3 +1388,6 @@ def setup_behavior_overview(con) -> dict:
         'details': details,
         'windows': windows,
     }
+    if perf is not None:
+        perf.add('Setup Behavior formatting: display table assembly', perf_counter() - start)
+    return result

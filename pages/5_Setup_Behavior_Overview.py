@@ -3,6 +3,7 @@ import streamlit as st
 from src.config import get_settings
 from src.data_health_indicator import data_health_cache_token, load_data_health_summary, render_data_health_indicator
 from src.database import get_connection
+from src.monitor_history_loader import MONITOR_HISTORY_CACHE_VERSION, load_cached_monitor_history
 from src.performance import PerfTimer, render_perf_debug
 from src.setup_behavior_overview import (
     OPENING_BEHAVIOR_MAIN_COLUMNS,
@@ -24,9 +25,11 @@ OVERVIEW_CACHE_VERSION = 'setup-overview-vwap-actionable-display-v2'
 
 
 @st.cache_data(show_spinner=False)
-def load_setup_behavior_overview(db_path: str, cache_version: str) -> dict:
+def load_setup_behavior_overview(db_path: str, cache_version: str, _history) -> tuple[dict, list[dict]]:
+    timer = PerfTimer('Setup Behavior Overview Build', enabled=True)
     con = get_connection(db_path)
-    return setup_behavior_overview(con)
+    overview = setup_behavior_overview(con, history=_history, perf=timer)
+    return overview, timer.rows()
 
 
 def ensure_overview_display_tables(overview: dict) -> dict:
@@ -59,6 +62,7 @@ st.title('Setup Behavior Overview')
 st.caption('Rolling summary of Back-Watch setup behavior across recent setup-date windows.')
 st.caption('D3 High only includes setups with completed D3 data.')
 overview_cache_token = f'{OVERVIEW_CACHE_VERSION}:{data_health_cache_token(db_path)}'
+monitor_history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{data_health_cache_token(db_path)}'
 with perf.measure('Data Health load'):
     health_summary = load_data_health_summary(db_path, data_health_cache_token(db_path))
 render_data_health_indicator(health_summary)
@@ -79,8 +83,14 @@ with st.expander('Definitions / Logic', expanded=False):
         """
     )
 
+with perf.measure('shared monitor_history load'):
+    history, history_timings = load_cached_monitor_history(db_path, monitor_history_cache_token)
+perf.extend(history_timings, prefix='monitor_history detail: ')
+
 with perf.measure('Setup Behavior Overview data build'):
-    overview = ensure_overview_display_tables(load_setup_behavior_overview(db_path, overview_cache_token))
+    overview, overview_timings = load_setup_behavior_overview(db_path, overview_cache_token, history)
+    overview = ensure_overview_display_tables(overview)
+perf.extend(overview_timings, prefix='overview detail: ')
 
 if overview['summary'].empty:
     st.info('No setup candidates yet. Process Back-Watch files to populate setup behavior history.')

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any
 
 import pandas as pd
@@ -282,6 +283,7 @@ def top_movers_from_history(
     setup_window: str = DEFAULT_SETUP_WINDOW,
     top_n: int = 20,
     sort_by: str = 'Max %',
+    mapped_history: pd.DataFrame | None = None,
 ) -> TopMoverResult:
     if history.empty:
         return TopMoverResult(
@@ -291,11 +293,13 @@ def top_movers_from_history(
             pd.DataFrame(columns=AUDIT_COLUMNS),
         )
 
-    all_rows = _mapped_top_mover_rows(history, latest_date)
+    all_rows = mapped_history.copy() if mapped_history is not None else _mapped_top_mover_rows(history, latest_date)
     portfolio_table = hypothetical_optimal_portfolio(all_rows)
     active_table = _active_top_movers_table(all_rows)
 
-    rows = filter_setup_window(history, setup_window).copy()
+    rows = filter_setup_window(all_rows, setup_window).copy()
+    if '_setup_date_display' in rows:
+        rows['Setup Date'] = rows['_setup_date_display']
     if rows.empty:
         return TopMoverResult(
             portfolio_table.reset_index(drop=True),
@@ -303,8 +307,6 @@ def top_movers_from_history(
             pd.DataFrame(columns=VISIBLE_COLUMNS),
             pd.DataFrame(columns=AUDIT_COLUMNS),
         )
-
-    rows = _mapped_top_mover_rows(rows, latest_date)
 
     if sort_by == 'Current %':
         sort_cols = ['_current_sort', '_max_sort', 'Setup Date', 'Ticker']
@@ -321,6 +323,12 @@ def top_movers_from_history(
     table = rows[VISIBLE_COLUMNS].copy()
     audit = _audit_table(rows)
     return TopMoverResult(portfolio_table.reset_index(drop=True), active_table.reset_index(drop=True), table.reset_index(drop=True), audit.reset_index(drop=True))
+
+
+def prepare_top_mover_rows(history: pd.DataFrame, latest_date: pd.Timestamp | str | None = None) -> pd.DataFrame:
+    if history.empty:
+        return history.copy()
+    return _mapped_top_mover_rows(history, latest_date)
 
 
 def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str | None) -> pd.DataFrame:
@@ -413,13 +421,21 @@ def _audit_table(rows: pd.DataFrame) -> pd.DataFrame:
     return rows[AUDIT_COLUMNS].copy()
 
 
-def load_top_movers(con) -> tuple[pd.DataFrame, pd.Timestamp | None]:
-    history = monitor_history(con)
+def load_top_movers(con, history: pd.DataFrame | None = None, perf=None) -> tuple[pd.DataFrame, pd.Timestamp | None]:
+    if history is None:
+        start = perf_counter()
+        history = monitor_history(con, perf=perf)
+        if perf is not None:
+            perf.add('Top Movers monitor_history build', perf_counter() - start)
+    start = perf_counter()
     latest = latest_market_date(con, history)
+    if perf is not None:
+        perf.add('Top Movers SQL: latest market date', perf_counter() - start)
     if not history.empty and 'Ticker' in history:
         tickers = history['Ticker'].dropna().astype(str).unique().tolist()
         if tickers:
             try:
+                start = perf_counter()
                 latest_by_ticker = con.execute(
                     f"""
                     select ticker, max(trading_date) as ticker_latest_bar_date
@@ -429,6 +445,8 @@ def load_top_movers(con) -> tuple[pd.DataFrame, pd.Timestamp | None]:
                     """,
                     tickers,
                 ).df()
+                if perf is not None:
+                    perf.add('Top Movers SQL: ticker latest dates', perf_counter() - start)
                 history = history.merge(latest_by_ticker, how='left', left_on='Ticker', right_on='ticker')
                 history = history.drop(columns=['ticker'], errors='ignore')
             except Exception:

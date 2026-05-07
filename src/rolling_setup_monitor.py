@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from html import escape
+from time import perf_counter
 from typing import Any
 
 import pandas as pd
@@ -1587,7 +1588,8 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
     return display
 
 
-def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
+def rolling_setup_monitor(con, setup_dates: int = 5, perf=None) -> list[dict]:
+    start = perf_counter()
     dates = [
         r[0]
         for r in con.execute(
@@ -1595,10 +1597,13 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
             [setup_dates],
         ).fetchall()
     ]
+    if perf is not None:
+        perf.add('Rolling Setup Monitor SQL: setup dates', perf_counter() - start)
     if not dates:
         return []
 
     placeholders = ','.join(['?'] * len(dates))
+    start = perf_counter()
     candidates = con.execute(
         f"""
         select c.candidate_id,c.watchlist_date,c.ticker,c.rating,c.setup,c.focus,
@@ -1611,14 +1616,20 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
         """,
         dates,
     ).df()
+    if perf is not None:
+        perf.add('Rolling Setup Monitor SQL: candidates/features', perf_counter() - start)
     if candidates.empty:
         return []
 
     tickers = candidates['ticker'].dropna().astype(str).unique().tolist()
+    start = perf_counter()
     daily_bars = con.execute(
         f"select * from daily_bars where ticker in ({','.join(['?'] * len(tickers))}) order by ticker,trading_date",
         tickers,
     ).df() if tickers else pd.DataFrame()
+    if perf is not None:
+        perf.add('Rolling Setup Monitor SQL: daily bars', perf_counter() - start)
+    start = perf_counter()
     intraday_bars = con.execute(
         f"""
         select * from intraday_bars_1m
@@ -1628,14 +1639,25 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
         """,
         [*tickers, *dates],
     ).df() if tickers else pd.DataFrame()
+    if perf is not None:
+        perf.add('Rolling Setup Monitor SQL: intraday bars', perf_counter() - start)
 
     rows = []
+    bar_slice_seconds = 0.0
+    trigger_seconds = 0.0
+    orh_pdh_seconds = 0.0
+    vwap_seconds = 0.0
+    follow_retest_seconds = 0.0
+    status_note_seconds = 0.0
     for _, item in candidates.iterrows():
         record = item.to_dict()
         setup_date = pd.to_datetime(record['watchlist_date']).date()
+        start = perf_counter()
         ticker_intraday = _bars_for_ticker_date(intraday_bars, record['ticker'], setup_date)
         ticker_daily = _daily_for_ticker(daily_bars, record['ticker'], setup_date)
         prior_day_high = _prior_day_high_for_ticker(daily_bars, record['ticker'], setup_date)
+        bar_slice_seconds += perf_counter() - start
+        start = perf_counter()
         trigger = derive_trigger_reference(
             record.get('or_1m'),
             record.get('or_5m'),
@@ -1646,9 +1668,12 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
             prior_day_high,
             record.get('open_price'),
         )
+        trigger_seconds += perf_counter() - start
+        start = perf_counter()
         one_assessment = orh_trigger_assessment(record.get('or_1m'), 1, ticker_intraday, ticker_daily)
         five_assessment = orh_trigger_assessment(record.get('or_5m'), 5, ticker_intraday, ticker_daily)
         pdh_assessment = pdh_trigger_assessment(prior_day_high, record.get('open_price'), ticker_intraday, ticker_daily)
+        orh_pdh_seconds += perf_counter() - start
         record.update({
             'prior_day_high': pdh_assessment.get('prior_day_high'),
             'setup_day_open': pdh_assessment.get('setup_day_open'),
@@ -1663,12 +1688,20 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
             'five_min_post_trigger_stop_breached': five_assessment.get('post_trigger_stop_breached'),
         })
         record.update(trigger)
+        start = perf_counter()
         record.update(_vwap_reclaim_fields(ticker_intraday, record.get('reference_low')))
+        vwap_seconds += perf_counter() - start
+        start = perf_counter()
         record.update(resolve_display_triggers(pd.DataFrame([record])).iloc[0].to_dict())
+        trigger_seconds += perf_counter() - start
         record.update(opening_range_width_notes(record.get('or_1m'), record.get('or_5m'), record.get('atr20')))
+        start = perf_counter()
         record.update(_follow_through(record, daily_bars, intraday_bars))
+        follow_retest_seconds += perf_counter() - start
+        start = perf_counter()
         raw_one_min_result = opening_range_result(record.get('or_1m'), 1, record['trigger_type'], ticker_intraday, ticker_daily)
         raw_five_min_result = opening_range_result(record.get('or_5m'), 5, record['trigger_type'], ticker_intraday, ticker_daily)
+        orh_pdh_seconds += perf_counter() - start
         record['raw_one_min_result'] = raw_one_min_result
         record['raw_five_min_result'] = raw_five_min_result
         if record.get('pdh_governed'):
@@ -1677,11 +1710,21 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
         else:
             record['one_min_result'] = raw_one_min_result or '-'
             record['five_min_result'] = '-' if record['trigger_type'] == '1m ORH' else raw_five_min_result or '-'
+        start = perf_counter()
         record.update(apply_one_min_quality_notes(record, ticker_intraday))
         record.update(apply_weak_close_note(record))
         record['status'] = status_for(record['trigger_type'], record['fail_day'])
+        status_note_seconds += perf_counter() - start
         rows.append(record)
+    if perf is not None:
+        perf.add('Rolling Setup Monitor derivation: bar slicing', bar_slice_seconds)
+        perf.add('Rolling Setup Monitor derivation: trigger resolution', trigger_seconds)
+        perf.add('Rolling Setup Monitor derivation: ORH/PDH triggers', orh_pdh_seconds)
+        perf.add('Rolling Setup Monitor derivation: VWAP reclaim', vwap_seconds)
+        perf.add('Rolling Setup Monitor derivation: retests/follow-through', follow_retest_seconds)
+        perf.add('Rolling Setup Monitor derivation: close < BE/status/notes', status_note_seconds)
 
+    start = perf_counter()
     raw = pd.DataFrame(rows)
     sections = []
     for setup_date, group in raw.groupby('watchlist_date', sort=False):
@@ -1691,4 +1734,6 @@ def rolling_setup_monitor(con, setup_dates: int = 5) -> list[dict]:
             'summary': day_summary(table),
             'table': sort_monitor_rows(table),
         })
+    if perf is not None:
+        perf.add('Rolling Setup Monitor dataframe formatting', perf_counter() - start)
     return sections

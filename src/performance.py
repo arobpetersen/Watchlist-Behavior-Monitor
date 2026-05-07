@@ -36,6 +36,17 @@ class PerfTimer:
         self.timings.append((label, seconds))
         LOGGER.info('%s: %s %.3fs', self.page, label, seconds)
 
+    def extend(self, rows: list[dict] | list[tuple[str, float]], prefix: str = '') -> None:
+        if not self.enabled:
+            return
+        for row in rows:
+            if isinstance(row, dict):
+                label = str(row.get('Step', ''))
+                seconds = float(row.get('Seconds', 0) or 0)
+            else:
+                label, seconds = row
+            self.add(f'{prefix}{label}', float(seconds))
+
     def finish(self) -> None:
         self.add('total page data/render path', perf_counter() - self._start)
 

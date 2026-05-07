@@ -8,6 +8,7 @@ from src.watchlist_top_movers import (
     PORTFOLIO_VISIBLE_COLUMNS,
     VISIBLE_COLUMNS,
     filter_setup_window,
+    prepare_top_mover_rows,
     top_movers_from_history,
 )
 
@@ -100,7 +101,8 @@ def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
 
     assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-hypothetical-portfolio-v2'" in page
     assert "top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
-    assert 'load_watchlist_top_movers(db_path, top_movers_cache_token)' in page
+    assert 'load_watchlist_top_movers(db_path, top_movers_cache_token, base_history)' in page
+    assert 'load_cached_monitor_history(db_path, monitor_history_cache_token)' in page
     assert "PerfTimer('Watchlist Top Movers')" in page
     assert 'render_perf_debug(st, perf)' in page
     assert "st.caption(f'Active rows: {len(all_active_result.active_table)}')" in page
@@ -112,6 +114,19 @@ def test_top_n_filtering_and_deterministic_rank_assignment():
 
     assert result.table['Rank'].tolist() == [1, 2, 3]
     assert result.table['Ticker'].tolist() == ['T12', 'T11', 'T10']
+
+
+def test_prepared_top_mover_rows_preserve_output_values():
+    history = _history()
+    mapped = prepare_top_mover_rows(history, latest_date='2026-04-30')
+
+    dynamic = top_movers_from_history(history, latest_date='2026-04-30', top_n=10)
+    optimized = top_movers_from_history(history, latest_date='2026-04-30', top_n=10, mapped_history=mapped)
+
+    pd.testing.assert_frame_equal(optimized.portfolio_table, dynamic.portfolio_table)
+    pd.testing.assert_frame_equal(optimized.active_table, dynamic.active_table)
+    pd.testing.assert_frame_equal(optimized.table, dynamic.table)
+    pd.testing.assert_frame_equal(optimized.audit, dynamic.audit)
 
 
 def test_max_pct_sort_behavior_uses_current_pct_tiebreaker():

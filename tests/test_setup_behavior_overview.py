@@ -1743,3 +1743,66 @@ def test_setup_behavior_overview_handles_zero_setup_dates():
     assert out['trigger_event_shift_highlights'] == {}
     assert out['details'] == {}
     assert out['windows'] == []
+
+
+def test_setup_behavior_overview_from_prebuilt_history_matches_dynamic(monkeypatch):
+    dates = [pd.Timestamp('2026-04-01'), pd.Timestamp('2026-04-02')]
+    history = pd.DataFrame([
+        {
+            'Setup Date': '2026-04-01',
+            'Ticker': 'AAPL',
+            'Current Status': 'Active',
+            'Trigger Day': 'Success',
+            'Trigger': '1m ORH',
+            'PDH': '-',
+            '1m ORH': 'success',
+            '5m ORH': '-',
+            'VWAP Reclaim': '-',
+            'Notes': '',
+            'Current %': '2.0%',
+            'Max %': '5.0%',
+            'Close < BE': '',
+            'D3 High %': '-',
+            'Retests': '',
+            'Setup': 'EP',
+            'Rating': '4',
+            'current_pct_raw': 0.02,
+            'max_pct_raw': 0.05,
+            'd3_high_pct_raw': None,
+        },
+        {
+            'Setup Date': '2026-04-02',
+            'Ticker': 'MSFT',
+            'Current Status': 'Failed D1',
+            'Trigger Day': 'Success',
+            'Trigger': 'PDH',
+            'PDH': 'success',
+            '1m ORH': '-',
+            '5m ORH': '-',
+            'VWAP Reclaim': '-',
+            'Notes': '',
+            'Current %': '-1.0%',
+            'Max %': '3.0%',
+            'Close < BE': 'Yes',
+            'D3 High %': '-',
+            'Retests': 'D1',
+            'Setup': 'Pullback',
+            'Rating': '3',
+            'current_pct_raw': -0.01,
+            'max_pct_raw': 0.03,
+            'd3_high_pct_raw': None,
+        },
+    ])
+
+    monkeypatch.setattr('src.setup_behavior_overview.setup_dates', lambda _con: dates)
+    monkeypatch.setattr('src.setup_behavior_overview.monitor_history', lambda _con, perf=None: history)
+
+    dynamic = setup_behavior_overview(object())
+    optimized = setup_behavior_overview(object(), history=history)
+
+    pd.testing.assert_frame_equal(optimized['summary'], dynamic['summary'])
+    pd.testing.assert_frame_equal(optimized['window_summaries'], dynamic['window_summaries'])
+    assert optimized['reads'] == dynamic['reads']
+    assert optimized['snapshots'] == dynamic['snapshots']
+    for label in dynamic['details']:
+        pd.testing.assert_frame_equal(optimized['details'][label], dynamic['details'][label])

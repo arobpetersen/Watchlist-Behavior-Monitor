@@ -23,8 +23,9 @@ ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-actionable-display-v3'
 
 @st.cache_data(show_spinner=False)
 def load_rolling_setup_sections(db_path: str, cache_version: str):
+    timer = PerfTimer('Rolling Setup Monitor Build', enabled=True)
     con = get_connection(db_path)
-    return rolling_setup_monitor(con, setup_dates=5)
+    return rolling_setup_monitor(con, setup_dates=5, perf=timer), timer.rows()
 
 
 perf = PerfTimer('Rolling Setup Monitor')
@@ -75,7 +76,8 @@ with st.expander('Audit OR Trigger', expanded=False):
 
 rolling_cache_token = f'{ROLLING_MONITOR_CACHE_VERSION}:{data_health_cache_token(db_path)}'
 with perf.measure('Rolling Setup Monitor data build'):
-    sections = load_rolling_setup_sections(db_path, rolling_cache_token)
+    sections, build_timings = load_rolling_setup_sections(db_path, rolling_cache_token)
+perf.extend(build_timings, prefix='cache miss detail: ')
 if not sections:
     st.info('No setup candidates yet.')
 else:
