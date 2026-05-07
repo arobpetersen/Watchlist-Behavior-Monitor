@@ -46,9 +46,10 @@ PORTFOLIO_VISIBLE_COLUMNS = [
     'Rating',
     'Current %',
     'Max %',
-    'Close < BE',
+    'Days Since Setup',
     'Retests',
     'Setup',
+    'Entry Tactic',
 ]
 AUDIT_COLUMNS = [
     'Rank',
@@ -270,7 +271,7 @@ def hypothetical_optimal_portfolio(rows: pd.DataFrame, limit: int = 8) -> pd.Dat
     if out.empty:
         return pd.DataFrame(columns=PORTFOLIO_VISIBLE_COLUMNS)
     out = out.sort_values(
-        ['_rating_sort', '_current_sort', '_max_sort', 'Setup Date', 'Ticker'],
+        ['_current_sort', '_rating_sort', '_max_sort', 'Setup Date', 'Ticker'],
         ascending=[False, False, False, False, True],
         na_position='last',
     ).head(int(limit)).copy()
@@ -378,6 +379,7 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
     rows['Breakeven / D1 Eligible'] = _breakeven_or_d1(rows).apply(_display)
     rows['Notes'] = _first_existing(rows, ['Notes', 'notes']).apply(_display)
     rows['Setup'] = _first_existing(rows, ['Setup', 'setup']).apply(_display)
+    rows['Entry Tactic'] = _first_existing(rows, ['Entry Tactic', 'entry_tactic']).apply(_display)
     rows['Rating'] = _first_existing(rows, ['Rating', 'rating']).apply(_display)
     rows['Setup Date'] = rows['_setup_date_display']
     rows['Active Table Exclusion Reason'] = _active_exclusion_reasons(rows)

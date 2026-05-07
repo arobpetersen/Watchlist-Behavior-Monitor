@@ -94,6 +94,7 @@ def test_page_groups_active_table_outside_setup_window_filters():
     assert 'No active 4–5 star names currently qualify.' in page
     assert 'Uses all available setup dates and is not affected by the setup-window filter below.' in page
     assert "setup_window='All'" in page
+    assert 'Eligible: Active, fresh status, rating 4-5, not Close < BE. Ranked by Current %.' in page
     assert 'top_n=20' in page
 
 
@@ -342,14 +343,22 @@ def test_hypothetical_portfolio_filters_and_ranks_candidates():
     result = top_movers_from_history(_portfolio_history(), latest_date='2026-04-30', setup_window='All')
 
     assert result.portfolio_table.columns.tolist() == PORTFOLIO_VISIBLE_COLUMNS
-    assert result.portfolio_table['Ticker'].tolist() == ['BEST', 'TIE_NEW', 'TIE_OLD', 'FOUR']
+    assert result.portfolio_table['Ticker'].tolist() == ['FOUR', 'BEST', 'TIE_NEW', 'TIE_OLD']
     assert result.portfolio_table['Rank'].tolist() == [1, 2, 3, 4]
-    assert result.portfolio_table.loc[0, 'Setup'] == 'Pullback'
-    assert result.portfolio_table.loc[0, 'Retests'] == 'D1'
+    assert result.portfolio_table.loc[1, 'Setup'] == 'Pullback'
+    assert result.portfolio_table.loc[1, 'Retests'] == 'D1'
+    assert 'Close < BE' not in result.portfolio_table.columns
+    assert 'Days Since Setup' in result.portfolio_table.columns
+    assert 'Entry Tactic' in result.portfolio_table.columns
     assert result.table['Ticker'].tolist() != result.portfolio_table['Ticker'].tolist()
     assert set(result.audit['Portfolio Eligible'].unique()) == {'Yes', 'No'}
     stale_reason = result.audit.set_index('Ticker').loc['STALE', 'Portfolio Exclusion Reason']
     assert 'latest status date older than ticker latest bar date' in stale_reason
+    audit_by_ticker = result.audit.set_index('Ticker')
+    assert audit_by_ticker.loc['BELOWBE', 'Portfolio Eligible'] == 'No'
+    assert 'close below breakeven' in audit_by_ticker.loc['BELOWBE', 'Portfolio Exclusion Reason']
+    assert audit_by_ticker.loc['LOWRATE', 'Portfolio Eligible'] == 'No'
+    assert 'rating below 4' in audit_by_ticker.loc['LOWRATE', 'Portfolio Exclusion Reason']
 
 
 def test_hypothetical_portfolio_limits_to_8_rows():

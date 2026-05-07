@@ -66,7 +66,7 @@ else:
         )
 
     st.subheader('Hypothetical Optimal Portfolio')
-    st.caption('Descriptive view of currently active 4-5 star names from all available setup dates.')
+    st.caption('Eligible: Active, fresh status, rating 4-5, not Close < BE. Ranked by Current %.')
     if all_active_result.portfolio_table.empty:
         st.info('No active 4–5 star names currently qualify.')
     else:
