@@ -29,7 +29,7 @@ def ingest_watchlists(con, watchlists_dir: Path, files: list[Path] | None = None
         d = infer_date(f.name)
         if is_weekend_setup_date(d):
             skipped_weekend_files += 1
-            failures.append(f'{f.name}: {weekend_setup_date_message(d)}')
+            failures.append(weekend_setup_date_message(d, f))
             continue
         h = hashlib.sha256(f.read_bytes()).hexdigest()
         try:

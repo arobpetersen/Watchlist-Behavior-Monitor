@@ -21,10 +21,17 @@ class MassiveClient:
         self.base_url = base_url.rstrip('/')
 
     def _get(self, url: str, params: dict, ticker: str, date_label: str):
-        try:
-            r = requests.get(url, params=params, timeout=30)
-        except requests.RequestException as exc:
-            raise RuntimeError(f"Massive fetch failed for {ticker} {date_label}: {exc.__class__.__name__}") from None
+        attempts = 2
+        for attempt in range(attempts):
+            try:
+                r = requests.get(url, params=params, timeout=30)
+                break
+            except requests.ReadTimeout:
+                if attempt < attempts - 1:
+                    continue
+                raise RuntimeError(f'{ticker}: market-data fetch timed out; retry later.') from None
+            except requests.RequestException as exc:
+                raise RuntimeError(f"Massive fetch failed for {ticker} {date_label}: {exc.__class__.__name__}") from None
         try:
             r.raise_for_status()
         except requests.HTTPError:

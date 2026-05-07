@@ -102,3 +102,26 @@ def test_fetch_daily_connection_error_hides_api_key(monkeypatch):
     assert 'secret-key' not in message
     assert 'apiKey' not in message
     assert 'https://api.polygon.io' not in message
+
+
+def test_read_timeout_retries_once_and_reports_ticker_message(monkeypatch):
+    calls = []
+
+    def fake_get(url, params, timeout):
+        calls.append((url, params, timeout))
+        raise requests.ReadTimeout('slow')
+
+    monkeypatch.setattr('src.massive_client.requests.get', fake_get)
+
+    client = MassiveClient('secret-key', 'https://api.polygon.io')
+    try:
+        client.fetch_intraday_1m('OKLO', '2026-05-06')
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError('Expected RuntimeError')
+
+    assert len(calls) == 2
+    assert message == 'OKLO: market-data fetch timed out; retry later.'
+    assert 'secret-key' not in message
+    assert 'apiKey' not in message

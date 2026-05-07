@@ -56,10 +56,15 @@ def list_source_files(source_dir: Path) -> list[SourceFile]:
     if not source_dir.exists():
         return []
     files = []
+    seen_paths = set()
     for path in source_dir.iterdir():
         if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+            resolved = path.resolve()
+            if resolved in seen_paths:
+                continue
+            seen_paths.add(resolved)
             stat = path.stat()
-            files.append(SourceFile(path.name, path, datetime.fromtimestamp(stat.st_mtime), stat.st_size))
+            files.append(SourceFile(path.name, resolved, datetime.fromtimestamp(stat.st_mtime), stat.st_size))
     return sorted(files, key=lambda f: f.modified_at, reverse=True)
 
 
@@ -102,8 +107,9 @@ def is_weekend_setup_date(setup_date: str | None) -> bool:
     return parsed.weekday() >= 5
 
 
-def weekend_setup_date_message(setup_date: str) -> str:
-    return f'Skipped: setup date {setup_date} is a weekend/non-trading date.'
+def weekend_setup_date_message(setup_date: str, path: Path | None = None) -> str:
+    location = f'{Path(path).resolve()} -- ' if path is not None else ''
+    return f'Skipped Weekend: {location}setup date {setup_date} is a weekend/non-trading date.'
 
 
 def _read_source_file(path: Path) -> pd.DataFrame:
@@ -185,7 +191,12 @@ def _already_loaded(con, setup_date: str, canonical_name: str, tickers: list[str
 
 def scan_source_files(source_dir: Path, watchlists_dir: Path, con=None) -> list[SourceFileStatus]:
     statuses = []
+    seen_paths = set()
     for source in list_source_files(source_dir):
+        source_path = source.path.resolve()
+        if source_path in seen_paths:
+            continue
+        seen_paths.add(source_path)
         if is_sample_or_test_file(source.name):
             statuses.append(SourceFileStatus(source.name, source.path, None, None, 'Skipped Sample/Test', 'Sample, test, and example files are ignored.'))
             continue
@@ -194,7 +205,7 @@ def scan_source_files(source_dir: Path, watchlists_dir: Path, con=None) -> list[
             statuses.append(SourceFileStatus(source.name, source.path, None, None, 'Missing Date', 'No setup date found in filename.'))
             continue
         if is_weekend_setup_date(setup_date):
-            statuses.append(SourceFileStatus(source.name, source.path, setup_date, None, 'Skipped Weekend', weekend_setup_date_message(setup_date)))
+            statuses.append(SourceFileStatus(source.name, source.path, setup_date, None, 'Skipped Weekend', weekend_setup_date_message(setup_date, source.path)))
             continue
         try:
             normalized = normalize_backwatch_file(source.path)
@@ -244,7 +255,7 @@ def reprocess_source_file(con, source_path: Path, watchlists_dir: Path) -> dict:
     if not setup_date:
         raise ValueError('No setup date found in filename.')
     if is_weekend_setup_date(setup_date):
-        raise ValueError(weekend_setup_date_message(setup_date))
+        raise ValueError(weekend_setup_date_message(setup_date, source_path))
     normalized = normalize_backwatch_file(source_path)
     if normalized.empty:
         raise ValueError('No symbol-like tickers detected.')

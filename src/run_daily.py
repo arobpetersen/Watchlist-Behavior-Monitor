@@ -26,10 +26,10 @@ SUMMARY_KEYS = [
 ]
 
 
-def run_daily_pipeline() -> dict:
+def run_daily_pipeline(ingest_result: dict | None = None) -> dict:
     s = get_settings()
     con = get_connection(str(s.db_path))
-    ingest = ingest_watchlists(con, s.watchlists_dir)
+    ingest = ingest_result if ingest_result is not None else ingest_watchlists(con, s.watchlists_dir)
     cands = con.execute('select candidate_id,watchlist_date,ticker from watchlist_candidates where watchlist_date is not null').df()
     bars, features, labels, failures = 0, 0, 0, list(ingest['failures'])
     daily_bars_fetched, daily_bars_skipped_existing, forward_stats_calculated = 0, 0, 0

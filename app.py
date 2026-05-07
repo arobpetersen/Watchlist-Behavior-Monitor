@@ -99,7 +99,7 @@ if st.button('Process All New Back-Watch Files', type='primary'):
             st.warning(metrics_message)
         else:
             with st.spinner('Running metrics pipeline...'):
-                pipeline_summary = run_daily_pipeline()
+                pipeline_summary = run_daily_pipeline(ingest_result)
             st.success('Back-Watch processing complete.')
 
         failures = [
@@ -173,7 +173,13 @@ with st.expander('Maintenance / Reprocess'):
                     con.close()
                     pipeline_summary = {}
                     if settings.massive_api_key:
-                        pipeline_summary = run_daily_pipeline()
+                        pipeline_summary = run_daily_pipeline({
+                            'files_scanned': 0,
+                            'candidates_inserted': 0,
+                            'skipped_sample_files': 0,
+                            'skipped_weekend_files': 0,
+                            'failures': [],
+                        })
                     else:
                         reprocess_summary['failures'].append('API key missing; file was reprocessed but metrics were not updated.')
                     st.success('Selected Back-Watch file reprocessed.')
@@ -204,7 +210,13 @@ with st.expander('Maintenance / Reprocess'):
                 con.close()
                 pipeline_summary = {}
                 if settings.massive_api_key:
-                    pipeline_summary = run_daily_pipeline()
+                    pipeline_summary = run_daily_pipeline({
+                        'files_scanned': 0,
+                        'candidates_inserted': 0,
+                        'skipped_sample_files': 0,
+                        'skipped_weekend_files': 0,
+                        'failures': [],
+                    })
                 else:
                     failures.append('API key missing; files were reprocessed but metrics were not updated.')
             st.success('All Back-Watch source files reprocessed.')

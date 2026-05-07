@@ -76,6 +76,6 @@ def test_ingest_skips_weekend_setup_dates(tmp_path: Path):
 
     assert out['skipped_weekend_files'] == 2
     assert out['candidates_inserted'] == 1
-    assert any('2026-05-02_watchlist.csv: Skipped: setup date 2026-05-02 is a weekend/non-trading date.' in failure for failure in out['failures'])
-    assert any('2026-05-03_watchlist.csv: Skipped: setup date 2026-05-03 is a weekend/non-trading date.' in failure for failure in out['failures'])
+    assert any(str((tmp_path / '2026-05-02_watchlist.csv').resolve()) in failure and 'setup date 2026-05-02 is a weekend/non-trading date.' in failure for failure in out['failures'])
+    assert any(str((tmp_path / '2026-05-03_watchlist.csv').resolve()) in failure and 'setup date 2026-05-03 is a weekend/non-trading date.' in failure for failure in out['failures'])
     assert con.execute('select cast(watchlist_date as varchar), ticker from watchlist_candidates').fetchall() == [('2026-05-04', 'NVDA')]
