@@ -435,6 +435,169 @@ def comparison_rows(window_summaries: pd.DataFrame) -> pd.DataFrame:
     return out[COMPARISON_COLUMNS].copy()
 
 
+def _insight_pct(value: float) -> str:
+    return f'{round(value * 100):.0f}%'
+
+
+def _insight_return(value: float) -> str:
+    pct = value * 100
+    sign = '+' if pct > 0 else ''
+    return f'{sign}{pct:.1f}%'
+
+
+def _window_rows_for_insights(rows: pd.DataFrame, dates: tuple[pd.Timestamp, ...]) -> pd.DataFrame:
+    if rows.empty or 'Setup Date' not in rows:
+        return pd.DataFrame()
+    included = {date.date() for date in dates}
+    setup_dates = pd.to_datetime(rows['Setup Date'], errors='coerce')
+    return rows[setup_dates.dt.date.isin(included)].copy()
+
+
+def _insight_rate(rows: pd.DataFrame, kind: str) -> float | None:
+    if rows.empty:
+        return None
+    total = len(rows)
+    if total == 0:
+        return None
+    if kind == 'Day Success':
+        return float(rows.get('Trigger Day', pd.Series('', index=rows.index)).eq('Success').sum() / total)
+    if kind == 'Day Fail':
+        return float(rows.get('Trigger Day', pd.Series('', index=rows.index)).eq('Fail').sum() / total)
+    if kind == 'Unresolved':
+        return float(rows.get('Trigger Day', pd.Series('', index=rows.index)).eq('Unresolved').sum() / total)
+    if kind == 'Active':
+        return float(rows.get('Current Status', pd.Series('', index=rows.index)).eq('Active').sum() / total)
+    if kind == 'Later Failed':
+        return float(_is_later_failed(rows.get('Current Status', pd.Series('', index=rows.index))).sum() / total)
+    if kind in {'PDH', '1m ORH', '5m ORH', 'Alt Required', 'Failed OR Trigger', 'No Trigger'}:
+        return float(rows.get('Trigger', pd.Series('', index=rows.index)).eq(kind).sum() / total)
+    if kind == 'Retested':
+        retests = rows['Retests'] if 'Retests' in rows else rows['Retest Day'] if 'Retest Day' in rows else pd.Series('', index=rows.index)
+        return float(retests.fillna('').astype(str).ne('').sum() / total)
+    if kind == 'Wide 1m OR':
+        return float(rows.get('Notes', pd.Series('', index=rows.index)).fillna('').astype(str).str.contains('Wide 1m OR', regex=False).sum() / total)
+    if kind == 'Wide 5m OR':
+        return float(rows.get('Notes', pd.Series('', index=rows.index)).fillna('').astype(str).str.contains('Wide 5m OR', regex=False).sum() / total)
+    return None
+
+
+def _insight_median(rows: pd.DataFrame, column: str) -> float | None:
+    if rows.empty or column not in rows:
+        return None
+    values = pd.to_numeric(rows[column], errors='coerce').dropna()
+    if len(values) < 5:
+        return None
+    return float(values.median())
+
+
+def generate_behavior_insights(summary_data, derived_rows: pd.DataFrame) -> list[dict]:
+    if derived_rows is None or derived_rows.empty or 'Setup Date' not in derived_rows:
+        return []
+
+    windows = {window.label: window for window in overview_windows(derived_rows['Setup Date'].dropna().unique())}
+    comparisons = [
+        ('Last 5 Setup Dates', 'Previous 5 Setup Dates', 'Compared last 5 setup dates vs prior 5 setup dates'),
+        ('Last 5 Setup Dates', 'Last 20 Setup Dates', 'Compared last 5 setup dates vs last 20 setup dates'),
+        ('Last 10 Setup Dates', 'Last 20 Setup Dates', 'Compared last 10 setup dates vs last 20 setup dates'),
+    ]
+    row_cache = {
+        label: _window_rows_for_insights(derived_rows, window.setup_dates)
+        for label, window in windows.items()
+    }
+
+    candidates: list[dict] = []
+
+    def add_candidate(priority: int, score: float, text: str, basis: str) -> None:
+        candidates.append({'priority': priority, 'score': score, 'text': text, 'basis': basis})
+
+    rate_metrics = [
+        (1, 'Day Success'),
+        (1, 'Day Fail'),
+        (1, 'Unresolved'),
+        (2, 'Active'),
+        (2, 'Later Failed'),
+        (4, 'PDH'),
+        (4, '1m ORH'),
+        (4, '5m ORH'),
+        (4, 'Alt Required'),
+        (4, 'Failed OR Trigger'),
+        (4, 'No Trigger'),
+        (5, 'Retested'),
+        (5, 'Wide 1m OR'),
+        (5, 'Wide 5m OR'),
+    ]
+    median_metrics = [
+        (3, 'Median Current %', 'current_pct_raw'),
+        (3, 'Median Max %', 'max_pct_raw'),
+        (3, 'Median D3 High %', 'd3_high_pct_raw'),
+    ]
+    trigger_bucket_metrics = {'PDH', '1m ORH', '5m ORH', 'Alt Required', 'Failed OR Trigger', 'No Trigger'}
+
+    for recent_label, baseline_label, basis in comparisons:
+        recent = row_cache.get(recent_label, pd.DataFrame())
+        baseline = row_cache.get(baseline_label, pd.DataFrame())
+        if len(recent) < 5 or len(baseline) < 5:
+            continue
+
+        for priority, metric in rate_metrics:
+            if metric in trigger_bucket_metrics:
+                trigger_count = int(recent.get('Trigger', pd.Series('', index=recent.index)).eq(metric).sum())
+                if trigger_count < 3:
+                    continue
+            recent_value = _insight_rate(recent, metric)
+            baseline_value = _insight_rate(baseline, metric)
+            if recent_value is None or baseline_value is None:
+                continue
+            delta = recent_value - baseline_value
+            if abs(delta) < 0.15:
+                continue
+            if metric == 'Later Failed' and delta > 0:
+                text = (
+                    f'Later Failed increased from {_insight_pct(baseline_value)} to {_insight_pct(recent_value)}, '
+                    'meaning more setups are working on trigger day but failing later.'
+                )
+            elif metric.startswith('Wide') and delta > 0:
+                text = (
+                    f'{metric} frequency increased from {_insight_pct(baseline_value)} to {_insight_pct(recent_value)}, '
+                    'meaning more setups required wider opening-range triggers.'
+                )
+            elif metric in trigger_bucket_metrics:
+                direction = 'increased' if delta > 0 else 'decreased'
+                text = f'{metric} usage {direction} from {_insight_pct(baseline_value)} to {_insight_pct(recent_value)} of setups.'
+            else:
+                direction = 'improved' if metric == 'Day Success' and delta > 0 else 'increased' if delta > 0 else 'decreased'
+                text = f'{metric} {direction} from {_insight_pct(baseline_value)} to {_insight_pct(recent_value)}.'
+            add_candidate(priority, abs(delta), text, basis)
+
+        for priority, metric, column in median_metrics:
+            recent_value = _insight_median(recent, column)
+            baseline_value = _insight_median(baseline, column)
+            if recent_value is None or baseline_value is None:
+                continue
+            delta = recent_value - baseline_value
+            if abs(delta) < 0.02:
+                continue
+            direction = 'improved' if delta > 0 else 'decreased'
+            add_candidate(
+                priority,
+                abs(delta),
+                f'{metric} {direction} from {_insight_return(baseline_value)} to {_insight_return(recent_value)}.',
+                basis,
+            )
+
+    candidates = sorted(candidates, key=lambda item: (item['priority'], -item['score'], item['text']))
+    seen: set[str] = set()
+    insights: list[dict] = []
+    for item in candidates:
+        if item['text'] in seen:
+            continue
+        seen.add(item['text'])
+        insights.append({'text': item['text'], 'basis': item['basis']})
+        if len(insights) == 5:
+            break
+    return insights
+
+
 def selected_window_metrics(window_summary: dict) -> list[dict]:
     return [
         {
@@ -1336,6 +1499,7 @@ def setup_behavior_overview(con, history: pd.DataFrame | None = None, perf=None)
             'trigger_event_shift_highlights': {},
             'trigger_quality': {},
             'details': {},
+            'behavior_insights': [],
             'windows': [],
         }
 
@@ -1388,6 +1552,7 @@ def setup_behavior_overview(con, history: pd.DataFrame | None = None, perf=None)
         'trigger_event_shift_highlights': trigger_event_shift_highlights(trigger_outcomes),
         'trigger_quality': {label: trigger_quality_table(history_by_window[label]) for label in summary_by_window},
         'details': details,
+        'behavior_insights': generate_behavior_insights(window_summaries, history),
         'windows': windows,
     }
     if perf is not None:

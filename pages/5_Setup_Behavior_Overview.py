@@ -21,7 +21,7 @@ from src.setup_behavior_overview import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-OVERVIEW_CACHE_VERSION = 'setup-overview-vwap-actionable-display-v2'
+OVERVIEW_CACHE_VERSION = 'setup-overview-behavior-insights-v1'
 
 
 @st.cache_data(show_spinner=False)
@@ -52,6 +52,8 @@ def ensure_overview_display_tables(overview: dict) -> dict:
         overview['trigger_event_shift_highlights'] = trigger_event_shift_highlights(
             overview.get('trigger_outcome_comparison')
         )
+    if 'behavior_insights' not in overview:
+        overview['behavior_insights'] = []
     return overview
 
 
@@ -108,6 +110,16 @@ else:
         snapshot_html = overview['snapshot_cards'][selected_window]
     st.markdown(snapshot_html, unsafe_allow_html=True)
     st.write(overview['reads'][selected_window])
+
+    st.subheader('Behavior Insights')
+    insights = overview.get('behavior_insights', [])
+    if insights:
+        for insight in insights:
+            basis = insight.get('basis', '')
+            suffix = f' _{basis}._' if basis else ''
+            st.markdown(f"- {insight['text']}{suffix}")
+    else:
+        st.info('No major behavior shifts detected yet.')
 
     st.subheader('Selected Window Successful Triggers')
     st.dataframe(overview['opening_behavior_main'][selected_window], width='stretch', hide_index=True)

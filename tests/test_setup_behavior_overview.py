@@ -20,6 +20,7 @@ from src.setup_behavior_overview import (
     detail_rows,
     factual_read,
     filter_detail_rows,
+    generate_behavior_insights,
     main_opening_behavior_table,
     mix_tables,
     monitor_history,
@@ -39,6 +40,49 @@ from src.setup_behavior_overview import (
     trigger_quality_table,
     _vwap_reclaim_defaults,
 )
+
+
+def _insight_rows(
+    recent_successes: int = 5,
+    prior_successes: int = 5,
+    recent_current: float = 0.01,
+    prior_current: float = 0.00,
+    recent_max: float = 0.05,
+    prior_max: float = 0.04,
+    recent_later_failed: int = 0,
+    prior_later_failed: int = 0,
+    recent_wide_5m: int = 0,
+    prior_wide_5m: int = 0,
+    recent_trigger: str = '1m ORH',
+    prior_trigger: str = '1m ORH',
+    include_d3: bool = True,
+) -> pd.DataFrame:
+    rows = []
+    dates = pd.date_range('2026-05-01', periods=10, freq='D')
+    for idx, date in enumerate(dates):
+        is_recent = idx >= 5
+        success_limit = recent_successes if is_recent else prior_successes
+        later_limit = recent_later_failed if is_recent else prior_later_failed
+        wide_limit = recent_wide_5m if is_recent else prior_wide_5m
+        trigger = recent_trigger if is_recent else prior_trigger
+        current = recent_current if is_recent else prior_current
+        max_pct = recent_max if is_recent else prior_max
+        position = idx - 5 if is_recent else idx
+        trigger_day = 'Success' if position < success_limit else 'Fail'
+        current_status = 'Failed D1' if trigger_day == 'Success' and position < later_limit else 'Active' if trigger_day == 'Success' else '—'
+        rows.append({
+            'Setup Date': date.date().isoformat(),
+            'Ticker': f'T{idx}',
+            'Trigger Day': trigger_day,
+            'Current Status': current_status,
+            'Trigger': trigger,
+            'Notes': 'Wide 5m OR' if position < wide_limit else '',
+            'Retests': '',
+            'current_pct_raw': current,
+            'max_pct_raw': max_pct,
+            'd3_high_pct_raw': current + 0.02 if include_d3 else math.nan,
+        })
+    return pd.DataFrame(rows)
 
 
 def _history() -> pd.DataFrame:
@@ -264,6 +308,98 @@ def test_comparison_rows_exclude_secondary_diagnostics():
     assert 'Retested' not in comparison.columns
     assert 'Wide 1m OR' not in comparison.columns
     assert 'Median D3 High' not in comparison.columns
+
+
+def test_behavior_insights_skip_when_sample_size_is_too_small():
+    rows = _insight_rows().iloc[:8].copy()
+
+    assert generate_behavior_insights(None, rows) == []
+
+
+def test_behavior_insights_generates_rate_change_at_threshold():
+    rows = _insight_rows(recent_successes=5, prior_successes=2)
+
+    insights = generate_behavior_insights(None, rows)
+
+    assert any('Day Success improved from 40% to 100%' in insight['text'] for insight in insights)
+    assert any('Compared last 5 setup dates vs prior 5 setup dates' == insight['basis'] for insight in insights)
+
+
+def test_behavior_insights_generates_median_return_change_at_threshold():
+    rows = _insight_rows(recent_current=0.03, prior_current=0.00)
+
+    insights = generate_behavior_insights(None, rows)
+
+    assert any('Median Current % improved from 0.0% to +3.0%' in insight['text'] for insight in insights)
+
+
+def test_behavior_insights_suppresses_below_threshold_changes():
+    rows = _insight_rows(recent_successes=5, prior_successes=5, recent_current=0.019, prior_current=0.00)
+
+    insights = generate_behavior_insights(None, rows)
+
+    assert insights == []
+
+
+def test_behavior_insights_limits_to_top_five():
+    rows = _insight_rows(
+        recent_successes=5,
+        prior_successes=1,
+        recent_current=0.05,
+        prior_current=-0.01,
+        recent_max=0.12,
+        prior_max=0.02,
+        recent_later_failed=3,
+        prior_later_failed=0,
+        recent_wide_5m=5,
+        prior_wide_5m=0,
+        recent_trigger='5m ORH',
+        prior_trigger='1m ORH',
+    )
+
+    insights = generate_behavior_insights(None, rows)
+
+    assert len(insights) == 5
+
+
+def test_behavior_insights_do_not_use_prescriptive_words():
+    rows = _insight_rows(recent_successes=5, prior_successes=1, recent_later_failed=3, recent_wide_5m=5)
+
+    text = ' '.join(insight['text'].lower() for insight in generate_behavior_insights(None, rows))
+
+    for word in ['you should', 'trade more', 'avoid', 'market is good', 'market is bad', 'aggressively']:
+        assert word not in text
+
+
+def test_behavior_insights_later_failed_wording_is_factual():
+    rows = _insight_rows(recent_later_failed=3, prior_later_failed=0)
+
+    insights = generate_behavior_insights(None, rows)
+
+    assert any(
+        insight['text'] == 'Later Failed increased from 0% to 60%, meaning more setups are working on trigger day but failing later.'
+        for insight in insights
+    )
+
+
+def test_behavior_insights_wide_or_wording_is_factual():
+    rows = _insight_rows(recent_wide_5m=3, prior_wide_5m=0)
+
+    insights = generate_behavior_insights(None, rows)
+
+    assert any(
+        insight['text'] == 'Wide 5m OR frequency increased from 0% to 60%, meaning more setups required wider opening-range triggers.'
+        for insight in insights
+    )
+
+
+def test_behavior_insights_missing_d3_data_is_handled_gracefully():
+    rows = _insight_rows(include_d3=False, recent_current=0.03, prior_current=0.00)
+
+    insights = generate_behavior_insights(None, rows)
+
+    assert insights
+    assert all('Median D3 High' not in insight['text'] for insight in insights)
 
 
 def test_summarize_window_empty_and_unavailable_values_format_cleanly():
@@ -1658,9 +1794,11 @@ def test_setup_behavior_page_uses_successful_triggers_section_title():
     page = open('pages/5_Setup_Behavior_Overview.py', encoding='utf-8').read()
 
     assert "st.subheader('Selected Window Successful Triggers')" in page
+    assert "st.subheader('Behavior Insights')" in page
+    assert 'No major behavior shifts detected yet.' in page
     assert "st.subheader('Selected Window Opening Path')" not in page
     assert "'VWAP Reclaim'" in page
-    assert "OVERVIEW_CACHE_VERSION = 'setup-overview-vwap-actionable-display-v2'" in page
+    assert "OVERVIEW_CACHE_VERSION = 'setup-overview-behavior-insights-v1'" in page
     assert "overview_cache_token = f'{OVERVIEW_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert "PerfTimer('Setup Behavior Overview')" in page
     assert 'render_perf_debug(st, perf)' in page
