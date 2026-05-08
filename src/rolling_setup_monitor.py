@@ -374,15 +374,10 @@ def current_status_display(
     close_below_be_day: int | None = None,
 ) -> str:
     fail_day_number = _status_day(fail_day_value)
-    if fail_day_number is not None:
-        return f'Failed D{fail_day_number}'
-    if trigger_day == 'Fail':
-        return 'Failed'
     if trigger_day != 'Success':
-        return '—'
-    close_below_day_number = _status_day(close_below_be_day)
-    if close_below_be is True:
-        return f'Failed D{close_below_day_number}' if close_below_day_number is not None else 'Failed'
+        return '\u2014'
+    if fail_day_number is not None and fail_day_number > 0:
+        return f'Failed D{fail_day_number}'
     return 'Active'
 
 

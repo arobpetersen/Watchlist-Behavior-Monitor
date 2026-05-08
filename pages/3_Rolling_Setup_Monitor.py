@@ -38,7 +38,7 @@ st.title('Rolling Setup Monitor')
 with st.expander('Definitions / Logic', expanded=False):
     st.markdown(
         """
-- **Current Status**: current setup state. Active means a trigger-day success has not failed later or closed below breakeven; Failed D# means the setup failed on that setup-relative day; Failed means the failure day is unknown; dash means unresolved.
+- **Current Status**: current setup state. Active means a trigger-day success has not broken the selected reference low later; Failed D# means the selected reference low failed on that setup-relative day; dash means day-0 fail or unresolved.
 - **Trigger Day**: setup-day outcome. Success means a selected trigger/reference held through day 0, Fail means it failed on day 0, and Unresolved means no trigger.
 - **PDH**: prior-day high diagnostic. Gap means the stock opened above prior-day high, so the ORH framework governs. Success means PDH broke and held day 0, failed means PDH broke and failed day 0, and dash means PDH did not trigger or is unavailable.
 - **1m ORH / 5m ORH**: diagnostic opening-range high results. Success requires a strict high break above ORH and the selected trigger-time reference low holding after trigger.

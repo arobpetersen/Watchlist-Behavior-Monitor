@@ -1666,22 +1666,23 @@ def test_trigger_day_display_values():
 
 def test_current_status_display_values():
     assert current_status_display('Success', None) == 'Active'
-    assert current_status_display('Success', None, True) == 'Failed'
-    assert current_status_display('Success', None, True, 0) == 'Failed D0'
+    assert current_status_display('Success', None, True) == 'Active'
+    assert current_status_display('Success', None, True, 0) == 'Active'
     assert current_status_display('Success', None, False) == 'Active'
-    assert current_status_display('Success', 0) == 'Failed D0'
+    assert current_status_display('Success', 0) == 'Active'
     assert current_status_display('Success', 1) == 'Failed D1'
     assert current_status_display('Success', 2) == 'Failed D2'
     assert current_status_display('Success', 3) == 'Failed D3'
-    assert current_status_display('Fail', 0) == 'Failed D0'
-    assert current_status_display('Fail', None) == 'Failed'
+    assert current_status_display('Fail', 0) == '—'
+    assert current_status_display('Fail', None) == '—'
     assert current_status_display('Unresolved', None) == '—'
 
-def test_successful_vwap_close_below_be_displays_failed_day():
+def test_sezl_style_retest_and_close_below_be_remains_active():
     raw = pd.DataFrame([{
         **_base_formatted_record(),
-        'trigger_type': 'VWAP Reclaim',
-        'vwap_qualified_trigger_result': 'success',
+        'ticker': 'SEZL',
+        'trigger_type': '1m ORH',
+        'retest_days': [0],
         'close_below_be': True,
         'close_below_be_day': 0,
     }])
@@ -1689,11 +1690,12 @@ def test_successful_vwap_close_below_be_displays_failed_day():
     table = _format_section_table(raw)
 
     assert table.loc[0, 'Trigger Day'] == 'Success'
-    assert table.loc[0, 'Current Status'] == 'Failed D0'
+    assert table.loc[0, 'Retests'] == 'D0'
+    assert table.loc[0, 'Current Status'] == 'Active'
     assert table.loc[0, 'Close < BE'] == 'Yes'
 
 
-def test_successful_non_vwap_close_below_be_displays_failed_day():
+def test_successful_non_vwap_close_below_be_remains_active():
     raw = pd.DataFrame([{
         **_base_formatted_record(),
         'trigger_type': '1m ORH',
@@ -1703,10 +1705,11 @@ def test_successful_non_vwap_close_below_be_displays_failed_day():
 
     table = _format_section_table(raw)
 
-    assert table.loc[0, 'Current Status'] == 'Failed D2'
+    assert table.loc[0, 'Current Status'] == 'Active'
+    assert table.loc[0, 'Close < BE'] == 'Yes'
 
 
-def test_close_below_be_unknown_failed_day_displays_failed():
+def test_close_below_be_unknown_day_remains_active():
     raw = pd.DataFrame([{
         **_base_formatted_record(),
         'trigger_type': '1m ORH',
@@ -1715,7 +1718,8 @@ def test_close_below_be_unknown_failed_day_displays_failed():
 
     table = _format_section_table(raw)
 
-    assert table.loc[0, 'Current Status'] == 'Failed'
+    assert table.loc[0, 'Current Status'] == 'Active'
+    assert table.loc[0, 'Close < BE'] == 'Yes'
 
 
 def test_successful_trigger_close_above_be_remains_active():
@@ -1756,27 +1760,22 @@ def test_trigger_day_failure_status_unchanged_by_close_below_be():
     table = _format_section_table(raw)
 
     assert table.loc[0, 'Trigger Day'] == 'Fail'
-    assert table.loc[0, 'Current Status'] == 'Failed D0'
+    assert table.loc[0, 'Current Status'] == '—'
 
 
-def test_hims_like_close_below_be_case_is_not_active():
+def test_retest_without_failure_remains_active():
     raw = pd.DataFrame([{
         **_base_formatted_record(),
-        'ticker': 'HIMS',
+        'ticker': 'RETEST',
         'trigger_type': 'VWAP Reclaim',
         'vwap_qualified_trigger_result': 'success',
-        'current_pct': -0.049,
-        'max_pct': 0.005,
-        'close_below_be': True,
-        'close_below_be_day': 0,
-        'retest_days': [0, 1, 2, 3, 4],
+        'retest_days': [0],
     }])
 
     table = _format_section_table(raw)
 
-    assert table.loc[0, 'Current Status'] != 'Active'
-    assert table.loc[0, 'Current Status'] == 'Failed D0'
-    assert table.loc[0, 'Retests'] == 'D0, D1, D2 +2'
+    assert table.loc[0, 'Current Status'] == 'Active'
+    assert table.loc[0, 'Retests'] == 'D0'
 
 
 def test_opening_range_display_results():
@@ -2566,7 +2565,7 @@ def test_format_section_table_derives_status_display_fields():
     table = _format_section_table(raw)
 
     assert table['Trigger Day'].tolist() == ['Success', 'Success', 'Fail', 'Unresolved']
-    assert table['Current Status'].tolist() == ['Active', 'Failed D1', 'Failed D0', '—']
+    assert table['Current Status'].tolist() == ['Active', 'Failed D1', '—', '—']
 
 
 def test_day_summary_metrics():
