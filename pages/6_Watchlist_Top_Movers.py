@@ -12,6 +12,8 @@ from src.watchlist_top_movers import (
     TOP_N_OPTIONS,
     load_top_movers,
     prepare_top_mover_rows,
+    portfolio_eligibility_funnel,
+    portfolio_exclusion_samples,
     top_movers_from_history,
 )
 
@@ -19,7 +21,7 @@ from src.watchlist_top_movers import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-TOP_MOVERS_CACHE_VERSION = 'top-movers-hypothetical-portfolio-v2'
+TOP_MOVERS_CACHE_VERSION = 'top-movers-portfolio-eligibility-v2'
 
 
 @st.cache_data(show_spinner=False)
@@ -71,9 +73,18 @@ else:
         st.info('No active 4–5 star names currently qualify.')
     else:
         st.dataframe(all_active_result.portfolio_table, width='stretch', hide_index=True)
+    with st.expander('Portfolio Eligibility Audit', expanded=False):
+        st.dataframe(portfolio_eligibility_funnel(mapped_history), width='stretch', hide_index=True)
+        samples = portfolio_exclusion_samples(mapped_history, limit=8)
+        if not samples.empty:
+            st.caption('Sample excluded rows')
+            st.dataframe(samples, width='stretch', hide_index=True)
 
     st.subheader('Top 10 Active Watchlist Movers')
-    st.caption('Uses all available setup dates and is not affected by the setup-window filter below.')
+    st.caption(
+        'Ranks active setups by entry-based Current %, then Rating, then entry-based Max %. '
+        'Entry Ref is the resolved trigger/reference price; setup-close returns remain in Details / Audit.'
+    )
     st.caption(f'Active rows: {len(all_active_result.active_table)}')
     if all_active_result.active_table.empty and not all_active_result.audit.empty and 'Active Table Exclusion Reason' in all_active_result.audit:
         reasons = all_active_result.audit['Active Table Exclusion Reason'].fillna('-').astype(str)
@@ -83,7 +94,10 @@ else:
     st.dataframe(all_active_result.active_table, width='stretch', hide_index=True)
 
     st.subheader('Top Triggered Watchlist Movers')
-    st.caption('Filters below apply only to this triggered movers table and its Details / Audit view.')
+    st.caption(
+        'Current % and Max % are entry-based when an Entry Ref is available. '
+        'Setup-close returns remain in Details / Audit.'
+    )
     filter_cols = st.columns([1.4, 0.8, 1.0])
     with filter_cols[0]:
         setup_window = st.selectbox(

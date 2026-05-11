@@ -31,11 +31,15 @@ ACTIVE_VISIBLE_COLUMNS = [
     'Ticker',
     'Setup Date',
     'Trigger',
+    'Entry Ref',
+    'Rating',
     'Current %',
     'Max %',
-    'Close < BE',
+    'Max High',
     'Days Since Setup',
-    'Retests',
+    'Retested',
+    'Setup',
+    'Entry Tactic',
     'Notes',
 ]
 PORTFOLIO_VISIBLE_COLUMNS = [
@@ -55,9 +59,13 @@ AUDIT_COLUMNS = [
     'Rank',
     'Ticker',
     'Setup Date',
+    'Entry Ref',
     'Reference Price',
     'Latest Close',
     'Max High',
+    'Setup Current %',
+    'Setup Max %',
+    'Close < BE',
     'Breakeven / D1 Eligible',
     'Latest Status Date',
     'Ticker Latest Bar Date',
@@ -74,8 +82,20 @@ AUDIT_COLUMNS = [
     'Setup',
     'Entry Tactic',
     'Rating',
+    'Rating Normalized',
     'Source',
     'Missing Data Notes',
+]
+PORTFOLIO_AUDIT_SAMPLE_COLUMNS = [
+    'Ticker',
+    'Setup Date',
+    'Current Status',
+    'Status Current',
+    'Rating',
+    'Close < BE',
+    'Current %',
+    'Max %',
+    'Portfolio Exclusion Reason',
 ]
 
 
@@ -113,6 +133,18 @@ def _numeric(rows: pd.DataFrame, names: list[str]) -> pd.Series:
     return numeric.where(~text.str.contains('%', regex=False), numeric / 100)
 
 
+def _plain_numeric(rows: pd.DataFrame, names: list[str]) -> pd.Series:
+    return pd.to_numeric(_first_existing(rows, names), errors='coerce')
+
+
+def _coalesced_numeric(rows: pd.DataFrame, names: list[str]) -> pd.Series:
+    values = pd.Series(pd.NA, index=rows.index, dtype='Float64')
+    for name in names:
+        if name in rows:
+            values = values.combine_first(pd.to_numeric(rows[name], errors='coerce'))
+    return values
+
+
 def _fmt_pct(value: Any) -> str:
     numeric = pd.to_numeric(pd.Series([value]), errors='coerce').iloc[0]
     if pd.isna(numeric):
@@ -125,6 +157,39 @@ def _fmt_price(value: Any) -> str:
     if pd.isna(numeric):
         return '-'
     return f'{numeric:.2f}'
+
+
+def _trigger_unavailable(value: Any) -> bool:
+    text = _display(value).strip().lower()
+    return text in {'-', '—', 'no trigger', 'unavailable', 'none', 'nan'}
+
+
+def _entry_ref(rows: pd.DataFrame) -> pd.Series:
+    trigger = _first_existing(rows, ['Trigger', 'trigger_type']).apply(_display)
+    vwap_ref = _coalesced_numeric(
+        rows,
+        ['VWAP Reclaim Trigger Price', 'Raw VWAP Reclaim Trigger Price', 'vwap_reclaim_trigger_price'],
+    )
+    standard_ref = _coalesced_numeric(rows, ['Trigger Level', 'trigger_level', 'Reference Price', 'base_price'])
+    entry = standard_ref.copy()
+    entry = entry.where(~trigger.eq('VWAP Reclaim'), vwap_ref)
+    entry = entry.where(~trigger.apply(_trigger_unavailable))
+    return entry.where(entry.gt(0))
+
+
+def _post_trigger_max_high(rows: pd.DataFrame) -> pd.Series:
+    return _coalesced_numeric(rows, ['Max High After Trigger', 'max_high_after_trigger', 'post_trigger_max_high'])
+
+
+def _pct_from_entry(value: pd.Series, entry: pd.Series) -> pd.Series:
+    return ((value - entry) / entry).where(entry.gt(0) & value.notna())
+
+
+def _rating_display(value: Any) -> str:
+    numeric = pd.to_numeric(pd.Series([value]), errors='coerce').iloc[0]
+    if pd.isna(numeric):
+        return '-'
+    return str(int(numeric)) if float(numeric).is_integer() else f'{float(numeric):g}'
 
 
 def _window_limit(setup_window: str) -> int | None:
@@ -194,12 +259,16 @@ def _missing_notes(rows: pd.DataFrame) -> pd.Series:
     notes = []
     for _, row in rows.iterrows():
         missing = []
+        if pd.isna(row.get('_entry_ref')):
+            missing.append('Entry Ref')
+        if pd.isna(row.get('_latest_close_num')):
+            missing.append('Latest Close')
+        if pd.isna(row.get('_post_trigger_max_high')):
+            missing.append('post-trigger Max High')
         if pd.isna(row.get('_current_sort')):
-            missing.append('Current %')
+            missing.append('Current % from entry')
         if pd.isna(row.get('_max_sort')):
-            missing.append('Max %')
-        if _display(row.get('Max High')) == '-':
-            missing.append('Max High')
+            missing.append('Max % from entry')
         notes.append('Missing: ' + ', '.join(missing) if missing else '-')
     return pd.Series(notes, index=rows.index)
 
@@ -262,6 +331,47 @@ def _portfolio_exclusion_reasons(rows: pd.DataFrame) -> pd.Series:
             row_reasons.append('missing Max %')
         reasons.append('; '.join(dict.fromkeys(row_reasons)) if row_reasons else '-')
     return pd.Series(reasons, index=rows.index)
+
+
+def portfolio_eligibility_funnel(rows: pd.DataFrame) -> pd.DataFrame:
+    if rows.empty:
+        counts = [
+            ('total rows', 0),
+            ('rows with Current Status = Active', 0),
+            ('rows with fresh/current status', 0),
+            ('rows with Rating present', 0),
+            ('rows with Rating 4 or 5', 0),
+            ('rows with Close < BE != Yes', 0),
+            ('rows with valid Current %', 0),
+            ('rows with valid Max %', 0),
+            ('final portfolio eligible rows', 0),
+        ]
+        return pd.DataFrame(counts, columns=['Step', 'Rows'])
+
+    rating = pd.to_numeric(_first_existing(rows, ['_rating_sort', 'Rating', 'rating']), errors='coerce')
+    counts = [
+        ('total rows', len(rows)),
+        ('rows with Current Status = Active', int(_first_existing(rows, ['Current Status']).apply(_display).eq('Active').sum())),
+        ('rows with fresh/current status', int(_first_existing(rows, ['_status_current']).fillna(False).astype(bool).sum())),
+        ('rows with Rating present', int(rating.notna().sum())),
+        ('rows with Rating 4 or 5', int(rating.between(4, 5, inclusive='both').sum())),
+        ('rows with Close < BE != Yes', int((~_first_existing(rows, ['Close < BE', 'close_below_be'], '-').apply(_display).eq('Yes')).sum())),
+        ('rows with valid Current %', int(pd.to_numeric(_first_existing(rows, ['_current_sort']), errors='coerce').notna().sum())),
+        ('rows with valid Max %', int(pd.to_numeric(_first_existing(rows, ['_max_sort']), errors='coerce').notna().sum())),
+        ('final portfolio eligible rows', int(_first_existing(rows, ['Portfolio Eligible'], '').apply(_display).eq('Yes').sum())),
+    ]
+    return pd.DataFrame(counts, columns=['Step', 'Rows'])
+
+
+def portfolio_exclusion_samples(rows: pd.DataFrame, limit: int = 3) -> pd.DataFrame:
+    if rows.empty:
+        return pd.DataFrame(columns=PORTFOLIO_AUDIT_SAMPLE_COLUMNS)
+    out = rows[_first_existing(rows, ['Portfolio Eligible'], '').apply(_display).ne('Yes')].copy()
+    if out.empty:
+        return pd.DataFrame(columns=PORTFOLIO_AUDIT_SAMPLE_COLUMNS)
+    if 'Status Current' not in out:
+        out['Status Current'] = out.get('_status_current', pd.Series(False, index=out.index)).apply(lambda v: 'Yes' if bool(v) else 'No')
+    return out[PORTFOLIO_AUDIT_SAMPLE_COLUMNS].head(int(limit)).reset_index(drop=True)
 
 
 def hypothetical_optimal_portfolio(rows: pd.DataFrame, limit: int = 8) -> pd.DataFrame:
@@ -337,8 +447,16 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
     rows = resolve_display_triggers(rows.copy())
     rows['Setup Date'] = pd.to_datetime(rows['Setup Date'])
     rows['_setup_date_display'] = _format_setup_date(rows['Setup Date'])
-    rows['_current_sort'] = _numeric(rows, ['current_pct_raw', 'Current %'])
-    rows['_max_sort'] = _numeric(rows, ['max_pct_raw', 'Max %'])
+    rows['_setup_current_sort'] = _numeric(rows, ['current_pct_raw', 'Current %'])
+    rows['_setup_max_sort'] = _numeric(rows, ['max_pct_raw', 'Max %'])
+    rows['_whole_window_max_high'] = _coalesced_numeric(rows, ['Max High', 'max_high'])
+    rows['_entry_ref'] = _entry_ref(rows)
+    rows['_latest_close_num'] = _coalesced_numeric(rows, ['Latest Close', 'latest_close'])
+    rows['_post_trigger_max_high'] = _post_trigger_max_high(rows)
+    rows['_current_sort'] = _pct_from_entry(rows['_latest_close_num'], rows['_entry_ref'])
+    entry_max_sort = _pct_from_entry(rows['_post_trigger_max_high'], rows['_entry_ref'])
+    rows['_max_sort'] = entry_max_sort.combine_first(rows['_setup_max_sort'])
+    rows['_display_max_high'] = rows['_post_trigger_max_high'].combine_first(rows['_whole_window_max_high'])
     rows['_days_sort'] = _days_since(rows['Setup Date'], pd.to_datetime(latest_date) if latest_date is not None else None)
     latest_status_dates = pd.to_datetime(
         _first_existing(rows, ['latest_trading_date_raw', 'Latest Status Date', 'latest_trading_date']),
@@ -370,17 +488,20 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
     rows['Ticker'] = _first_existing(rows, ['Ticker', 'ticker']).apply(_display)
     rows['Trigger'] = _first_existing(rows, ['Trigger', 'trigger_type']).apply(_display)
     rows['Current Status'] = _first_existing(rows, ['Current Status', 'Status', 'status']).apply(_display)
+    rows['Entry Ref'] = rows['_entry_ref'].apply(_fmt_price)
     rows['Current %'] = rows['_current_sort'].apply(_fmt_pct)
     rows['Max %'] = rows['_max_sort'].apply(_fmt_pct)
-    rows['Max High'] = _first_existing(rows, ['Max High', 'max_high']).apply(_fmt_price)
+    rows['Max High'] = rows['_display_max_high'].apply(_fmt_price)
     rows['Close < BE'] = _first_existing(rows, ['Close < BE', 'close_below_be'], '-').apply(_display)
     rows['Days Since Setup'] = rows['_days_sort'].apply(lambda v: '-' if pd.isna(v) else int(v))
     rows['Retests'] = _first_existing(rows, ['Retests', 'Retested', 'Retest', 'Retest Day', 'retest_day']).apply(_display)
+    rows['Retested'] = rows['Retests']
     rows['Breakeven / D1 Eligible'] = _breakeven_or_d1(rows).apply(_display)
     rows['Notes'] = _first_existing(rows, ['Notes', 'notes']).apply(_display)
     rows['Setup'] = _first_existing(rows, ['Setup', 'setup']).apply(_display)
     rows['Entry Tactic'] = _first_existing(rows, ['Entry Tactic', 'entry_tactic']).apply(_display)
     rows['Rating'] = _first_existing(rows, ['Rating', 'rating']).apply(_display)
+    rows['Rating Normalized'] = rows['_rating_sort'].apply(_rating_display)
     rows['Setup Date'] = rows['_setup_date_display']
     rows['Active Table Exclusion Reason'] = _active_exclusion_reasons(rows)
     rows['Portfolio Exclusion Reason'] = _portfolio_exclusion_reasons(rows)
@@ -391,8 +512,8 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
 def _active_top_movers_table(rows: pd.DataFrame) -> pd.DataFrame:
     active_rows = rows[rows['Current Status'].eq('Active') & rows['_status_current'].fillna(False)].copy()
     active_rows = active_rows.sort_values(
-        ['_max_sort', '_current_sort', 'Setup Date', 'Ticker'],
-        ascending=[False, False, False, True],
+        ['_current_sort', '_rating_sort', '_max_sort', 'Setup Date', 'Ticker'],
+        ascending=[False, False, False, False, True],
         na_position='last',
     ).head(10).copy()
     active_rows.insert(0, 'Rank', range(1, len(active_rows) + 1))
@@ -401,9 +522,13 @@ def _active_top_movers_table(rows: pd.DataFrame) -> pd.DataFrame:
 
 def _audit_table(rows: pd.DataFrame) -> pd.DataFrame:
     rows = rows.copy()
+    rows['Entry Ref'] = rows['_entry_ref'].apply(_fmt_price)
     rows['Reference Price'] = _first_existing(rows, ['Trigger Level', 'Reference Price', 'base_price']).apply(_display)
     rows['Latest Close'] = _first_existing(rows, ['Latest Close', 'latest_close']).apply(_display)
-    rows['Max High'] = _first_existing(rows, ['Max High', 'max_high']).apply(_fmt_price)
+    rows['Max High'] = rows['_whole_window_max_high'].apply(_fmt_price)
+    rows['Setup Current %'] = rows['_setup_current_sort'].apply(_fmt_pct)
+    rows['Setup Max %'] = rows['_setup_max_sort'].apply(_fmt_pct)
+    rows['Close < BE'] = _first_existing(rows, ['Close < BE', 'close_below_be'], '-').apply(_display)
     rows['Breakeven / D1 Eligible'] = _breakeven_or_d1(rows).apply(_display)
     rows['Latest Status Date'] = _date_display(rows['_latest_status_date'])
     rows['Ticker Latest Bar Date'] = _date_display(rows['_ticker_latest_bar_date'])
@@ -420,6 +545,7 @@ def _audit_table(rows: pd.DataFrame) -> pd.DataFrame:
     rows['Setup'] = _first_existing(rows, ['Setup', 'setup']).apply(_display)
     rows['Entry Tactic'] = _first_existing(rows, ['Entry Tactic', 'entry_tactic']).apply(_display)
     rows['Rating'] = _first_existing(rows, ['Rating', 'rating']).apply(_display)
+    rows['Rating Normalized'] = _first_existing(rows, ['Rating Normalized']).apply(_display)
     rows['Source'] = _first_existing(rows, ['Source', 'source_file', 'Source File']).apply(_display)
     rows['Missing Data Notes'] = _missing_notes(rows)
     return rows[AUDIT_COLUMNS].copy()

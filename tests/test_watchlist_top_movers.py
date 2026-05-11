@@ -8,14 +8,36 @@ from src.watchlist_top_movers import (
     PORTFOLIO_VISIBLE_COLUMNS,
     VISIBLE_COLUMNS,
     filter_setup_window,
+    portfolio_eligibility_funnel,
+    portfolio_exclusion_samples,
     prepare_top_mover_rows,
     top_movers_from_history,
 )
 
 
+def _with_entry_prices(row: dict, entry: float = 10.0) -> dict:
+    out = dict(row)
+    current = out.get('current_pct_raw')
+    max_pct = out.get('max_pct_raw')
+    out.setdefault('Trigger Level', entry)
+    if current is not None:
+        out.setdefault('Latest Close', entry * (1 + float(current)))
+    if max_pct is not None:
+        out.setdefault('Max High After Trigger', entry * (1 + float(max_pct)))
+    out.setdefault('Max High', out.get('Max High After Trigger'))
+    return out
+
+
+def _entry_history(rows: list[dict]) -> pd.DataFrame:
+    return pd.DataFrame([_with_entry_prices(row) for row in rows])
+
+
 def _history() -> pd.DataFrame:
     rows = []
     for index in range(1, 13):
+        entry = 10 + index
+        current_pct = float(index) / 100
+        max_pct = float(index + 5) / 100
         rows.append({
             'Ticker': f'T{index:02d}',
             'Setup Date': f'2026-04-{index:02d}',
@@ -26,15 +48,16 @@ def _history() -> pd.DataFrame:
             'Latest Status Date': '2026-04-30',
             'Ticker Latest Bar Date': '2026-04-30',
             'Global Latest Bar Date': '2026-04-30',
-            'current_pct_raw': float(index) / 100,
-            'max_pct_raw': float(index + 5) / 100,
+            'current_pct_raw': current_pct,
+            'max_pct_raw': max_pct,
             'Max High': 20 + index,
             'Close < BE': 'Yes' if index % 7 == 0 else 'No',
             'Retest Day': 'D1' if index % 4 == 0 else '',
             'Breakeven / D1 Eligible': 'Yes' if index % 5 == 0 else '',
             'Notes': 'Wide 5m OR' if index % 6 == 0 else '',
-            'Trigger Level': 10 + index,
-            'Latest Close': 15 + index,
+            'Trigger Level': entry,
+            'Latest Close': entry * (1 + current_pct),
+            'Max High After Trigger': entry * (1 + max_pct),
             'D3 High %': f'{index + 3:.1f}%',
             'Setup': 'Flag',
             'Entry Tactic': 'Gap Over Range' if index == 1 else '',
@@ -92,7 +115,8 @@ def test_page_groups_active_table_outside_setup_window_filters():
     filter_widget = page.index("st.selectbox(\n            'Setup Window'")
     assert portfolio_heading < portfolio_table < active_heading < active_table < filter_heading < filter_widget
     assert 'No active 4–5 star names currently qualify.' in page
-    assert 'Uses all available setup dates and is not affected by the setup-window filter below.' in page
+    assert 'Ranks active setups by entry-based Current %, then Rating, then entry-based Max %.' in page
+    assert 'Entry Ref is the resolved trigger/reference price; setup-close returns remain in Details / Audit.' in page
     assert "setup_window='All'" in page
     assert 'Eligible: Active, fresh status, rating 4-5, not Close < BE. Ranked by Current %.' in page
     assert 'top_n=20' in page
@@ -101,7 +125,7 @@ def test_page_groups_active_table_outside_setup_window_filters():
 def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
     page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
 
-    assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-hypothetical-portfolio-v2'" in page
+    assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-portfolio-eligibility-v2'" in page
     assert "top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_watchlist_top_movers(db_path, top_movers_cache_token, base_history)' in page
     assert 'load_cached_monitor_history(db_path, monitor_history_cache_token)' in page
@@ -132,7 +156,7 @@ def test_prepared_top_mover_rows_preserve_output_values():
 
 
 def test_max_pct_sort_behavior_uses_current_pct_tiebreaker():
-    history = pd.DataFrame([
+    history = _entry_history([
         {'Ticker': 'A', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
         {'Ticker': 'B', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.04, 'max_pct_raw': 0.10},
     ])
@@ -143,7 +167,7 @@ def test_max_pct_sort_behavior_uses_current_pct_tiebreaker():
 
 
 def test_current_pct_sort_behavior_uses_max_pct_tiebreaker():
-    history = pd.DataFrame([
+    history = _entry_history([
         {'Ticker': 'A', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.05, 'max_pct_raw': 0.08},
         {'Ticker': 'B', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.05, 'max_pct_raw': 0.12},
     ])
@@ -154,7 +178,7 @@ def test_current_pct_sort_behavior_uses_max_pct_tiebreaker():
 
 
 def test_days_since_setup_calculation_and_sort_behavior():
-    history = pd.DataFrame([
+    history = _entry_history([
         {'Ticker': 'OLD', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.01, 'max_pct_raw': 0.03},
         {'Ticker': 'NEW', 'Setup Date': '2026-04-10', 'Trigger': 'PDH', 'Current Status': 'Active', 'current_pct_raw': 0.02, 'max_pct_raw': 0.08},
     ])
@@ -192,7 +216,10 @@ def test_vwap_reclaim_can_display_as_top_mover_trigger():
         '1m ORH': 'failed',
         '5m ORH': 'failed',
         'VWAP Reclaim': 'success',
-        'VWAP Reclaim Trigger Price': 10.5,
+        'VWAP Reclaim Trigger Price': None,
+        'Raw VWAP Reclaim Trigger Price': 10.5,
+        'Latest Close': 11.13,
+        'Max High After Trigger': 11.97,
         'PDH': '-',
         'current_pct_raw': 0.06,
         'max_pct_raw': 0.14,
@@ -219,6 +246,9 @@ def test_raw_vwap_reclaim_does_not_display_as_top_mover_trigger_when_not_resolve
         'VWAP Reclaim': 'success',
         'VWAP Reclaim Trigger Price': 10.5,
         'PDH': 'success',
+        'Trigger Level': 10.0,
+        'Latest Close': 10.6,
+        'Max High After Trigger': 11.4,
         'current_pct_raw': 0.06,
         'max_pct_raw': 0.14,
     }])
@@ -272,7 +302,7 @@ def test_multiple_retests_display_in_top_movers_tables():
     result = top_movers_from_history(history, latest_date='2026-04-05')
 
     assert result.table.loc[0, 'Retests'] == 'D0, D3'
-    assert result.active_table.loc[0, 'Retests'] == 'D0, D3'
+    assert result.active_table.loc[0, 'Retested'] == 'D0, D3'
 
 
 def test_setup_date_formats_as_date_only_in_tables_and_audit():
@@ -312,19 +342,156 @@ def test_visible_column_contract():
     assert 'Close < BE' in result.table.columns
 
 
+def test_entry_based_return_beats_setup_close_return_in_active_table():
+    history = pd.DataFrame([
+        {
+            'Ticker': 'GAP',
+            'Setup Date': '2026-04-01',
+            'Trigger': 'PDH',
+            'Current Status': 'Active',
+            'Latest Status Date': '2026-04-30',
+            'Ticker Latest Bar Date': '2026-04-30',
+            'Global Latest Bar Date': '2026-04-30',
+            'Trigger Level': 18,
+            'Latest Close': 18.5,
+            'Max High After Trigger': 19,
+            'current_pct_raw': 0.85,
+            'max_pct_raw': 0.90,
+        },
+        {
+            'Ticker': 'CLEAN',
+            'Setup Date': '2026-04-01',
+            'Trigger': 'PDH',
+            'Current Status': 'Active',
+            'Latest Status Date': '2026-04-30',
+            'Ticker Latest Bar Date': '2026-04-30',
+            'Global Latest Bar Date': '2026-04-30',
+            'Trigger Level': 11,
+            'Latest Close': 13,
+            'Max High After Trigger': 13.5,
+            'current_pct_raw': 0.30,
+            'max_pct_raw': 0.40,
+        },
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30')
+
+    assert result.active_table['Ticker'].tolist() == ['CLEAN', 'GAP']
+    assert result.active_table.set_index('Ticker').loc['CLEAN', 'Current %'] == '18.2%'
+    audit = result.audit.set_index('Ticker')
+    assert audit.loc['GAP', 'Setup Current %'] == '85.0%'
+    assert audit.loc['CLEAN', 'Setup Current %'] == '30.0%'
+
+
+def test_active_ranking_uses_current_rating_max_date_and_ticker():
+    history = _entry_history([
+        {'Ticker': 'CUR', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.30, 'max_pct_raw': 0.31},
+        {'Ticker': 'RATE', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.20, 'max_pct_raw': 0.22},
+        {'Ticker': 'MAX', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.20, 'max_pct_raw': 0.50},
+        {'Ticker': 'NEW', 'Setup Date': '2026-04-02', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.20, 'max_pct_raw': 0.40},
+        {'Ticker': 'AAA', 'Setup Date': '2026-04-02', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.20, 'max_pct_raw': 0.40},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30')
+
+    assert result.active_table['Ticker'].tolist() == ['CUR', 'RATE', 'MAX', 'AAA', 'NEW']
+
+
+def test_vwap_reclaim_uses_vwap_trigger_price_as_entry_ref():
+    history = pd.DataFrame([{
+        'Ticker': 'VWAP',
+        'Setup Date': '2026-04-01',
+        'Trigger': 'Alt Required',
+        'Trigger Day': 'Success',
+        'Current Status': 'Active',
+        'Latest Status Date': '2026-04-05',
+        'Ticker Latest Bar Date': '2026-04-05',
+        'Global Latest Bar Date': '2026-04-05',
+        '1m ORH': 'failed',
+        '5m ORH': 'failed',
+        'VWAP Reclaim': 'success',
+        'VWAP Reclaim Trigger Price': 10.5,
+        'Trigger Level': 9.5,
+        'Latest Close': 12.6,
+        'Max High After Trigger': 13.65,
+        'PDH': '-',
+        'current_pct_raw': 0.60,
+        'max_pct_raw': 0.80,
+    }])
+
+    result = top_movers_from_history(history, latest_date='2026-04-05')
+
+    assert result.active_table.loc[0, 'Entry Ref'] == '10.50'
+    assert result.active_table.loc[0, 'Current %'] == '20.0%'
+    assert result.audit.loc[0, 'Reference Price'] == '10.5'
+
+
+def test_no_trigger_rows_have_missing_entry_ref_and_sort_last():
+    history = _entry_history([
+        {'Ticker': 'GOOD', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.03},
+        {'Ticker': 'UNTRIG', 'Setup Date': '2026-04-01', 'Trigger': 'No Trigger', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.99, 'max_pct_raw': 1.20},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30')
+
+    assert result.active_table['Ticker'].tolist() == ['GOOD', 'UNTRIG']
+    assert result.active_table.set_index('Ticker').loc['UNTRIG', 'Entry Ref'] == '-'
+    assert result.active_table.set_index('Ticker').loc['UNTRIG', 'Current %'] == '-'
+    assert 'Missing: Entry Ref' in result.audit.set_index('Ticker').loc['UNTRIG', 'Missing Data Notes']
+
+
+def test_audit_preserves_setup_close_returns():
+    history = _entry_history([
+        {'Ticker': 'AUD', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.21, 'max_pct_raw': 0.34},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30')
+
+    assert result.audit.loc[0, 'Setup Current %'] == '21.0%'
+    assert result.audit.loc[0, 'Setup Max %'] == '34.0%'
+
+
+def test_missing_post_trigger_max_high_falls_back_to_setup_max_with_audit_note():
+    history = pd.DataFrame([{
+        'Ticker': 'WHOLE',
+        'Setup Date': '2026-04-01',
+        'Trigger': 'PDH',
+        'Current Status': 'Active',
+        'Latest Status Date': '2026-04-30',
+        'Ticker Latest Bar Date': '2026-04-30',
+        'Global Latest Bar Date': '2026-04-30',
+        'Trigger Level': 10,
+        'Latest Close': 11,
+        'Max High': 25,
+        'current_pct_raw': 0.10,
+        'max_pct_raw': 1.50,
+    }])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30')
+
+    assert result.active_table.loc[0, 'Max %'] == '150.0%'
+    assert result.active_table.loc[0, 'Max High'] == '25.00'
+    audit = result.audit.loc[0]
+    assert audit['Max High'] == '25.00'
+    assert audit['Setup Max %'] == '150.0%'
+    assert 'Missing: post-trigger Max High' in audit['Missing Data Notes']
+
+
 def test_active_table_filters_active_only_and_omits_current_status():
     result = top_movers_from_history(_history(), latest_date='2026-04-30')
 
     assert result.active_table.columns.tolist() == ACTIVE_VISIBLE_COLUMNS
     assert 'Current Status' not in result.active_table.columns
-    assert 'Max High' not in result.active_table.columns
+    assert 'Entry Ref' in result.active_table.columns
+    assert 'Rating' in result.active_table.columns
+    assert 'Max High' in result.active_table.columns
     assert 'Breakeven / D1 Eligible' not in result.active_table.columns
-    assert 'Close < BE' in result.active_table.columns
+    assert 'Close < BE' not in result.active_table.columns
     assert result.active_table['Ticker'].tolist() == ['T11', 'T09', 'T07', 'T05', 'T03', 'T01']
 
 
 def _portfolio_history() -> pd.DataFrame:
-    return pd.DataFrame([
+    return _entry_history([
         {'Ticker': 'BEST', 'Setup Date': '2026-04-07', 'Trigger': '1m ORH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.30, 'max_pct_raw': 0.50, 'Close < BE': 'No', 'Retests': 'D1', 'Setup': 'Pullback'},
         {'Ticker': 'TIE_NEW', 'Setup Date': '2026-04-08', 'Trigger': '5m ORH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.20, 'max_pct_raw': 0.40, 'Close < BE': 'No', 'Retests': '', 'Setup': 'EP'},
         {'Ticker': 'TIE_OLD', 'Setup Date': '2026-04-06', 'Trigger': '5m ORH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.20, 'max_pct_raw': 0.40, 'Close < BE': 'No', 'Retests': '', 'Setup': 'Flag'},
@@ -362,7 +529,7 @@ def test_hypothetical_portfolio_filters_and_ranks_candidates():
 
 
 def test_hypothetical_portfolio_limits_to_8_rows():
-    rows = pd.DataFrame([
+    rows = _entry_history([
         {'Ticker': f'P{i:02d}', 'Setup Date': f'2026-04-{i:02d}', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': i / 100, 'max_pct_raw': (i + 1) / 100, 'Close < BE': 'No', 'Setup': ''}
         for i in range(1, 12)
     ])
@@ -381,8 +548,83 @@ def test_hypothetical_portfolio_empty_when_no_rows_qualify():
     assert result.portfolio_table.columns.tolist() == PORTFOLIO_VISIBLE_COLUMNS
 
 
+def test_hypothetical_portfolio_accepts_integer_string_and_float_four_ratings():
+    history = _entry_history([
+        {'Ticker': 'INT', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.10, 'max_pct_raw': 0.20, 'Close < BE': 'No'},
+        {'Ticker': 'STR', 'Setup Date': '2026-04-02', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': '4', 'current_pct_raw': 0.09, 'max_pct_raw': 0.20, 'Close < BE': 'No'},
+        {'Ticker': 'FLOAT', 'Setup Date': '2026-04-03', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4.0, 'current_pct_raw': 0.08, 'max_pct_raw': 0.20, 'Close < BE': 'No'},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30')
+
+    assert result.portfolio_table['Ticker'].tolist() == ['INT', 'STR', 'FLOAT']
+    assert result.audit.set_index('Ticker').loc['FLOAT', 'Rating Normalized'] == '4'
+
+
+def test_hypothetical_portfolio_excludes_missing_low_rating_and_close_below_be():
+    history = _entry_history([
+        {'Ticker': 'LOW', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 3, 'current_pct_raw': 0.10, 'max_pct_raw': 0.20, 'Close < BE': 'No'},
+        {'Ticker': 'MISS', 'Setup Date': '2026-04-02', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': '', 'current_pct_raw': 0.09, 'max_pct_raw': 0.20, 'Close < BE': 'No'},
+        {'Ticker': 'BE', 'Setup Date': '2026-04-03', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.08, 'max_pct_raw': 0.20, 'Close < BE': 'Yes'},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30')
+    audit = result.audit.set_index('Ticker')
+
+    assert result.portfolio_table.empty
+    assert 'rating below 4' in audit.loc['LOW', 'Portfolio Exclusion Reason']
+    assert 'missing rating' in audit.loc['MISS', 'Portfolio Exclusion Reason']
+    assert 'close below breakeven' in audit.loc['BE', 'Portfolio Exclusion Reason']
+
+
+def test_hypothetical_portfolio_exclusion_reason_identifies_stale_status():
+    history = _entry_history([
+        {'Ticker': 'STALE', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-29', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.10, 'max_pct_raw': 0.20, 'Close < BE': 'No'},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30')
+
+    reason = result.audit.loc[0, 'Portfolio Exclusion Reason']
+    assert 'latest status date older than ticker latest bar date' in reason
+
+
+def test_portfolio_audit_funnel_counts_and_samples_exclusions():
+    result = top_movers_from_history(_portfolio_history(), latest_date='2026-04-30', setup_window='All')
+    mapped = prepare_top_mover_rows(_portfolio_history(), latest_date='2026-04-30')
+
+    funnel = portfolio_eligibility_funnel(mapped)
+    samples = portfolio_exclusion_samples(mapped, limit=2)
+
+    assert funnel.set_index('Step').loc['final portfolio eligible rows', 'Rows'] == 4
+    assert funnel.set_index('Step').loc['rows with valid Max %', 'Rows'] == 10
+    assert samples.columns.tolist() == [
+        'Ticker',
+        'Setup Date',
+        'Current Status',
+        'Status Current',
+        'Rating',
+        'Close < BE',
+        'Current %',
+        'Max %',
+        'Portfolio Exclusion Reason',
+    ]
+    assert len(samples) == 2
+
+
+def test_manual_rating_column_flows_into_watchlist_top_movers_portfolio_helper():
+    history = _entry_history([
+        {'Ticker': 'MANUAL', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'rating': 4.0, 'current_pct_raw': 0.10, 'max_pct_raw': 0.20, 'Close < BE': 'No'},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30')
+
+    assert result.portfolio_table['Ticker'].tolist() == ['MANUAL']
+    assert result.portfolio_table.loc[0, 'Rating'] == '4.0'
+    assert result.audit.loc[0, 'Rating Normalized'] == '4'
+
+
 def test_active_table_excludes_close_below_be_later_failed_rows():
-    history = pd.DataFrame([
+    history = _entry_history([
         {'Ticker': 'HIMS', 'Setup Date': '2026-04-28', 'Trigger': 'VWAP Reclaim', 'Trigger Day': 'Success', 'Current Status': 'Failed D0', 'Close < BE': 'Yes', 'Latest Status Date': '2026-05-04', 'Ticker Latest Bar Date': '2026-05-04', 'Global Latest Bar Date': '2026-05-04', 'current_pct_raw': -0.049, 'max_pct_raw': 0.005},
         {'Ticker': 'OK', 'Setup Date': '2026-04-28', 'Trigger': '1m ORH', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Close < BE': 'No', 'Latest Status Date': '2026-05-04', 'Ticker Latest Bar Date': '2026-05-04', 'Global Latest Bar Date': '2026-05-04', 'current_pct_raw': 0.02, 'max_pct_raw': 0.08},
     ])
@@ -421,7 +663,7 @@ def test_active_table_limits_to_10_rows():
 
 
 def test_active_table_sorts_by_max_pct_then_current_pct():
-    history = pd.DataFrame([
+    history = _entry_history([
         {'Ticker': 'A', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
         {'Ticker': 'B', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.04, 'max_pct_raw': 0.10},
         {'Ticker': 'C', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.20},
@@ -433,7 +675,7 @@ def test_active_table_sorts_by_max_pct_then_current_pct():
 
 
 def test_active_table_excludes_non_active_statuses():
-    history = pd.DataFrame([
+    history = _entry_history([
         {'Ticker': 'ACTIVE', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
         {'Ticker': 'LATER', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Current Status': 'Failed D2', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.30},
         {'Ticker': 'D1', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Trigger Day': 'Success', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.29},
@@ -447,7 +689,7 @@ def test_active_table_excludes_non_active_statuses():
 
 
 def test_active_table_excludes_stale_active_status_rows():
-    history = pd.DataFrame([
+    history = _entry_history([
         {'Ticker': 'CURRENT', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
         {'Ticker': 'STALE', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-22', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.30},
     ])
@@ -461,7 +703,7 @@ def test_active_table_excludes_stale_active_status_rows():
 
 
 def test_active_table_uses_latest_status_when_duplicate_ticker_setup_rows_exist():
-    history = pd.DataFrame([
+    history = _entry_history([
         {'Ticker': 'DUP', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-22', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.08, 'max_pct_raw': 0.30},
         {'Ticker': 'DUP', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': -0.02, 'max_pct_raw': 0.30},
         {'Ticker': 'OK', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'current_pct_raw': 0.02, 'max_pct_raw': 0.10},
@@ -495,7 +737,7 @@ def test_active_table_excludes_bird_like_stale_status_even_with_high_max_return(
 
 
 def test_active_table_includes_rows_with_current_ticker_and_global_status_dates():
-    history = pd.DataFrame([{
+    history = _entry_history([{
         'Ticker': 'AKAN',
         'Setup Date': '2026-04-28',
         'Trigger': 'PDH',
@@ -516,7 +758,7 @@ def test_active_table_includes_rows_with_current_ticker_and_global_status_dates(
 
 
 def test_active_table_excludes_ticker_not_current_to_global_latest_bar_date():
-    history = pd.DataFrame([{
+    history = _entry_history([{
         'Ticker': 'STALE_TICKER',
         'Setup Date': '2026-04-28',
         'Trigger': 'PDH',
