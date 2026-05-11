@@ -13,7 +13,7 @@ SETUP_WINDOW_OPTIONS = ['Last 5 setup dates', 'Last 10 setup dates', 'Last 20 se
 DEFAULT_SETUP_WINDOW = 'All'
 TOP_N_OPTIONS = [10, 20, 50]
 SORT_OPTIONS = ['Max %', 'Current %', 'Days Since Setup']
-PORTFOLIO_VIEW_OPTIONS = ['Current Progress', 'Max Progress']
+PORTFOLIO_VIEW_OPTIONS = ['Current Progress', 'Longest Open']
 DEFAULT_PORTFOLIO_VIEW = 'Current Progress'
 VISIBLE_COLUMNS = [
     'Rank',
@@ -57,21 +57,6 @@ PORTFOLIO_VISIBLE_COLUMNS = [
     'Setup',
     'Entry Tactic',
 ]
-MAX_PORTFOLIO_VISIBLE_COLUMNS = [
-    'Rank',
-    'Ticker',
-    'Setup Date',
-    'Trigger',
-    'Current Status',
-    'Rating',
-    'Current %',
-    'Max %',
-    'Close < BE',
-    'Days Since Setup',
-    'Retests',
-    'Setup',
-    'Entry Tactic',
-]
 AUDIT_COLUMNS = [
     'Rank',
     'Ticker',
@@ -94,7 +79,7 @@ AUDIT_COLUMNS = [
     'Portfolio View Eligible',
     'Portfolio View Exclusion Reason',
     'Current Progress Eligible',
-    'Max Progress Eligible',
+    'Longest Open Eligible',
     'Retest Count',
     'Retest Days Raw',
     'Retest Dates Raw',
@@ -354,23 +339,21 @@ def _portfolio_exclusion_reasons(rows: pd.DataFrame) -> pd.Series:
     return pd.Series(reasons, index=rows.index)
 
 
-def _max_progress_exclusion_reasons(rows: pd.DataFrame) -> pd.Series:
+def _longest_open_exclusion_reasons(rows: pd.DataFrame) -> pd.Series:
     reasons = []
     for _, row in rows.iterrows():
         row_reasons = []
-        rating = row.get('_rating_sort')
-        if pd.isna(rating):
-            row_reasons.append('missing rating')
-        elif float(rating) < 4:
-            row_reasons.append('rating below 4')
-        if pd.isna(row.get('_max_sort')):
-            row_reasons.append('missing Max %')
+        current_reason = _display(row.get('Portfolio Exclusion Reason'))
+        if current_reason != '-':
+            row_reasons.extend(current_reason.split('; '))
+        if pd.isna(row.get('_days_sort')):
+            row_reasons.append('missing Days Since Setup')
         reasons.append('; '.join(dict.fromkeys(row_reasons)) if row_reasons else '-')
     return pd.Series(reasons, index=rows.index)
 
 
 def _portfolio_columns(portfolio_view: str) -> list[str]:
-    return MAX_PORTFOLIO_VISIBLE_COLUMNS if portfolio_view == 'Max Progress' else PORTFOLIO_VISIBLE_COLUMNS
+    return PORTFOLIO_VISIBLE_COLUMNS
 
 
 def portfolio_summary(table: pd.DataFrame) -> str:
@@ -435,13 +418,13 @@ def hypothetical_optimal_portfolio(rows: pd.DataFrame, limit: int = 8, portfolio
     columns = _portfolio_columns(portfolio_view)
     if rows.empty:
         return pd.DataFrame(columns=columns)
-    eligible_col = 'Max Progress Eligible' if portfolio_view == 'Max Progress' else 'Current Progress Eligible'
+    eligible_col = 'Longest Open Eligible' if portfolio_view == 'Longest Open' else 'Current Progress Eligible'
     out = rows[rows.get(eligible_col, pd.Series('', index=rows.index)).eq('Yes')].copy()
     if out.empty:
         return pd.DataFrame(columns=columns)
-    if portfolio_view == 'Max Progress':
-        sort_cols = ['_max_sort', '_current_sort', '_rating_sort', 'Setup Date', 'Ticker']
-        ascending = [False, False, False, False, True]
+    if portfolio_view == 'Longest Open':
+        sort_cols = ['_days_sort', '_current_sort', '_rating_sort', '_max_sort', 'Setup Date', 'Ticker']
+        ascending = [False, False, False, False, False, True]
     else:
         sort_cols = ['_current_sort', '_rating_sort', '_max_sort', 'Setup Date', 'Ticker']
         ascending = [False, False, False, False, True]
@@ -576,16 +559,16 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
     rows['Portfolio Exclusion Reason'] = _portfolio_exclusion_reasons(rows)
     rows['Portfolio Eligible'] = rows['Portfolio Exclusion Reason'].eq('-').map(lambda value: 'Yes' if value else 'No')
     rows['Current Progress Eligible'] = rows['Portfolio Eligible']
-    rows['Max Progress Exclusion Reason'] = _max_progress_exclusion_reasons(rows)
-    rows['Max Progress Eligible'] = rows['Max Progress Exclusion Reason'].eq('-').map(lambda value: 'Yes' if value else 'No')
+    rows['Longest Open Exclusion Reason'] = _longest_open_exclusion_reasons(rows)
+    rows['Longest Open Eligible'] = rows['Longest Open Exclusion Reason'].eq('-').map(lambda value: 'Yes' if value else 'No')
     _apply_portfolio_view_fields(rows, DEFAULT_PORTFOLIO_VIEW)
     return rows
 
 
 def _apply_portfolio_view_fields(rows: pd.DataFrame, portfolio_view: str) -> None:
-    if portfolio_view == 'Max Progress':
-        rows['Portfolio View Eligible'] = _first_existing(rows, ['Max Progress Eligible']).apply(_display)
-        rows['Portfolio View Exclusion Reason'] = _first_existing(rows, ['Max Progress Exclusion Reason']).apply(_display)
+    if portfolio_view == 'Longest Open':
+        rows['Portfolio View Eligible'] = _first_existing(rows, ['Longest Open Eligible']).apply(_display)
+        rows['Portfolio View Exclusion Reason'] = _first_existing(rows, ['Longest Open Exclusion Reason']).apply(_display)
     else:
         rows['Portfolio View Eligible'] = _first_existing(rows, ['Current Progress Eligible', 'Portfolio Eligible']).apply(_display)
         rows['Portfolio View Exclusion Reason'] = _first_existing(rows, ['Portfolio Exclusion Reason']).apply(_display)
@@ -622,7 +605,7 @@ def _audit_table(rows: pd.DataFrame) -> pd.DataFrame:
     rows['Portfolio View Eligible'] = _first_existing(rows, ['Portfolio View Eligible']).apply(_display)
     rows['Portfolio View Exclusion Reason'] = _first_existing(rows, ['Portfolio View Exclusion Reason']).apply(_display)
     rows['Current Progress Eligible'] = _first_existing(rows, ['Current Progress Eligible']).apply(_display)
-    rows['Max Progress Eligible'] = _first_existing(rows, ['Max Progress Eligible']).apply(_display)
+    rows['Longest Open Eligible'] = _first_existing(rows, ['Longest Open Eligible']).apply(_display)
     rows['Retest Count'] = _first_existing(rows, ['Retest Count', 'retest_count']).apply(_display)
     rows['Retest Days Raw'] = _first_existing(rows, ['Retest Days Raw', 'retest_days_raw']).apply(_display)
     rows['Retest Dates Raw'] = _first_existing(rows, ['Retest Dates Raw', 'retest_dates_raw']).apply(_display)

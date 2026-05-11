@@ -6,7 +6,6 @@ from src.watchlist_top_movers import (
     ACTIVE_VISIBLE_COLUMNS,
     DEFAULT_PORTFOLIO_VIEW,
     DEFAULT_SETUP_WINDOW,
-    MAX_PORTFOLIO_VISIBLE_COLUMNS,
     PORTFOLIO_VIEW_OPTIONS,
     PORTFOLIO_VISIBLE_COLUMNS,
     VISIBLE_COLUMNS,
@@ -123,11 +122,12 @@ def test_page_groups_active_table_outside_setup_window_filters():
     assert portfolio_heading < portfolio_selector < portfolio_caption < portfolio_table
     assert portfolio_table < reference_heading < active_heading < active_table < filter_heading < filter_widget
     assert 'No active 4–5 star names currently qualify.' in page
-    assert 'No 4–5 star names with valid Max % currently qualify.' in page
+    assert 'No active 4–5 star names with valid Days Since Setup currently qualify.' in page
     assert "'Portfolio View'" in page
     assert "key='top_movers_portfolio_view'" in page
     assert 'Current Progress: active, fresh 4–5 star names ranked by Current %.' in page
-    assert 'Max Progress: 4–5 star names ranked by Max %, regardless of current active status.' in page
+    assert 'Longest Open: active, fresh 4–5 star names ranked by Days Since Setup.' in page
+    assert 'Max Progress' not in page
     assert 'Ranks active setups by entry-based Current %, then Rating, then entry-based Max %.' in page
     assert 'Entry Ref is the resolved trigger/reference price; setup-close returns remain in Details / Audit.' in page
     assert "setup_window='All'" in page
@@ -139,7 +139,7 @@ def test_page_groups_active_table_outside_setup_window_filters():
 def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
     page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
 
-    assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-portfolio-two-view-v1'" in page
+    assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-longest-open-v1'" in page
     assert "top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_watchlist_top_movers(db_path, top_movers_cache_token, base_history)' in page
     assert 'load_cached_monitor_history(db_path, monitor_history_cache_token)' in page
@@ -153,7 +153,7 @@ def test_default_portfolio_view_is_current_progress():
     page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
 
     assert DEFAULT_PORTFOLIO_VIEW == 'Current Progress'
-    assert PORTFOLIO_VIEW_OPTIONS == ['Current Progress', 'Max Progress']
+    assert PORTFOLIO_VIEW_OPTIONS == ['Current Progress', 'Longest Open']
     assert 'index=PORTFOLIO_VIEW_OPTIONS.index(DEFAULT_PORTFOLIO_VIEW)' in page
 
 
@@ -611,51 +611,64 @@ def test_hypothetical_portfolio_empty_when_no_rows_qualify():
     assert result.portfolio_table.columns.tolist() == PORTFOLIO_VISIBLE_COLUMNS
 
 
-def test_max_progress_includes_high_rated_failed_rows_and_ranks_by_max_pct():
+def test_longest_open_uses_current_progress_eligibility_and_ranks_by_days_since_setup():
     history = _entry_history([
-        {'Ticker': 'ACTIVE', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.30, 'max_pct_raw': 0.40, 'Close < BE': 'No'},
-        {'Ticker': 'FAILED', 'Setup Date': '2026-04-02', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.10, 'max_pct_raw': 0.90, 'Close < BE': 'Yes'},
-        {'Ticker': 'LATER', 'Setup Date': '2026-04-03', 'Trigger': 'PDH', 'Current Status': 'Failed D2', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.20, 'max_pct_raw': 0.80, 'Close < BE': 'Yes'},
+        {'Ticker': 'OLDER', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.10, 'max_pct_raw': 0.40, 'Close < BE': 'No'},
+        {'Ticker': 'NEWER', 'Setup Date': '2026-04-10', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.90, 'max_pct_raw': 1.20, 'Close < BE': 'No'},
+        {'Ticker': 'FAILED', 'Setup Date': '2026-04-02', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.80, 'max_pct_raw': 1.00, 'Close < BE': 'No'},
     ])
 
-    result = top_movers_from_history(history, latest_date='2026-04-30', portfolio_view='Max Progress')
+    result = top_movers_from_history(history, latest_date='2026-04-30', portfolio_view='Longest Open')
 
-    assert result.portfolio_table.columns.tolist() == MAX_PORTFOLIO_VISIBLE_COLUMNS
-    assert result.portfolio_table['Ticker'].tolist() == ['FAILED', 'LATER', 'ACTIVE']
-    assert result.portfolio_table.set_index('Ticker').loc['FAILED', 'Current Status'] == 'Failed D1'
-    assert result.portfolio_table.set_index('Ticker').loc['FAILED', 'Close < BE'] == 'Yes'
+    assert result.portfolio_table.columns.tolist() == PORTFOLIO_VISIBLE_COLUMNS
+    assert result.portfolio_table['Ticker'].tolist() == ['OLDER', 'NEWER']
     audit = result.audit.set_index('Ticker')
-    assert audit.loc['FAILED', 'Max Progress Eligible'] == 'Yes'
-    assert audit.loc['FAILED', 'Portfolio View Eligible'] == 'Yes'
+    assert audit.loc['OLDER', 'Longest Open Eligible'] == 'Yes'
+    assert audit.loc['OLDER', 'Portfolio View Eligible'] == 'Yes'
+    assert audit.loc['FAILED', 'Longest Open Eligible'] == 'No'
+    assert 'not active: Failed D1' in audit.loc['FAILED', 'Portfolio View Exclusion Reason']
 
 
-def test_max_progress_limits_to_8_rows():
+def test_longest_open_tiebreaks_by_current_rating_max_date_and_ticker():
     rows = _entry_history([
-        {'Ticker': f'M{i:02d}', 'Setup Date': f'2026-04-{i:02d}', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': i / 200, 'max_pct_raw': i / 100, 'Close < BE': 'Yes'}
+        {'Ticker': 'DAYS', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.10, 'max_pct_raw': 0.20, 'Close < BE': 'No'},
+        {'Ticker': 'CUR', 'Setup Date': '2026-04-02', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.30, 'max_pct_raw': 0.31, 'Close < BE': 'No'},
+        {'Ticker': 'RATE', 'Setup Date': '2026-04-02', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.20, 'max_pct_raw': 0.22, 'Close < BE': 'No'},
+        {'Ticker': 'MAX', 'Setup Date': '2026-04-02', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.20, 'max_pct_raw': 0.50, 'Close < BE': 'No'},
+        {'Ticker': 'NEW', 'Setup Date': '2026-04-03', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.20, 'max_pct_raw': 0.40, 'Close < BE': 'No'},
+        {'Ticker': 'AAA', 'Setup Date': '2026-04-03', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.20, 'max_pct_raw': 0.40, 'Close < BE': 'No'},
+    ])
+
+    result = top_movers_from_history(rows, latest_date='2026-04-30', portfolio_view='Longest Open')
+
+    assert result.portfolio_table['Ticker'].tolist() == ['DAYS', 'CUR', 'RATE', 'MAX', 'AAA', 'NEW']
+
+
+def test_longest_open_limits_to_8_rows():
+    rows = _entry_history([
+        {'Ticker': f'L{i:02d}', 'Setup Date': f'2026-04-{i:02d}', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': i / 200, 'max_pct_raw': i / 100, 'Close < BE': 'No'}
         for i in range(1, 12)
     ])
 
-    result = top_movers_from_history(rows, latest_date='2026-04-30', portfolio_view='Max Progress')
+    result = top_movers_from_history(rows, latest_date='2026-04-30', portfolio_view='Longest Open')
 
     assert len(result.portfolio_table) == 8
-    assert result.portfolio_table['Ticker'].tolist() == ['M11', 'M10', 'M09', 'M08', 'M07', 'M06', 'M05', 'M04']
+    assert result.portfolio_table['Ticker'].tolist() == ['L01', 'L02', 'L03', 'L04', 'L05', 'L06', 'L07', 'L08']
 
 
-def test_max_progress_excludes_missing_low_rating_and_missing_max_pct():
+def test_longest_open_requires_days_since_setup():
     history = _entry_history([
-        {'Ticker': 'MISSRATE', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': '', 'current_pct_raw': 0.30, 'max_pct_raw': 0.40, 'Close < BE': 'No'},
-        {'Ticker': 'LOWRATE', 'Setup Date': '2026-04-02', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 3, 'current_pct_raw': 0.20, 'max_pct_raw': 0.90, 'Close < BE': 'Yes'},
-        {'Ticker': 'NOMAX', 'Setup Date': '2026-04-03', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.10, 'max_pct_raw': None, 'Close < BE': 'Yes'},
+        {'Ticker': 'NODAYS', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.30, 'max_pct_raw': 0.40, 'Close < BE': 'No'},
     ])
 
-    result = top_movers_from_history(history, latest_date='2026-04-30', portfolio_view='Max Progress')
+    result = top_movers_from_history(history, latest_date=None, portfolio_view='Longest Open')
     audit = result.audit.set_index('Ticker')
 
     assert result.portfolio_table.empty
-    assert result.portfolio_table.columns.tolist() == MAX_PORTFOLIO_VISIBLE_COLUMNS
-    assert 'missing rating' in audit.loc['MISSRATE', 'Portfolio View Exclusion Reason']
-    assert 'rating below 4' in audit.loc['LOWRATE', 'Portfolio View Exclusion Reason']
-    assert 'missing Max %' in audit.loc['NOMAX', 'Portfolio View Exclusion Reason']
+    assert result.portfolio_table.columns.tolist() == PORTFOLIO_VISIBLE_COLUMNS
+    assert audit.loc['NODAYS', 'Current Progress Eligible'] == 'Yes'
+    assert audit.loc['NODAYS', 'Longest Open Eligible'] == 'No'
+    assert 'missing Days Since Setup' in audit.loc['NODAYS', 'Portfolio View Exclusion Reason']
 
 
 def test_hypothetical_portfolio_accepts_integer_string_and_float_four_ratings():

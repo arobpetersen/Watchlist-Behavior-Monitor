@@ -24,7 +24,7 @@ from src.watchlist_top_movers import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-TOP_MOVERS_CACHE_VERSION = 'top-movers-portfolio-two-view-v1'
+TOP_MOVERS_CACHE_VERSION = 'top-movers-longest-open-v1'
 
 
 @st.cache_data(show_spinner=False)
@@ -79,13 +79,13 @@ else:
             portfolio_view=portfolio_view,
         )
 
-    if portfolio_view == 'Max Progress':
-        st.caption('Max Progress: 4–5 star names ranked by Max %, regardless of current active status.')
+    if portfolio_view == 'Longest Open':
+        st.caption('Longest Open: active, fresh 4–5 star names ranked by Days Since Setup.')
     else:
         st.caption('Current Progress: active, fresh 4–5 star names ranked by Current %.')
     if all_active_result.portfolio_table.empty:
-        if portfolio_view == 'Max Progress':
-            st.info('No 4–5 star names with valid Max % currently qualify.')
+        if portfolio_view == 'Longest Open':
+            st.info('No active 4–5 star names with valid Days Since Setup currently qualify.')
         else:
             st.info('No active 4–5 star names currently qualify.')
     else:
