@@ -828,7 +828,7 @@ def test_vwap_reclaim_stop_invalid_prevents_display_trigger_promotion():
     assert out.loc[0, 'vwap_qualified_trigger_result'] == ''
 
 
-def test_vwap_reclaim_raw_non_success_results_do_not_qualify():
+def test_vwap_reclaim_high_not_taken_out_does_not_qualify():
     rows = pd.DataFrame([
         {'Ticker': 'FAILED', 'Trigger': 'Alt Required', 'VWAP Reclaim': 'failed', 'VWAP Reclaim Trigger Price': 10.5},
         {'Ticker': 'BLANK', 'Trigger': 'Alt Required', 'VWAP Reclaim': '', 'VWAP Reclaim Trigger Price': 10.5},
@@ -839,6 +839,27 @@ def test_vwap_reclaim_raw_non_success_results_do_not_qualify():
 
     assert out['Trigger'].tolist() == ['Alt Required', 'Alt Required', 'Alt Required']
     assert out['vwap_qualified_trigger_result'].tolist() == ['', '', '']
+
+
+def test_vwap_reclaim_triggered_failure_resolves_as_failed_vwap_trigger():
+    rows = pd.DataFrame([{
+        'Ticker': 'IONQ',
+        'Trigger': 'No Trigger',
+        'Trigger Day': 'Unresolved',
+        'VWAP Reclaim': 'failed',
+        'Raw VWAP Reclaim Result': 'failed',
+        'Raw VWAP Reclaim Result Reason': 'post-trigger low-of-day reference breached',
+        'Raw VWAP Reclaim Trigger Time': '2026-05-08 10:05',
+        'VWAP Reclaim Trigger Price': 48.09,
+        'PDH': '-',
+    }])
+
+    out = resolve_display_triggers(rows)
+
+    assert out.loc[0, 'Trigger'] == 'VWAP Reclaim'
+    assert out.loc[0, 'Trigger Day'] == 'Fail'
+    assert out.loc[0, 'vwap_qualified_trigger_result'] == 'failed'
+    assert out.loc[0, 'vwap_qualified_trigger_reason'] == 'VWAP triggered then failed'
 
 
 def test_vwap_reclaim_display_trigger_appears_in_detail_rows():

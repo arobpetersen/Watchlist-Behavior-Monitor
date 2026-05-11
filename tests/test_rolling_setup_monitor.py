@@ -34,6 +34,7 @@ from src.rolling_setup_monitor import (
     current_status_display,
     trigger_day_status,
 )
+from src.trigger_resolution import resolve_display_triggers
 
 
 def _or(**kwargs):
@@ -1926,7 +1927,7 @@ def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
 def test_rolling_setup_monitor_page_uses_db_backed_cache_token_and_perf_debug():
     page = open('pages/3_Rolling_Setup_Monitor.py', encoding='utf-8').read()
 
-    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-lod-reference-v1'" in page
+    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-triggered-fail-v1'" in page
     assert "rolling_cache_token = f'{ROLLING_MONITOR_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_rolling_setup_sections(db_path, rolling_cache_token)' in page
     assert "PerfTimer('Rolling Setup Monitor')" in page
@@ -2202,6 +2203,56 @@ def test_format_section_table_preserves_raw_vwap_failure_without_qualified_failu
     assert table.loc[0, 'Raw VWAP Reclaim Result Reason'] == 'reclaim-bar high not taken out'
     assert table.loc[0, 'Qualified VWAP Trigger Result'] == '-'
     assert table.loc[0, 'Qualified VWAP Trigger Reason'] == 'raw VWAP Reclaim is failed'
+
+
+def test_format_section_table_shows_triggered_vwap_failure_as_failed_trigger():
+    raw = pd.DataFrame([{
+        'candidate_id': 1,
+        'ticker': 'IONQ',
+        'status': 'Failed',
+        'trigger_type': 'No Trigger',
+        'raw_one_min_result': 'failed',
+        'raw_five_min_result': 'failed',
+        'one_min_result': 'failed',
+        'five_min_result': 'failed',
+        'vwap_reclaim_result': 'failed',
+        'vwap_reclaim_result_reason': 'post-trigger low-of-day reference breached',
+        'vwap_reclaim_trigger_time': pd.Timestamp('2026-05-08 10:05'),
+        'vwap_reclaim_trigger_price': 48.09,
+        'vwap_qualified_trigger_result': 'failed',
+        'vwap_qualified_trigger_reason': 'VWAP triggered then failed',
+        'notes': '',
+        'current_pct': -0.02,
+        'max_pct': 0.03,
+        'd3_high_pct': None,
+        'retest_day': None,
+        'fail_day': 0,
+        'setup': None,
+        'rating': None,
+        'trigger_level': 48.09,
+        'reference_low': 46.92,
+        'reference_basis': 'VWAP Reclaim',
+        'trigger_break_time': pd.Timestamp('2026-05-08 10:05'),
+        'latest_close': 45.8,
+        'close_price': 48.0,
+        'high_price': 49.44,
+        'low_price': 45.72,
+        'current_pct_from_setup_close': -0.01,
+        'max_gain_from_setup_close': 0.02,
+        'relative_volume_20d': None,
+        'range_vs_atr20': None,
+        'one_min_or_width_vs_atr14': None,
+        'five_min_or_width_vs_atr14': None,
+        'close_location': None,
+    }])
+
+    raw = resolve_display_triggers(raw)
+    table = _format_section_table(raw)
+
+    assert table.loc[0, 'Trigger'] == 'VWAP Reclaim'
+    assert table.loc[0, 'Trigger Day'] == 'Fail'
+    assert table.loc[0, 'VWAP Reclaim'] == 'failed'
+    assert table.loc[0, 'Qualified VWAP Trigger Result'] == 'failed'
 
 
 def test_format_section_table_flags_vwap_success_later_failed_in_detail_only():

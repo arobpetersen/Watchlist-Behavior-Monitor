@@ -56,6 +56,14 @@ def _vwap_price(row: pd.Series) -> float | None:
     return _num(_first_present(row, ['vwap_reclaim_trigger_price', 'Raw VWAP Reclaim Trigger Price', 'VWAP Reclaim Trigger Price']))
 
 
+def _vwap_time(row: pd.Series) -> Any:
+    return _first_present(row, ['vwap_reclaim_trigger_time', 'Raw VWAP Reclaim Trigger Time', 'VWAP Reclaim Trigger Time'])
+
+
+def _vwap_reference_low(row: pd.Series) -> float | None:
+    return _num(_first_present(row, ['vwap_reclaim_trigger_lod_reference', 'Raw VWAP Reclaim Trigger LOD Reference', 'VWAP Reclaim Trigger LOD Reference']))
+
+
 def _json_field(value: Any, field: str) -> Any:
     if isinstance(value, str) and value:
         try:
@@ -109,7 +117,23 @@ def should_promote_vwap_reclaim(row: pd.Series) -> bool:
 def qualified_vwap_trigger_fields(row: pd.Series) -> dict:
     raw_result = _vwap_result(row)
     vwap_price = _vwap_price(row)
+    vwap_time = _vwap_time(row)
     trigger = _trigger_label(row)
+    if raw_result == 'failed' and vwap_time is not None:
+        if vwap_price is None:
+            return {
+                'vwap_qualified_trigger_result': '',
+                'vwap_qualified_trigger_reason': 'failed VWAP trigger price unavailable',
+            }
+        if trigger in FALLBACK_TRIGGER_LABELS or trigger == '':
+            return {
+                'vwap_qualified_trigger_result': 'failed',
+                'vwap_qualified_trigger_reason': 'VWAP triggered then failed',
+            }
+        return {
+            'vwap_qualified_trigger_result': '',
+            'vwap_qualified_trigger_reason': f'{trigger or "current"} trigger preserved',
+        }
     if raw_result != 'success':
         return {
             'vwap_qualified_trigger_result': '',
@@ -183,10 +207,11 @@ def vwap_orh_suppression_reason(row: pd.Series, one_min_result: Any, five_min_re
 
 
 def resolve_display_triggers(rows: pd.DataFrame) -> pd.DataFrame:
-    """Promote successful VWAP Reclaim to the displayed trigger when warranted.
+    """Promote actionable VWAP Reclaim outcomes to the displayed trigger when warranted.
 
     The rule is deterministic and display-focused:
     - fallback labels promote when VWAP succeeded;
+    - triggered VWAP failures promote over fallback labels as day-0 failures;
     - 1m/5m ORH labels promote only when VWAP trigger price is lower;
     - PDH and other labels are preserved.
     """
@@ -207,14 +232,19 @@ def resolve_display_triggers(rows: pd.DataFrame) -> pd.DataFrame:
             out.at[idx, 'VWAP Trigger'] = qualified['vwap_qualified_trigger_result']
         if 'VWAP Trigger Reason' in out:
             out.at[idx, 'VWAP Trigger Reason'] = qualified['vwap_qualified_trigger_reason']
-        if qualified['vwap_qualified_trigger_result'] != 'success':
+        if qualified['vwap_qualified_trigger_result'] not in {'success', 'failed'}:
             continue
         if 'trigger_type' in out:
             out.at[idx, 'trigger_type'] = 'VWAP Reclaim'
         if 'Trigger' in out:
             out.at[idx, 'Trigger'] = 'VWAP Reclaim'
+        if qualified['vwap_qualified_trigger_result'] == 'failed':
+            if 'fail_day' in out:
+                out.at[idx, 'fail_day'] = 0
+            if 'Trigger Day' in out:
+                out.at[idx, 'Trigger Day'] = 'Fail'
         vwap_price = _vwap_price(row)
-        vwap_time = _first_present(row, ['vwap_reclaim_trigger_time', 'Raw VWAP Reclaim Trigger Time', 'VWAP Reclaim Trigger Time'])
+        vwap_time = _vwap_time(row)
         if 'trigger_level' in out:
             out.at[idx, 'trigger_level'] = vwap_price
         if 'Trigger Level' in out and vwap_price is not None:
@@ -227,4 +257,10 @@ def resolve_display_triggers(rows: pd.DataFrame) -> pd.DataFrame:
             out.at[idx, 'reference_basis'] = 'VWAP Reclaim'
         if 'Reference Basis' in out:
             out.at[idx, 'Reference Basis'] = 'VWAP Reclaim'
+        vwap_reference_low = _vwap_reference_low(row)
+        if vwap_reference_low is not None:
+            if 'reference_low' in out:
+                out.at[idx, 'reference_low'] = vwap_reference_low
+            if 'Reference Low' in out:
+                out.at[idx, 'Reference Low'] = vwap_reference_low
     return out
