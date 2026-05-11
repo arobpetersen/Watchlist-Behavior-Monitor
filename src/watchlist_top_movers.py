@@ -373,6 +373,23 @@ def _portfolio_columns(portfolio_view: str) -> list[str]:
     return MAX_PORTFOLIO_VISIBLE_COLUMNS if portfolio_view == 'Max Progress' else PORTFOLIO_VISIBLE_COLUMNS
 
 
+def portfolio_summary(table: pd.DataFrame) -> str:
+    if table.empty:
+        return ''
+    current = _numeric(table, ['Current %'])
+    max_pct = _numeric(table, ['Max %'])
+    rating = pd.to_numeric(_first_existing(table, ['Rating']), errors='coerce')
+    row_count = len(table)
+    name_label = 'name' if row_count == 1 else 'names'
+    return (
+        f'{row_count} {name_label} | '
+        f'Avg Current {_fmt_pct(current.mean())} | '
+        f'Avg Max {_fmt_pct(max_pct.mean())} | '
+        f'{int(rating.eq(5).sum())} rated 5★ | '
+        f'{int(rating.eq(4).sum())} rated 4★'
+    )
+
+
 def portfolio_eligibility_funnel(rows: pd.DataFrame) -> pd.DataFrame:
     if rows.empty:
         counts = [

@@ -13,6 +13,7 @@ from src.watchlist_top_movers import (
     filter_setup_window,
     portfolio_eligibility_funnel,
     portfolio_exclusion_samples,
+    portfolio_summary,
     prepare_top_mover_rows,
     top_movers_from_history,
 )
@@ -111,12 +112,16 @@ def test_page_groups_active_table_outside_setup_window_filters():
     page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
 
     portfolio_heading = page.index("st.subheader('Hypothetical Optimal Portfolio')")
+    portfolio_selector = page.index("'Portfolio View'")
+    portfolio_caption = page.index("st.caption('Current Progress:")
     portfolio_table = page.index("st.dataframe(all_active_result.portfolio_table")
+    reference_heading = page.index("st.header('Reference Tables')")
     active_heading = page.index("st.subheader('Top 10 Active Watchlist Movers')")
     active_table = page.index("st.dataframe(all_active_result.active_table")
     filter_heading = page.index("st.subheader('Top Triggered Watchlist Movers')")
     filter_widget = page.index("st.selectbox(\n            'Setup Window'")
-    assert portfolio_heading < portfolio_table < active_heading < active_table < filter_heading < filter_widget
+    assert portfolio_heading < portfolio_selector < portfolio_caption < portfolio_table
+    assert portfolio_table < reference_heading < active_heading < active_table < filter_heading < filter_widget
     assert 'No active 4–5 star names currently qualify.' in page
     assert 'No 4–5 star names with valid Max % currently qualify.' in page
     assert "'Portfolio View'" in page
@@ -128,6 +133,7 @@ def test_page_groups_active_table_outside_setup_window_filters():
     assert "setup_window='All'" in page
     assert 'portfolio_view=portfolio_view' in page
     assert 'top_n=20' in page
+    assert 'portfolio_summary(all_active_result.portfolio_table)' in page
 
 
 def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
@@ -149,6 +155,20 @@ def test_default_portfolio_view_is_current_progress():
     assert DEFAULT_PORTFOLIO_VIEW == 'Current Progress'
     assert PORTFOLIO_VIEW_OPTIONS == ['Current Progress', 'Max Progress']
     assert 'index=PORTFOLIO_VIEW_OPTIONS.index(DEFAULT_PORTFOLIO_VIEW)' in page
+
+
+def test_portfolio_summary_formats_counts_and_averages():
+    table = pd.DataFrame([
+        {'Ticker': 'A', 'Rating': 5, 'Current %': '10.0%', 'Max %': '20.0%'},
+        {'Ticker': 'B', 'Rating': '4', 'Current %': '20.0%', 'Max %': '40.0%'},
+        {'Ticker': 'C', 'Rating': 5.0, 'Current %': '30.0%', 'Max %': '60.0%'},
+    ])
+
+    assert portfolio_summary(table) == '3 names | Avg Current 20.0% | Avg Max 40.0% | 2 rated 5★ | 1 rated 4★'
+
+
+def test_portfolio_summary_handles_empty_table_without_averages():
+    assert portfolio_summary(pd.DataFrame(columns=PORTFOLIO_VISIBLE_COLUMNS)) == ''
 
 
 def test_top_n_filtering_and_deterministic_rank_assignment():

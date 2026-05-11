@@ -16,6 +16,7 @@ from src.watchlist_top_movers import (
     prepare_top_mover_rows,
     portfolio_eligibility_funnel,
     portfolio_exclusion_samples,
+    portfolio_summary,
     top_movers_from_history,
 )
 
@@ -59,6 +60,7 @@ else:
     with perf.measure('top movers base row mapping'):
         mapped_history = prepare_top_mover_rows(history, latest_date)
 
+    st.subheader('Hypothetical Optimal Portfolio')
     portfolio_view = st.selectbox(
         'Portfolio View',
         PORTFOLIO_VIEW_OPTIONS,
@@ -77,7 +79,6 @@ else:
             portfolio_view=portfolio_view,
         )
 
-    st.subheader('Hypothetical Optimal Portfolio')
     if portfolio_view == 'Max Progress':
         st.caption('Max Progress: 4–5 star names ranked by Max %, regardless of current active status.')
     else:
@@ -88,6 +89,7 @@ else:
         else:
             st.info('No active 4–5 star names currently qualify.')
     else:
+        st.caption(portfolio_summary(all_active_result.portfolio_table))
         st.dataframe(all_active_result.portfolio_table, width='stretch', hide_index=True)
     with st.expander('Portfolio Eligibility Audit', expanded=False):
         st.dataframe(portfolio_eligibility_funnel(mapped_history), width='stretch', hide_index=True)
@@ -96,6 +98,7 @@ else:
             st.caption('Sample excluded rows')
             st.dataframe(samples, width='stretch', hide_index=True)
 
+    st.header('Reference Tables')
     st.subheader('Top 10 Active Watchlist Movers')
     st.caption(
         'Ranks active setups by entry-based Current %, then Rating, then entry-based Max %. '
