@@ -71,6 +71,8 @@ def assess_vwap_reclaim(
         reclaim_bar_close=None,
         trigger_time=None,
         trigger_price=None,
+        vwap_trigger_lod_reference=None,
+        vwap_reference_basis: str = '',
         post_trigger_high=None,
         post_trigger_low=None,
         post_trigger_stop_breached: bool | None = None,
@@ -86,6 +88,8 @@ def assess_vwap_reclaim(
             'reclaim_bar_close': reclaim_bar_close,
             'trigger_time': trigger_time,
             'trigger_price': trigger_price,
+            'vwap_trigger_lod_reference': vwap_trigger_lod_reference,
+            'vwap_reference_basis': vwap_reference_basis,
             'post_trigger_high': post_trigger_high,
             'post_trigger_low': post_trigger_low,
             'post_trigger_stop_breached': post_trigger_stop_breached,
@@ -141,7 +145,7 @@ def assess_vwap_reclaim(
             & (end_times <= pd.Timestamp('11:30').time())
             & (close > vwap)
         ).any())
-        reason = 'no prior 5-minute close below or equal to VWAP' if above_in_window and not any_prior_below else 'no true VWAP reclaim'
+        reason = 'no prior 5-minute close below or equal to VWAP' if above_in_window and not any_prior_below else 'no qualifying reclaim'
         return result('', failure_reason=reason, prior_below_vwap_observed=any_prior_below)
 
     reclaim = candidates.iloc[0]
@@ -166,10 +170,14 @@ def assess_vwap_reclaim(
         )
     first = trigger.iloc[0]
     trigger_time = first['timestamp_et']
+    lod_through_trigger = pd.to_numeric(
+        session.loc[session['timestamp_et'] <= trigger_time, 'low'],
+        errors='coerce',
+    ).min()
     post_trigger = session[session['timestamp_et'] >= trigger_time]
     post_trigger_high = pd.to_numeric(post_trigger['high'], errors='coerce').max()
     post_trigger_low = pd.to_numeric(post_trigger['low'], errors='coerce').min()
-    stop_breached = bool(pd.notna(post_trigger_low) and post_trigger_low < reclaim_low)
+    stop_breached = bool(pd.notna(post_trigger_low) and pd.notna(lod_through_trigger) and post_trigger_low < lod_through_trigger)
     if stop_breached:
         return result(
             'failed',
@@ -180,10 +188,12 @@ def assess_vwap_reclaim(
             reclaim_bar_close=reclaim_close,
             trigger_time=_fmt_ts(trigger_time),
             trigger_price=reclaim_high,
+            vwap_trigger_lod_reference=float(lod_through_trigger) if pd.notna(lod_through_trigger) else None,
+            vwap_reference_basis='low of day through trigger',
             post_trigger_high=float(post_trigger_high) if pd.notna(post_trigger_high) else None,
             post_trigger_low=float(post_trigger_low) if pd.notna(post_trigger_low) else None,
             post_trigger_stop_breached=True,
-            failure_reason='post-trigger reclaim-bar low breached',
+            failure_reason='post-trigger low-of-day reference breached',
             prior_below_vwap_observed=True,
         )
     return result(
@@ -195,9 +205,11 @@ def assess_vwap_reclaim(
         reclaim_bar_close=reclaim_close,
         trigger_time=_fmt_ts(trigger_time),
         trigger_price=reclaim_high,
+        vwap_trigger_lod_reference=float(lod_through_trigger) if pd.notna(lod_through_trigger) else None,
+        vwap_reference_basis='low of day through trigger',
         post_trigger_high=float(post_trigger_high) if pd.notna(post_trigger_high) else None,
         post_trigger_low=float(post_trigger_low) if pd.notna(post_trigger_low) else None,
         post_trigger_stop_breached=False,
-        failure_reason='reclaim confirmed and held through setup session',
+        failure_reason='reclaim confirmed and LOD reference held through setup session',
         prior_below_vwap_observed=True,
     )

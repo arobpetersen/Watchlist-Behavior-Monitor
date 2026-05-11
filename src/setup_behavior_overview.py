@@ -239,6 +239,7 @@ def _vwap_reclaim_defaults(history: pd.DataFrame) -> pd.DataFrame:
         'Raw VWAP Reclaim Bar Low',
         'Raw VWAP Reclaim Bar Close',
         'Raw VWAP Reclaim Trigger Price',
+        'Raw VWAP Reclaim Trigger LOD Reference',
         'Raw VWAP Reclaim Post-Trigger High',
         'Raw VWAP Reclaim Post-Trigger Low',
         'Raw VWAP Reclaim Post-Trigger Stop Breached',
@@ -255,6 +256,8 @@ def _vwap_reclaim_defaults(history: pd.DataFrame) -> pd.DataFrame:
         'Raw VWAP Reclaim Bar Close': None,
         'Raw VWAP Reclaim Trigger Time': '',
         'Raw VWAP Reclaim Trigger Price': None,
+        'Raw VWAP Reclaim Trigger LOD Reference': None,
+        'Raw VWAP Reclaim Reference Basis': '',
         'Raw VWAP Reclaim Post-Trigger High': None,
         'Raw VWAP Reclaim Post-Trigger Low': None,
         'Raw VWAP Reclaim Post-Trigger Stop Breached': None,
@@ -323,6 +326,8 @@ def _add_vwap_reclaim_events(con, history: pd.DataFrame, perf=None) -> pd.DataFr
         history.at[idx, 'Raw VWAP Reclaim Bar Close'] = result.get('reclaim_bar_close')
         history.at[idx, 'Raw VWAP Reclaim Trigger Time'] = result.get('trigger_time') or ''
         history.at[idx, 'Raw VWAP Reclaim Trigger Price'] = result.get('trigger_price')
+        history.at[idx, 'Raw VWAP Reclaim Trigger LOD Reference'] = result.get('vwap_trigger_lod_reference')
+        history.at[idx, 'Raw VWAP Reclaim Reference Basis'] = result.get('vwap_reference_basis') or ''
         history.at[idx, 'Raw VWAP Reclaim Post-Trigger High'] = result.get('post_trigger_high')
         history.at[idx, 'Raw VWAP Reclaim Post-Trigger Low'] = result.get('post_trigger_low')
         history.at[idx, 'Raw VWAP Reclaim Post-Trigger Stop Breached'] = result.get('post_trigger_stop_breached')
