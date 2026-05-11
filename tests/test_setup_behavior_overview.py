@@ -1815,11 +1815,12 @@ def test_setup_behavior_page_uses_successful_triggers_section_title():
     page = open('pages/5_Setup_Behavior_Overview.py', encoding='utf-8').read()
 
     assert "st.subheader('Selected Window Successful Triggers')" in page
-    assert "st.subheader('Behavior Insights')" in page
-    assert 'No major behavior shifts detected yet.' in page
+    assert "st.subheader('Behavior Insights')" not in page
+    assert 'No major behavior shifts detected yet.' not in page
+    assert "st.expander('Daily Intelligence Report'" in page
     assert "st.subheader('Selected Window Opening Path')" not in page
     assert "'VWAP Reclaim'" in page
-    assert "OVERVIEW_CACHE_VERSION = 'setup-overview-behavior-insights-v1'" in page
+    assert "OVERVIEW_CACHE_VERSION = 'setup-overview-daily-report-v1'" in page
     assert "overview_cache_token = f'{OVERVIEW_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert "PerfTimer('Setup Behavior Overview')" in page
     assert 'render_perf_debug(st, perf)' in page

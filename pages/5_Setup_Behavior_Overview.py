@@ -3,6 +3,7 @@ import streamlit as st
 from src.config import get_settings
 from src.data_health_indicator import data_health_cache_token, load_data_health_summary, render_data_health_indicator
 from src.database import get_connection
+from src.daily_report import build_daily_report_payload, build_llm_report_prompt, render_daily_report_markdown
 from src.monitor_history_loader import MONITOR_HISTORY_CACHE_VERSION, load_cached_monitor_history
 from src.performance import PerfTimer, render_perf_debug
 from src.setup_behavior_overview import (
@@ -21,7 +22,7 @@ from src.setup_behavior_overview import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-OVERVIEW_CACHE_VERSION = 'setup-overview-behavior-insights-v1'
+OVERVIEW_CACHE_VERSION = 'setup-overview-daily-report-v1'
 
 
 @st.cache_data(show_spinner=False)
@@ -105,21 +106,19 @@ else:
         st.session_state.setup_behavior_selected_window = labels[0]
     selected_window = st.selectbox('Selected Window', labels, key='setup_behavior_selected_window')
 
+    with st.expander('Daily Intelligence Report', expanded=False):
+        report_payload = build_daily_report_payload(history, overview)
+        latest_date = report_payload.get('latest_setup_date_summary', {}).get('latest_setup_date') or '-'
+        st.caption(f'Latest setup date: {latest_date}')
+        st.markdown(render_daily_report_markdown(report_payload))
+        with st.expander('LLM-ready structured prompt', expanded=False):
+            st.code(build_llm_report_prompt(report_payload), language='text')
+
     st.subheader('Selected Window Snapshot')
     with perf.measure('snapshot display preparation'):
         snapshot_html = overview['snapshot_cards'][selected_window]
     st.markdown(snapshot_html, unsafe_allow_html=True)
     st.write(overview['reads'][selected_window])
-
-    st.subheader('Behavior Insights')
-    insights = overview.get('behavior_insights', [])
-    if insights:
-        for insight in insights:
-            basis = insight.get('basis', '')
-            suffix = f' _{basis}._' if basis else ''
-            st.markdown(f"- {insight['text']}{suffix}")
-    else:
-        st.info('No major behavior shifts detected yet.')
 
     st.subheader('Selected Window Successful Triggers')
     st.dataframe(overview['opening_behavior_main'][selected_window], width='stretch', hide_index=True)
