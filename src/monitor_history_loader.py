@@ -8,7 +8,7 @@ from src.performance import PerfTimer
 from src.setup_behavior_overview import monitor_history
 
 
-MONITOR_HISTORY_CACHE_VERSION = 'monitor-history-shared-v1'
+MONITOR_HISTORY_CACHE_VERSION = 'monitor-history-vwap-setup-date-scope-v1'
 
 
 @st.cache_data(show_spinner=False)

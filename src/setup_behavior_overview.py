@@ -301,7 +301,7 @@ def _add_vwap_reclaim_events(con, history: pd.DataFrame, perf=None) -> pd.DataFr
         setup_date = pd.to_datetime(row.get('Setup Date'), errors='coerce')
         if not ticker or pd.isna(setup_date):
             continue
-        result = assess_vwap_reclaim(grouped.get((ticker, setup_date.date().isoformat())))
+        result = assess_vwap_reclaim(grouped.get((ticker, setup_date.date().isoformat())), setup_date=setup_date)
         history.at[idx, 'Raw VWAP Reclaim Result'] = result.get('result') or ''
         history.at[idx, 'Raw VWAP Reclaim Prior Below VWAP'] = result.get('prior_below_vwap_observed')
         history.at[idx, 'Raw VWAP Reclaim Time'] = result.get('reclaim_time') or ''

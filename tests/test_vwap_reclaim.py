@@ -132,6 +132,33 @@ def test_vwap_reclaim_failed_when_reclaim_high_not_taken_out():
     assert out['failure_reason'] == 'reclaim-bar high not taken out'
 
 
+def test_vwap_reclaim_setup_date_scope_ignores_later_day_strength():
+    setup = _session_with_reclaim(reclaim_start='10:00:00', later_high=11.1)
+    later = _bars('2026-05-04', [
+        ('09:30:00', 11.0, 12.5, 10.8, 12.2, 1000),
+        ('09:31:00', 12.2, 12.8, 12.0, 12.6, 1000),
+    ])
+
+    out = assess_vwap_reclaim(pd.concat([setup, later], ignore_index=True), min_regular_session_bars=300, setup_date='2026-05-01')
+
+    assert out['result'] == 'failed'
+    assert out['reclaim_time'] == '2026-05-01 10:05:00'
+    assert out['trigger_time'] is None
+    assert out['failure_reason'] == 'reclaim-bar high not taken out'
+
+
+def test_vwap_reclaim_blank_setup_date_stays_blank_despite_later_day_strength():
+    setup = _session_with_reclaim(reclaim_start='10:00:00', reclaim_close=9.8, reclaim_high=10.1, later_high=None)
+    later = _session_with_reclaim(reclaim_start='10:00:00', later_high=12.0)
+    later['trading_date'] = '2026-05-04'
+    later['timestamp_et'] = pd.to_datetime(later['timestamp_et']) + pd.Timedelta(days=3)
+
+    out = assess_vwap_reclaim(pd.concat([setup, later], ignore_index=True), min_regular_session_bars=300, setup_date='2026-05-01')
+
+    assert out['result'] == ''
+    assert out['failure_reason'] == 'no true VWAP reclaim'
+
+
 def test_vwap_reclaim_takeout_must_occur_after_reclaim_bar_close():
     bars = _session_with_reclaim(reclaim_start='10:00:00', reclaim_high=11.4, later_high=11.3)
 

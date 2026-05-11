@@ -512,8 +512,8 @@ def day0_fail_time(intraday: pd.DataFrame, trigger_break_time, reference_low: fl
     return _ts(failures.iloc[0]['timestamp_et'])
 
 
-def _vwap_reclaim_fields(intraday: pd.DataFrame | None, reference_low: float | None = None) -> dict:
-    assessment = assess_vwap_reclaim(intraday)
+def _vwap_reclaim_fields(intraday: pd.DataFrame | None, reference_low: float | None = None, setup_date=None) -> dict:
+    assessment = assess_vwap_reclaim(intraday, setup_date=setup_date)
     trigger_time = _ts(assessment.get('trigger_time'))
     stop_valid = None
     if assessment.get('result') == 'success' and trigger_time is not None and reference_low is not None:
@@ -1707,7 +1707,7 @@ def rolling_setup_monitor(con, setup_dates: int = 5, perf=None) -> list[dict]:
         })
         record.update(trigger)
         start = perf_counter()
-        record.update(_vwap_reclaim_fields(ticker_intraday, record.get('reference_low')))
+        record.update(_vwap_reclaim_fields(ticker_intraday, record.get('reference_low'), setup_date))
         vwap_seconds += perf_counter() - start
         start = perf_counter()
         record.update(resolve_display_triggers(pd.DataFrame([record])).iloc[0].to_dict())

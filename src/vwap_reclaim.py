@@ -60,6 +60,7 @@ def _fmt_ts(value: Any) -> str | None:
 def assess_vwap_reclaim(
     bars: pd.DataFrame | None,
     min_regular_session_bars: int = 300,
+    setup_date: Any = None,
 ) -> dict:
     def result(
         value: str,
@@ -84,7 +85,21 @@ def assess_vwap_reclaim(
     if bars is None or bars.empty:
         return result('Not Applicable', failure_reason='missing intraday bars')
 
-    session = regular_session_bars(bars)
+    source = bars.copy()
+    if setup_date is not None:
+        setup_day = pd.to_datetime(setup_date, errors='coerce')
+        if pd.isna(setup_day):
+            return result('Not Applicable', failure_reason='invalid setup date')
+        if 'trading_date' in source:
+            dates = pd.to_datetime(source['trading_date'], errors='coerce').dt.normalize()
+            source = source[dates.eq(setup_day.normalize())].copy()
+        elif 'timestamp_et' in source:
+            timestamps = pd.to_datetime(source['timestamp_et'], errors='coerce').dt.normalize()
+            source = source[timestamps.eq(setup_day.normalize())].copy()
+        if source.empty:
+            return result('Not Applicable', failure_reason='missing setup-date intraday bars')
+
+    session = regular_session_bars(source)
     if session.empty:
         return result('Not Applicable', failure_reason='missing regular-session bars')
     quality_rows = partial_intraday_sessions(

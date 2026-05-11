@@ -19,7 +19,7 @@ from src.rolling_setup_monitor import (
 
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
-ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-actionable-display-v3'
+ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-setup-date-scope-v1'
 
 
 @st.cache_data(show_spinner=False)

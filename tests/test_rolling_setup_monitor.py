@@ -1922,7 +1922,7 @@ def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
 def test_rolling_setup_monitor_page_uses_db_backed_cache_token_and_perf_debug():
     page = open('pages/3_Rolling_Setup_Monitor.py', encoding='utf-8').read()
 
-    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-actionable-display-v3'" in page
+    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-setup-date-scope-v1'" in page
     assert "rolling_cache_token = f'{ROLLING_MONITOR_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_rolling_setup_sections(db_path, rolling_cache_token)' in page
     assert "PerfTimer('Rolling Setup Monitor')" in page
