@@ -7,6 +7,8 @@ from src.monitor_history_loader import MONITOR_HISTORY_CACHE_VERSION, load_cache
 from src.performance import PerfTimer, render_perf_debug
 from src.watchlist_top_movers import (
     DEFAULT_SETUP_WINDOW,
+    DEFAULT_PORTFOLIO_VIEW,
+    PORTFOLIO_VIEW_OPTIONS,
     SETUP_WINDOW_OPTIONS,
     SORT_OPTIONS,
     TOP_N_OPTIONS,
@@ -21,7 +23,7 @@ from src.watchlist_top_movers import (
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-TOP_MOVERS_CACHE_VERSION = 'top-movers-portfolio-eligibility-v2'
+TOP_MOVERS_CACHE_VERSION = 'top-movers-portfolio-two-view-v1'
 
 
 @st.cache_data(show_spinner=False)
@@ -57,6 +59,13 @@ else:
     with perf.measure('top movers base row mapping'):
         mapped_history = prepare_top_mover_rows(history, latest_date)
 
+    portfolio_view = st.selectbox(
+        'Portfolio View',
+        PORTFOLIO_VIEW_OPTIONS,
+        index=PORTFOLIO_VIEW_OPTIONS.index(DEFAULT_PORTFOLIO_VIEW),
+        key='top_movers_portfolio_view',
+    )
+
     with perf.measure('active table preparation'):
         all_active_result = top_movers_from_history(
             history,
@@ -65,12 +74,19 @@ else:
             top_n=20,
             sort_by='Max %',
             mapped_history=mapped_history,
+            portfolio_view=portfolio_view,
         )
 
     st.subheader('Hypothetical Optimal Portfolio')
-    st.caption('Eligible: Active, fresh status, rating 4-5, not Close < BE. Ranked by Current %.')
+    if portfolio_view == 'Max Progress':
+        st.caption('Max Progress: 4–5 star names ranked by Max %, regardless of current active status.')
+    else:
+        st.caption('Current Progress: active, fresh 4–5 star names ranked by Current %.')
     if all_active_result.portfolio_table.empty:
-        st.info('No active 4–5 star names currently qualify.')
+        if portfolio_view == 'Max Progress':
+            st.info('No 4–5 star names with valid Max % currently qualify.')
+        else:
+            st.info('No active 4–5 star names currently qualify.')
     else:
         st.dataframe(all_active_result.portfolio_table, width='stretch', hide_index=True)
     with st.expander('Portfolio Eligibility Audit', expanded=False):
@@ -129,6 +145,7 @@ else:
             top_n=top_n,
             sort_by=sort_by,
             mapped_history=mapped_history,
+            portfolio_view=portfolio_view,
         )
 
     st.dataframe(result.table, width='stretch', hide_index=True)

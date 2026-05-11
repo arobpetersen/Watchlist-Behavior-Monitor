@@ -4,7 +4,10 @@ import pandas as pd
 
 from src.watchlist_top_movers import (
     ACTIVE_VISIBLE_COLUMNS,
+    DEFAULT_PORTFOLIO_VIEW,
     DEFAULT_SETUP_WINDOW,
+    MAX_PORTFOLIO_VISIBLE_COLUMNS,
+    PORTFOLIO_VIEW_OPTIONS,
     PORTFOLIO_VISIBLE_COLUMNS,
     VISIBLE_COLUMNS,
     filter_setup_window,
@@ -115,17 +118,22 @@ def test_page_groups_active_table_outside_setup_window_filters():
     filter_widget = page.index("st.selectbox(\n            'Setup Window'")
     assert portfolio_heading < portfolio_table < active_heading < active_table < filter_heading < filter_widget
     assert 'No active 4–5 star names currently qualify.' in page
+    assert 'No 4–5 star names with valid Max % currently qualify.' in page
+    assert "'Portfolio View'" in page
+    assert "key='top_movers_portfolio_view'" in page
+    assert 'Current Progress: active, fresh 4–5 star names ranked by Current %.' in page
+    assert 'Max Progress: 4–5 star names ranked by Max %, regardless of current active status.' in page
     assert 'Ranks active setups by entry-based Current %, then Rating, then entry-based Max %.' in page
     assert 'Entry Ref is the resolved trigger/reference price; setup-close returns remain in Details / Audit.' in page
     assert "setup_window='All'" in page
-    assert 'Eligible: Active, fresh status, rating 4-5, not Close < BE. Ranked by Current %.' in page
+    assert 'portfolio_view=portfolio_view' in page
     assert 'top_n=20' in page
 
 
 def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
     page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
 
-    assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-portfolio-eligibility-v2'" in page
+    assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-portfolio-two-view-v1'" in page
     assert "top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_watchlist_top_movers(db_path, top_movers_cache_token, base_history)' in page
     assert 'load_cached_monitor_history(db_path, monitor_history_cache_token)' in page
@@ -133,6 +141,14 @@ def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
     assert 'render_perf_debug(st, perf)' in page
     assert "st.caption(f'Active rows: {len(all_active_result.active_table)}')" in page
     assert 'Why empty:' in page
+
+
+def test_default_portfolio_view_is_current_progress():
+    page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
+
+    assert DEFAULT_PORTFOLIO_VIEW == 'Current Progress'
+    assert PORTFOLIO_VIEW_OPTIONS == ['Current Progress', 'Max Progress']
+    assert 'index=PORTFOLIO_VIEW_OPTIONS.index(DEFAULT_PORTFOLIO_VIEW)' in page
 
 
 def test_top_n_filtering_and_deterministic_rank_assignment():
@@ -526,6 +542,22 @@ def test_hypothetical_portfolio_filters_and_ranks_candidates():
     assert 'close below breakeven' in audit_by_ticker.loc['BELOWBE', 'Portfolio Exclusion Reason']
     assert audit_by_ticker.loc['LOWRATE', 'Portfolio Eligible'] == 'No'
     assert 'rating below 4' in audit_by_ticker.loc['LOWRATE', 'Portfolio Exclusion Reason']
+    assert audit_by_ticker.loc['FOUR', 'Current Progress Eligible'] == 'Yes'
+    assert audit_by_ticker.loc['FOUR', 'Portfolio View Eligible'] == 'Yes'
+
+
+def test_current_progress_excludes_stale_close_below_be_and_low_rating_rows():
+    result = top_movers_from_history(_portfolio_history(), latest_date='2026-04-30', setup_window='All')
+    tickers = set(result.portfolio_table['Ticker'])
+    audit = result.audit.set_index('Ticker')
+
+    assert 'STALE' not in tickers
+    assert 'BELOWBE' not in tickers
+    assert 'LOWRATE' not in tickers
+    assert audit.loc['STALE', 'Current Progress Eligible'] == 'No'
+    assert 'latest status date older than ticker latest bar date' in audit.loc['STALE', 'Portfolio Exclusion Reason']
+    assert 'close below breakeven' in audit.loc['BELOWBE', 'Portfolio Exclusion Reason']
+    assert 'rating below 4' in audit.loc['LOWRATE', 'Portfolio Exclusion Reason']
 
 
 def test_hypothetical_portfolio_limits_to_8_rows():
@@ -541,11 +573,69 @@ def test_hypothetical_portfolio_limits_to_8_rows():
     assert result.portfolio_table['Ticker'].tolist() == ['P11', 'P10', 'P09', 'P08', 'P07', 'P06', 'P05', 'P04']
 
 
+def test_current_progress_ranks_by_current_pct_first():
+    history = _entry_history([
+        {'Ticker': 'CUR', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.30, 'max_pct_raw': 0.31, 'Close < BE': 'No'},
+        {'Ticker': 'MAX', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.20, 'max_pct_raw': 0.80, 'Close < BE': 'No'},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30', portfolio_view='Current Progress')
+
+    assert result.portfolio_table['Ticker'].tolist() == ['CUR', 'MAX']
+
+
 def test_hypothetical_portfolio_empty_when_no_rows_qualify():
     result = top_movers_from_history(_history(), latest_date='2026-04-30')
 
     assert result.portfolio_table.empty
     assert result.portfolio_table.columns.tolist() == PORTFOLIO_VISIBLE_COLUMNS
+
+
+def test_max_progress_includes_high_rated_failed_rows_and_ranks_by_max_pct():
+    history = _entry_history([
+        {'Ticker': 'ACTIVE', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Active', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.30, 'max_pct_raw': 0.40, 'Close < BE': 'No'},
+        {'Ticker': 'FAILED', 'Setup Date': '2026-04-02', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': 0.10, 'max_pct_raw': 0.90, 'Close < BE': 'Yes'},
+        {'Ticker': 'LATER', 'Setup Date': '2026-04-03', 'Trigger': 'PDH', 'Current Status': 'Failed D2', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.20, 'max_pct_raw': 0.80, 'Close < BE': 'Yes'},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30', portfolio_view='Max Progress')
+
+    assert result.portfolio_table.columns.tolist() == MAX_PORTFOLIO_VISIBLE_COLUMNS
+    assert result.portfolio_table['Ticker'].tolist() == ['FAILED', 'LATER', 'ACTIVE']
+    assert result.portfolio_table.set_index('Ticker').loc['FAILED', 'Current Status'] == 'Failed D1'
+    assert result.portfolio_table.set_index('Ticker').loc['FAILED', 'Close < BE'] == 'Yes'
+    audit = result.audit.set_index('Ticker')
+    assert audit.loc['FAILED', 'Max Progress Eligible'] == 'Yes'
+    assert audit.loc['FAILED', 'Portfolio View Eligible'] == 'Yes'
+
+
+def test_max_progress_limits_to_8_rows():
+    rows = _entry_history([
+        {'Ticker': f'M{i:02d}', 'Setup Date': f'2026-04-{i:02d}', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 5, 'current_pct_raw': i / 200, 'max_pct_raw': i / 100, 'Close < BE': 'Yes'}
+        for i in range(1, 12)
+    ])
+
+    result = top_movers_from_history(rows, latest_date='2026-04-30', portfolio_view='Max Progress')
+
+    assert len(result.portfolio_table) == 8
+    assert result.portfolio_table['Ticker'].tolist() == ['M11', 'M10', 'M09', 'M08', 'M07', 'M06', 'M05', 'M04']
+
+
+def test_max_progress_excludes_missing_low_rating_and_missing_max_pct():
+    history = _entry_history([
+        {'Ticker': 'MISSRATE', 'Setup Date': '2026-04-01', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': '', 'current_pct_raw': 0.30, 'max_pct_raw': 0.40, 'Close < BE': 'No'},
+        {'Ticker': 'LOWRATE', 'Setup Date': '2026-04-02', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 3, 'current_pct_raw': 0.20, 'max_pct_raw': 0.90, 'Close < BE': 'Yes'},
+        {'Ticker': 'NOMAX', 'Setup Date': '2026-04-03', 'Trigger': 'PDH', 'Current Status': 'Failed D1', 'Latest Status Date': '2026-04-30', 'Ticker Latest Bar Date': '2026-04-30', 'Global Latest Bar Date': '2026-04-30', 'Rating': 4, 'current_pct_raw': 0.10, 'max_pct_raw': None, 'Close < BE': 'Yes'},
+    ])
+
+    result = top_movers_from_history(history, latest_date='2026-04-30', portfolio_view='Max Progress')
+    audit = result.audit.set_index('Ticker')
+
+    assert result.portfolio_table.empty
+    assert result.portfolio_table.columns.tolist() == MAX_PORTFOLIO_VISIBLE_COLUMNS
+    assert 'missing rating' in audit.loc['MISSRATE', 'Portfolio View Exclusion Reason']
+    assert 'rating below 4' in audit.loc['LOWRATE', 'Portfolio View Exclusion Reason']
+    assert 'missing Max %' in audit.loc['NOMAX', 'Portfolio View Exclusion Reason']
 
 
 def test_hypothetical_portfolio_accepts_integer_string_and_float_four_ratings():
