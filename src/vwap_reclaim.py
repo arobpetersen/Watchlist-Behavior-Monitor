@@ -65,18 +65,30 @@ def assess_vwap_reclaim(
     def result(
         value: str,
         reclaim_time=None,
+        reclaim_bar_open=None,
         reclaim_bar_high=None,
+        reclaim_bar_low=None,
+        reclaim_bar_close=None,
         trigger_time=None,
         trigger_price=None,
+        post_trigger_high=None,
+        post_trigger_low=None,
+        post_trigger_stop_breached: bool | None = None,
         failure_reason: str = '',
         prior_below_vwap_observed: bool | None = None,
     ) -> dict:
         return {
             'result': value,
             'reclaim_time': reclaim_time,
+            'reclaim_bar_open': reclaim_bar_open,
             'reclaim_bar_high': reclaim_bar_high,
+            'reclaim_bar_low': reclaim_bar_low,
+            'reclaim_bar_close': reclaim_bar_close,
             'trigger_time': trigger_time,
             'trigger_price': trigger_price,
+            'post_trigger_high': post_trigger_high,
+            'post_trigger_low': post_trigger_low,
+            'post_trigger_stop_breached': post_trigger_stop_breached,
             'failure_reason': failure_reason,
             'result_reason': failure_reason,
             'prior_below_vwap_observed': prior_below_vwap_observed,
@@ -133,7 +145,10 @@ def assess_vwap_reclaim(
         return result('', failure_reason=reason, prior_below_vwap_observed=any_prior_below)
 
     reclaim = candidates.iloc[0]
+    reclaim_open = float(reclaim['open'])
     reclaim_high = float(reclaim['high'])
+    reclaim_low = float(reclaim['low'])
+    reclaim_close = float(reclaim['close'])
     reclaim_end = reclaim['end_time']
     later = session[session['timestamp_et'] >= reclaim_end]
     trigger = later[pd.to_numeric(later['high'], errors='coerce') > reclaim_high]
@@ -141,17 +156,48 @@ def assess_vwap_reclaim(
         return result(
             'failed',
             reclaim_time=_fmt_ts(reclaim_end),
+            reclaim_bar_open=reclaim_open,
             reclaim_bar_high=reclaim_high,
+            reclaim_bar_low=reclaim_low,
+            reclaim_bar_close=reclaim_close,
             trigger_price=reclaim_high,
             failure_reason='reclaim-bar high not taken out',
             prior_below_vwap_observed=True,
         )
     first = trigger.iloc[0]
+    trigger_time = first['timestamp_et']
+    post_trigger = session[session['timestamp_et'] >= trigger_time]
+    post_trigger_high = pd.to_numeric(post_trigger['high'], errors='coerce').max()
+    post_trigger_low = pd.to_numeric(post_trigger['low'], errors='coerce').min()
+    stop_breached = bool(pd.notna(post_trigger_low) and post_trigger_low < reclaim_low)
+    if stop_breached:
+        return result(
+            'failed',
+            reclaim_time=_fmt_ts(reclaim_end),
+            reclaim_bar_open=reclaim_open,
+            reclaim_bar_high=reclaim_high,
+            reclaim_bar_low=reclaim_low,
+            reclaim_bar_close=reclaim_close,
+            trigger_time=_fmt_ts(trigger_time),
+            trigger_price=reclaim_high,
+            post_trigger_high=float(post_trigger_high) if pd.notna(post_trigger_high) else None,
+            post_trigger_low=float(post_trigger_low) if pd.notna(post_trigger_low) else None,
+            post_trigger_stop_breached=True,
+            failure_reason='post-trigger reclaim-bar low breached',
+            prior_below_vwap_observed=True,
+        )
     return result(
         'success',
         reclaim_time=_fmt_ts(reclaim_end),
+        reclaim_bar_open=reclaim_open,
         reclaim_bar_high=reclaim_high,
-        trigger_time=_fmt_ts(first['timestamp_et']),
+        reclaim_bar_low=reclaim_low,
+        reclaim_bar_close=reclaim_close,
+        trigger_time=_fmt_ts(trigger_time),
         trigger_price=reclaim_high,
+        post_trigger_high=float(post_trigger_high) if pd.notna(post_trigger_high) else None,
+        post_trigger_low=float(post_trigger_low) if pd.notna(post_trigger_low) else None,
+        post_trigger_stop_breached=False,
+        failure_reason='reclaim confirmed and held through setup session',
         prior_below_vwap_observed=True,
     )

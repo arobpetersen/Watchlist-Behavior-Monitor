@@ -76,9 +76,15 @@ DETAIL_COLUMNS = [
     'Raw VWAP Reclaim Result',
     'Raw VWAP Reclaim Prior Below VWAP',
     'Raw VWAP Reclaim Time',
+    'Raw VWAP Reclaim Bar Open',
     'Raw VWAP Reclaim Bar High',
+    'Raw VWAP Reclaim Bar Low',
+    'Raw VWAP Reclaim Bar Close',
     'Raw VWAP Reclaim Trigger Time',
     'Raw VWAP Reclaim Trigger Price',
+    'Raw VWAP Reclaim Post-Trigger High',
+    'Raw VWAP Reclaim Post-Trigger Low',
+    'Raw VWAP Reclaim Post-Trigger Stop Breached',
     'Raw VWAP Reclaim Stop Valid',
     'Raw VWAP Reclaim Result Reason',
     'Qualified VWAP Trigger Result',
@@ -515,16 +521,19 @@ def day0_fail_time(intraday: pd.DataFrame, trigger_break_time, reference_low: fl
 def _vwap_reclaim_fields(intraday: pd.DataFrame | None, reference_low: float | None = None, setup_date=None) -> dict:
     assessment = assess_vwap_reclaim(intraday, setup_date=setup_date)
     trigger_time = _ts(assessment.get('trigger_time'))
-    stop_valid = None
-    if assessment.get('result') == 'success' and trigger_time is not None and reference_low is not None:
-        bars = _regular_session_bars(intraday)
-        stop_valid = not day0_fail(bars, trigger_time, reference_low)
+    stop_valid = None if assessment.get('post_trigger_stop_breached') is None else not bool(assessment.get('post_trigger_stop_breached'))
     return {
         'vwap_reclaim_result': assessment.get('result') or '',
         'vwap_reclaim_time': _ts(assessment.get('reclaim_time')),
+        'vwap_reclaim_reclaim_bar_open': assessment.get('reclaim_bar_open'),
         'vwap_reclaim_reclaim_bar_high': assessment.get('reclaim_bar_high'),
+        'vwap_reclaim_reclaim_bar_low': assessment.get('reclaim_bar_low'),
+        'vwap_reclaim_reclaim_bar_close': assessment.get('reclaim_bar_close'),
         'vwap_reclaim_trigger_time': trigger_time,
         'vwap_reclaim_trigger_price': assessment.get('trigger_price'),
+        'vwap_reclaim_post_trigger_high': assessment.get('post_trigger_high'),
+        'vwap_reclaim_post_trigger_low': assessment.get('post_trigger_low'),
+        'vwap_reclaim_post_trigger_stop_breached': assessment.get('post_trigger_stop_breached'),
         'vwap_reclaim_stop_valid': stop_valid,
         'vwap_reclaim_prior_below_vwap_observed': assessment.get('prior_below_vwap_observed'),
         'vwap_reclaim_failure_reason': assessment.get('failure_reason') or '',
@@ -1558,9 +1567,15 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'Raw VWAP Reclaim Result': raw.get('vwap_reclaim_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),
         'Raw VWAP Reclaim Prior Below VWAP': raw.get('vwap_reclaim_prior_below_vwap_observed', blank_series).apply(_fmt_bool_available),
         'Raw VWAP Reclaim Time': raw.get('vwap_reclaim_time', blank_series).apply(_fmt_ts),
+        'Raw VWAP Reclaim Bar Open': raw.get('vwap_reclaim_reclaim_bar_open', blank_series).apply(_fmt_price),
         'Raw VWAP Reclaim Bar High': raw.get('vwap_reclaim_reclaim_bar_high', blank_series).apply(_fmt_price),
+        'Raw VWAP Reclaim Bar Low': raw.get('vwap_reclaim_reclaim_bar_low', blank_series).apply(_fmt_price),
+        'Raw VWAP Reclaim Bar Close': raw.get('vwap_reclaim_reclaim_bar_close', blank_series).apply(_fmt_price),
         'Raw VWAP Reclaim Trigger Time': raw.get('vwap_reclaim_trigger_time', blank_series).apply(_fmt_ts),
         'Raw VWAP Reclaim Trigger Price': raw.get('vwap_reclaim_trigger_price', blank_series).apply(_fmt_price),
+        'Raw VWAP Reclaim Post-Trigger High': raw.get('vwap_reclaim_post_trigger_high', blank_series).apply(_fmt_price),
+        'Raw VWAP Reclaim Post-Trigger Low': raw.get('vwap_reclaim_post_trigger_low', blank_series).apply(_fmt_price),
+        'Raw VWAP Reclaim Post-Trigger Stop Breached': raw.get('vwap_reclaim_post_trigger_stop_breached', blank_series).apply(_fmt_bool_available),
         'Raw VWAP Reclaim Stop Valid': raw.get('vwap_reclaim_stop_valid', blank_series).apply(_fmt_bool_available),
         'Raw VWAP Reclaim Result Reason': raw.get('vwap_reclaim_result_reason', blank_series).apply(_blank),
         'Qualified VWAP Trigger Result': raw.get('vwap_qualified_trigger_result', blank_series).apply(lambda v: '-' if _blank(v) == '' else _blank(v)),

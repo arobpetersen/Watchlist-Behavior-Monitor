@@ -234,8 +234,14 @@ def _vwap_reclaim_defaults(history: pd.DataFrame) -> pd.DataFrame:
     out = history.copy()
     audit_columns = {
         'Raw VWAP Reclaim Prior Below VWAP',
+        'Raw VWAP Reclaim Bar Open',
         'Raw VWAP Reclaim Bar High',
+        'Raw VWAP Reclaim Bar Low',
+        'Raw VWAP Reclaim Bar Close',
         'Raw VWAP Reclaim Trigger Price',
+        'Raw VWAP Reclaim Post-Trigger High',
+        'Raw VWAP Reclaim Post-Trigger Low',
+        'Raw VWAP Reclaim Post-Trigger Stop Breached',
     }
     for column, value in {
         'VWAP Trigger': '',
@@ -243,9 +249,15 @@ def _vwap_reclaim_defaults(history: pd.DataFrame) -> pd.DataFrame:
         'Raw VWAP Reclaim Result': 'Not Applicable',
         'Raw VWAP Reclaim Prior Below VWAP': None,
         'Raw VWAP Reclaim Time': '',
+        'Raw VWAP Reclaim Bar Open': None,
         'Raw VWAP Reclaim Bar High': None,
+        'Raw VWAP Reclaim Bar Low': None,
+        'Raw VWAP Reclaim Bar Close': None,
         'Raw VWAP Reclaim Trigger Time': '',
         'Raw VWAP Reclaim Trigger Price': None,
+        'Raw VWAP Reclaim Post-Trigger High': None,
+        'Raw VWAP Reclaim Post-Trigger Low': None,
+        'Raw VWAP Reclaim Post-Trigger Stop Breached': None,
         'Raw VWAP Reclaim Result Reason': 'intraday bars unavailable',
     }.items():
         if column not in out:
@@ -305,9 +317,15 @@ def _add_vwap_reclaim_events(con, history: pd.DataFrame, perf=None) -> pd.DataFr
         history.at[idx, 'Raw VWAP Reclaim Result'] = result.get('result') or ''
         history.at[idx, 'Raw VWAP Reclaim Prior Below VWAP'] = result.get('prior_below_vwap_observed')
         history.at[idx, 'Raw VWAP Reclaim Time'] = result.get('reclaim_time') or ''
+        history.at[idx, 'Raw VWAP Reclaim Bar Open'] = result.get('reclaim_bar_open')
         history.at[idx, 'Raw VWAP Reclaim Bar High'] = result.get('reclaim_bar_high')
+        history.at[idx, 'Raw VWAP Reclaim Bar Low'] = result.get('reclaim_bar_low')
+        history.at[idx, 'Raw VWAP Reclaim Bar Close'] = result.get('reclaim_bar_close')
         history.at[idx, 'Raw VWAP Reclaim Trigger Time'] = result.get('trigger_time') or ''
         history.at[idx, 'Raw VWAP Reclaim Trigger Price'] = result.get('trigger_price')
+        history.at[idx, 'Raw VWAP Reclaim Post-Trigger High'] = result.get('post_trigger_high')
+        history.at[idx, 'Raw VWAP Reclaim Post-Trigger Low'] = result.get('post_trigger_low')
+        history.at[idx, 'Raw VWAP Reclaim Post-Trigger Stop Breached'] = result.get('post_trigger_stop_breached')
         history.at[idx, 'Raw VWAP Reclaim Result Reason'] = result.get('result_reason') or result.get('failure_reason') or ''
     if perf is not None:
         perf.add('monitor_history derivation: raw VWAP reclaim', perf_counter() - start)

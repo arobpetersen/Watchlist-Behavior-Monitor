@@ -1868,8 +1868,11 @@ def test_main_and_detail_table_columns_and_blank_handling():
         '5m Recovery Reference Low', 'Alt Recovery Qualified',
         'PDH Trigger Break Time', 'PDH Trigger Level', 'PDH Reference Low', 'PDH Reference Basis',
         'Raw VWAP Reclaim Result', 'Raw VWAP Reclaim Prior Below VWAP',
-        'Raw VWAP Reclaim Time', 'Raw VWAP Reclaim Bar High',
+        'Raw VWAP Reclaim Time', 'Raw VWAP Reclaim Bar Open', 'Raw VWAP Reclaim Bar High',
+        'Raw VWAP Reclaim Bar Low', 'Raw VWAP Reclaim Bar Close',
         'Raw VWAP Reclaim Trigger Time', 'Raw VWAP Reclaim Trigger Price',
+        'Raw VWAP Reclaim Post-Trigger High', 'Raw VWAP Reclaim Post-Trigger Low',
+        'Raw VWAP Reclaim Post-Trigger Stop Breached',
         'Raw VWAP Reclaim Stop Valid', 'Raw VWAP Reclaim Result Reason',
         'Qualified VWAP Trigger Result', 'Qualified VWAP Trigger Reason',
         'VWAP Success Later Failed',
@@ -1922,7 +1925,7 @@ def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
 def test_rolling_setup_monitor_page_uses_db_backed_cache_token_and_perf_debug():
     page = open('pages/3_Rolling_Setup_Monitor.py', encoding='utf-8').read()
 
-    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-setup-date-scope-v1'" in page
+    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-post-trigger-stop-v1'" in page
     assert "rolling_cache_token = f'{ROLLING_MONITOR_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_rolling_setup_sections(db_path, rolling_cache_token)' in page
     assert "PerfTimer('Rolling Setup Monitor')" in page
@@ -2499,7 +2502,7 @@ def test_format_section_table_keeps_orh_success_when_vwap_does_not_qualify():
     assert table.loc[0, 'VWAP Reclaim'] == '-'
 
 
-def test_vwap_reclaim_fields_detect_stop_validity_from_existing_reference_low():
+def test_vwap_reclaim_fields_use_reclaim_bar_low_for_stop_validity():
     intraday = pd.DataFrame({
         'ticker': ['AAPL'] * 390,
         'trading_date': ['2026-05-01'] * 390,
@@ -2512,17 +2515,28 @@ def test_vwap_reclaim_fields_detect_stop_validity_from_existing_reference_low():
     })
     mask = (intraday['timestamp_et'] >= pd.Timestamp('2026-05-01 10:00')) & (intraday['timestamp_et'] < pd.Timestamp('2026-05-01 10:05'))
     intraday.loc[mask, ['open', 'high', 'low', 'close']] = [10.6, 10.8, 10.5, 10.7]
+    post = intraday['timestamp_et'] >= pd.Timestamp('2026-05-01 10:05')
+    intraday.loc[post, ['open', 'high', 'low', 'close']] = [10.6, 10.7, 10.55, 10.6]
     intraday.loc[intraday['timestamp_et'] == pd.Timestamp('2026-05-01 10:10'), 'high'] = 10.9
-    intraday.loc[intraday['timestamp_et'] == pd.Timestamp('2026-05-01 10:11'), 'low'] = 9.4
 
-    valid = _vwap_reclaim_fields(intraday, reference_low=9.3)
-    invalid = _vwap_reclaim_fields(intraday, reference_low=9.5)
+    valid = _vwap_reclaim_fields(intraday, reference_low=10.6)
 
     assert valid['vwap_reclaim_result'] == 'success'
     assert valid['vwap_reclaim_trigger_price'] == 10.8
+    assert valid['vwap_reclaim_reclaim_bar_low'] == 10.5
+    assert valid['vwap_reclaim_post_trigger_low'] == 10.55
+    assert valid['vwap_reclaim_post_trigger_stop_breached'] is False
     assert valid['vwap_reclaim_stop_valid'] is True
     assert valid['vwap_reclaim_prior_below_vwap_observed'] is True
+
+    intraday.loc[intraday['timestamp_et'] == pd.Timestamp('2026-05-01 10:11'), 'low'] = 9.4
+
+    invalid = _vwap_reclaim_fields(intraday, reference_low=9.3)
+
+    assert invalid['vwap_reclaim_result'] == 'failed'
     assert invalid['vwap_reclaim_stop_valid'] is False
+    assert invalid['vwap_reclaim_post_trigger_stop_breached'] is True
+    assert invalid['vwap_reclaim_result_reason'] == 'post-trigger reclaim-bar low breached'
 
 
 def test_format_section_table_derives_status_display_fields():

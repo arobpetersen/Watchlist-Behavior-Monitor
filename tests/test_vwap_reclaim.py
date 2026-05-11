@@ -26,6 +26,7 @@ def _session_with_reclaim(
     reclaim_close: float = 11.0,
     reclaim_high: float = 11.2,
     later_high: float | None = 11.4,
+    post_trigger_low: float = 10.8,
 ) -> pd.DataFrame:
     rows = []
     for hour in [9, 10, 11, 12, 13, 14, 15]:
@@ -38,8 +39,11 @@ def _session_with_reclaim(
         idx = next(i for i, row in enumerate(rows) if row[0] == f'{reclaim_hour:02d}:{minute:02d}:00')
         rows[idx] = (rows[idx][0], 10.6, reclaim_high, 10.5, reclaim_close, 1000)
     if later_high is not None:
+        for idx, row in enumerate(rows):
+            if row[0] >= '10:10:00':
+                rows[idx] = (row[0], 10.9, 11.0, post_trigger_low, 10.9, 1000)
         later_idx = next(i for i, row in enumerate(rows) if row[0] == '10:10:00')
-        rows[later_idx] = ('10:10:00', 10.9, later_high, 10.8, 11.0, 1000)
+        rows[later_idx] = ('10:10:00', 10.9, later_high, post_trigger_low, 11.0, 1000)
     return _bars('2026-05-01', rows)
 
 
@@ -109,8 +113,12 @@ def test_vwap_reclaim_success_after_prior_below_between_10_and_1130():
     assert out['prior_below_vwap_observed'] is True
     assert out['reclaim_time'] == '2026-05-01 10:05:00'
     assert out['reclaim_bar_high'] == 11.2
+    assert out['reclaim_bar_low'] == 10.5
     assert out['trigger_time'] == '2026-05-01 10:10:00'
     assert out['trigger_price'] == 11.2
+    assert out['post_trigger_low'] == 10.8
+    assert out['post_trigger_stop_breached'] is False
+    assert out['result_reason'] == 'reclaim confirmed and held through setup session'
 
 
 def test_vwap_reclaim_ignored_after_1130():
@@ -132,6 +140,21 @@ def test_vwap_reclaim_failed_when_reclaim_high_not_taken_out():
     assert out['failure_reason'] == 'reclaim-bar high not taken out'
 
 
+def test_vwap_reclaim_failed_when_post_trigger_reclaim_bar_low_breached():
+    bars = _session_with_reclaim(reclaim_start='10:00:00', later_high=11.4, post_trigger_low=10.4)
+
+    out = assess_vwap_reclaim(bars, min_regular_session_bars=300)
+
+    assert out['result'] == 'failed'
+    assert out['reclaim_bar_high'] == 11.2
+    assert out['reclaim_bar_low'] == 10.5
+    assert out['trigger_time'] == '2026-05-01 10:10:00'
+    assert out['trigger_price'] == 11.2
+    assert out['post_trigger_low'] == 10.4
+    assert out['post_trigger_stop_breached'] is True
+    assert out['failure_reason'] == 'post-trigger reclaim-bar low breached'
+
+
 def test_vwap_reclaim_setup_date_scope_ignores_later_day_strength():
     setup = _session_with_reclaim(reclaim_start='10:00:00', later_high=11.1)
     later = _bars('2026-05-04', [
@@ -145,6 +168,19 @@ def test_vwap_reclaim_setup_date_scope_ignores_later_day_strength():
     assert out['reclaim_time'] == '2026-05-01 10:05:00'
     assert out['trigger_time'] is None
     assert out['failure_reason'] == 'reclaim-bar high not taken out'
+
+
+def test_vwap_reclaim_setup_date_scope_ignores_later_day_recovery_after_stop_breach():
+    setup = _session_with_reclaim(reclaim_start='10:00:00', later_high=11.4, post_trigger_low=10.4)
+    later = _session_with_reclaim(reclaim_start='10:00:00', later_high=12.0)
+    later['trading_date'] = '2026-05-04'
+    later['timestamp_et'] = pd.to_datetime(later['timestamp_et']) + pd.Timedelta(days=3)
+
+    out = assess_vwap_reclaim(pd.concat([setup, later], ignore_index=True), min_regular_session_bars=300, setup_date='2026-05-01')
+
+    assert out['result'] == 'failed'
+    assert out['trigger_time'] == '2026-05-01 10:10:00'
+    assert out['failure_reason'] == 'post-trigger reclaim-bar low breached'
 
 
 def test_vwap_reclaim_blank_setup_date_stays_blank_despite_later_day_strength():
