@@ -13,6 +13,10 @@ from src.watchlist_top_movers import top_movers_from_history
 
 
 WINDOW_LABELS = ['Last 5 Setup Dates', 'Previous 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
+RATE_CHANGE_THRESHOLD = 15.0
+CLOSE_BE_THRESHOLD = 10.0
+RETURN_CHANGE_THRESHOLD = 0.03
+COUNT_CHANGE_THRESHOLD = 3
 
 
 def _display(value: Any) -> str:
@@ -150,6 +154,57 @@ def _recent_window_summary(history: pd.DataFrame, overview: dict) -> dict:
     return summaries
 
 
+def _rows_for_latest_n_setup_dates(history: pd.DataFrame, n: int, offset: int = 0) -> pd.DataFrame:
+    if history.empty or 'Setup Date' not in history:
+        return pd.DataFrame()
+    out = history.copy()
+    out['_setup_date'] = pd.to_datetime(out['Setup Date'], errors='coerce')
+    setup_dates = sorted(out['_setup_date'].dt.date.dropna().unique())
+    if not setup_dates:
+        return pd.DataFrame()
+    end = len(setup_dates) - offset
+    start = max(0, end - n)
+    selected = set(setup_dates[start:end])
+    return out[out['_setup_date'].dt.date.isin(selected)].drop(columns=['_setup_date']).copy()
+
+
+def _snapshot(rows: pd.DataFrame) -> dict:
+    total = len(rows)
+    status = _status_text(rows)
+    trigger_day = _trigger_day_text(rows)
+    return {
+        'setup_count': total,
+        'active_count': int(status.eq('Active').sum()),
+        'active_pct': _pct(int(status.eq('Active').sum()), total),
+        'failed_d0_count': int(trigger_day.eq('Fail').sum()),
+        'failed_d0_pct': _pct(int(trigger_day.eq('Fail').sum()), total),
+        'failed_after_d0_count': int(_failed_after_d0_mask(rows).sum()),
+        'failed_after_d0_pct': _pct(int(_failed_after_d0_mask(rows).sum()), total),
+        'unresolved_count': int(trigger_day.eq('Unresolved').sum()),
+        'unresolved_pct': _pct(int(trigger_day.eq('Unresolved').sum()), total),
+        'close_below_be_count': int(_close_be_mask(rows).sum()),
+        'close_below_be_pct': _pct(int(_close_be_mask(rows).sum()), total),
+        'retested_after_d0_count': int(_retested_after_d0_mask(rows).sum()),
+        'retested_after_d0_pct': _pct(int(_retested_after_d0_mask(rows).sum()), total),
+        'median_current': None if rows.empty else _numeric_series(rows, 'current_pct_raw').median(),
+        'median_max': None if rows.empty else _numeric_series(rows, 'max_pct_raw').median(),
+    }
+
+
+def _comparison_payload(history: pd.DataFrame, overview: dict) -> dict:
+    latest = _rows_for_latest_n_setup_dates(history, 1)
+    prior = _rows_for_latest_n_setup_dates(history, 1, offset=1)
+    last2 = _rows_for_latest_n_setup_dates(history, 2)
+    last5 = _window_rows(history, overview, 'Last 5 Setup Dates')
+    previous5 = _window_rows(history, overview, 'Previous 5 Setup Dates')
+    return {
+        'latest_vs_prior': {'current': _snapshot(latest), 'baseline': _snapshot(prior)},
+        'latest_vs_last5': {'current': _snapshot(latest), 'baseline': _snapshot(last5)},
+        'last2_vs_last5': {'current': _snapshot(last2), 'baseline': _snapshot(last5)},
+        'last5_vs_previous5': {'current': _snapshot(last5), 'baseline': _snapshot(previous5)},
+    }
+
+
 def _trigger_summary(overview: dict) -> dict:
     comparison = overview.get('trigger_outcome_comparison')
     if comparison is None or comparison.empty:
@@ -233,14 +288,250 @@ def _portfolio_summary(history: pd.DataFrame) -> dict:
     }
 
 
+def _delta(current: Any, baseline: Any) -> float | None:
+    if current is None or baseline is None:
+        return None
+    try:
+        if pd.isna(current) or pd.isna(baseline):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return float(current) - float(baseline)
+
+
+def _direction(delta: float, higher_is_better: bool) -> str:
+    improved = delta > 0 if higher_is_better else delta < 0
+    return 'improved' if improved else 'deteriorated'
+
+
+def _rate_observation(comparison: str, metric: str, current: dict, baseline: dict, higher_is_better: bool, threshold: float, meaning: str) -> dict | None:
+    delta = _delta(current.get(f'{metric}_pct'), baseline.get(f'{metric}_pct'))
+    if delta is None or abs(delta) < threshold:
+        return None
+    count_delta = int(current.get(f'{metric}_count', 0)) - int(baseline.get(f'{metric}_count', 0))
+    if abs(count_delta) < COUNT_CHANGE_THRESHOLD and min(current.get('setup_count', 0), baseline.get('setup_count', 0)) >= 10:
+        return None
+    label = metric.replace('_', ' ').title()
+    change_word = 'increased' if delta > 0 else 'decreased'
+    section = 'Short-Term Shifts' if comparison.startswith('Last 2') or comparison.startswith('Last 5') else 'Current Read'
+    return {
+        'section': section,
+        'comparison': comparison,
+        'metric': metric,
+        'direction': _direction(delta, higher_is_better),
+        'text': (
+            f"{comparison}: {label} {change_word} from {_pct_text(baseline.get(f'{metric}_pct'))} to "
+            f"{_pct_text(current.get(f'{metric}_pct'))}, {meaning}"
+        ),
+    }
+
+
+def _return_observation(comparison: str, metric: str, current: dict, baseline: dict, higher_is_better: bool, meaning: str) -> dict | None:
+    delta = _delta(current.get(metric), baseline.get(metric))
+    if delta is None or abs(delta) < RETURN_CHANGE_THRESHOLD:
+        return None
+    label = metric.replace('_', ' ').title()
+    change_word = 'improved' if delta > 0 else 'weakened'
+    section = 'Short-Term Shifts' if comparison.startswith('Last 2') or comparison.startswith('Last 5') else 'Current Read'
+    return {
+        'section': section,
+        'comparison': comparison,
+        'metric': metric,
+        'direction': _direction(delta, higher_is_better),
+        'text': (
+            f"{comparison}: {label} {change_word} from {_return_text(baseline.get(metric))} to "
+            f"{_return_text(current.get(metric))}, {meaning}"
+        ),
+    }
+
+
+def _meaning(metric: str, delta: float | None) -> str:
+    if metric == 'active':
+        return 'suggesting follow-through improved.' if delta and delta > 0 else 'suggesting follow-through weakened.'
+    if metric == 'failed_d0':
+        return 'showing setups failed faster on trigger day.' if delta and delta > 0 else 'showing fewer setups failed immediately.'
+    if metric == 'failed_after_d0':
+        return 'showing more setups worked first but failed later.' if delta and delta > 0 else 'showing fewer setups failed after initially working.'
+    if metric == 'close_below_be':
+        return 'which points to weaker end-of-day follow-through.' if delta and delta > 0 else 'which points to fewer end-of-day follow-through breaks.'
+    if metric == 'retested_after_d0':
+        return 'which shows retests became more common after setup day.' if delta and delta > 0 else 'which shows post-D0 retests eased.'
+    return 'highlighting a material behavior shift.'
+
+
+def _trigger_share(rows: pd.DataFrame) -> dict[str, float]:
+    if rows.empty or 'Trigger' not in rows:
+        return {}
+    success = rows[_trigger_day_text(rows).eq('Success')]
+    total = len(success)
+    if total == 0:
+        return {}
+    return {
+        str(trigger): round((count / total) * 100, 1)
+        for trigger, count in success['Trigger'].fillna('').astype(str).value_counts().items()
+        if trigger and trigger != 'No Trigger'
+    }
+
+
+def _trigger_failure_rates(rows: pd.DataFrame) -> dict[str, float]:
+    if rows.empty or 'Trigger' not in rows:
+        return {}
+    out = {}
+    for trigger, group in rows.groupby(rows['Trigger'].fillna('').astype(str)):
+        if not trigger or trigger == 'No Trigger':
+            continue
+        total = len(group)
+        if total:
+            out[trigger] = round((_trigger_day_text(group).eq('Fail').sum() / total) * 100, 1)
+    return out
+
+
+def _trigger_observations(history: pd.DataFrame, overview: dict) -> list[dict]:
+    observations = []
+    pairs = {
+        'Latest setup date vs prior setup date': (
+            _rows_for_latest_n_setup_dates(history, 1),
+            _rows_for_latest_n_setup_dates(history, 1, offset=1),
+        ),
+        'Latest setup date vs Last 5 setup dates': (
+            _rows_for_latest_n_setup_dates(history, 1),
+            _window_rows(history, overview, 'Last 5 Setup Dates'),
+        ),
+        'Last 2 setup dates vs Last 5 setup-date baseline': (
+            _rows_for_latest_n_setup_dates(history, 2),
+            _window_rows(history, overview, 'Last 5 Setup Dates'),
+        ),
+        'Last 5 setup dates vs Previous 5 setup dates': (
+            _window_rows(history, overview, 'Last 5 Setup Dates'),
+            _window_rows(history, overview, 'Previous 5 Setup Dates'),
+        ),
+    }
+    for label, (current_rows, baseline_rows) in pairs.items():
+        current_share = _trigger_share(current_rows)
+        baseline_share = _trigger_share(baseline_rows)
+        for trigger in sorted(set(current_share) | set(baseline_share)):
+            delta = current_share.get(trigger, 0.0) - baseline_share.get(trigger, 0.0)
+            if abs(delta) >= RATE_CHANGE_THRESHOLD:
+                word = 'larger' if delta > 0 else 'smaller'
+                observations.append({
+                    'section': 'Trigger Read',
+                    'comparison': label,
+                    'metric': 'successful_trigger_share',
+                    'direction': 'changed',
+                    'text': (
+                        f"{label}: {trigger} contributed a {word} share of successful triggers "
+                        f"({_pct_text(baseline_share.get(trigger, 0.0))} to {_pct_text(current_share.get(trigger, 0.0))}), "
+                        "which points to a changing trigger mix."
+                    ),
+                })
+        current_fail = _trigger_failure_rates(current_rows)
+        baseline_fail = _trigger_failure_rates(baseline_rows)
+        for trigger in sorted(set(current_fail) | set(baseline_fail)):
+            delta = current_fail.get(trigger, 0.0) - baseline_fail.get(trigger, 0.0)
+            if abs(delta) >= RATE_CHANGE_THRESHOLD:
+                word = 'higher' if delta > 0 else 'lower'
+                meaning = 'pointing to faster trigger failures.' if delta > 0 else 'suggesting that trigger held better.'
+                observations.append({
+                    'section': 'Trigger Read',
+                    'comparison': label,
+                    'metric': 'trigger_failure_rate',
+                    'direction': 'deteriorated' if delta > 0 else 'improved',
+                    'text': (
+                        f"{label}: {trigger} failure rate was {word} "
+                        f"({_pct_text(baseline_fail.get(trigger, 0.0))} to {_pct_text(current_fail.get(trigger, 0.0))}), "
+                        f"{meaning}"
+                    ),
+                })
+    return observations[:8]
+
+
+def _material_observations(history: pd.DataFrame, overview: dict, comparisons: dict, notable_tickers: dict, portfolio: dict) -> list[dict]:
+    observations: list[dict] = []
+    comparison_labels = {
+        'latest_vs_prior': 'Latest setup date vs prior setup date',
+        'latest_vs_last5': 'Latest setup date vs Last 5 setup dates',
+        'last2_vs_last5': 'Last 2 setup dates vs Last 5 setup-date baseline',
+        'last5_vs_previous5': 'Last 5 setup dates vs Previous 5 setup dates',
+    }
+    for label, pair in comparisons.items():
+        name = comparison_labels.get(label, label.replace('_', ' ').title())
+        current = pair.get('current', {})
+        baseline = pair.get('baseline', {})
+        checks = [
+            _rate_observation(name, 'active', current, baseline, True, RATE_CHANGE_THRESHOLD, _meaning('active', _delta(current.get('active_pct'), baseline.get('active_pct')))),
+            _rate_observation(name, 'failed_d0', current, baseline, False, RATE_CHANGE_THRESHOLD, _meaning('failed_d0', _delta(current.get('failed_d0_pct'), baseline.get('failed_d0_pct')))),
+            _rate_observation(name, 'failed_after_d0', current, baseline, False, RATE_CHANGE_THRESHOLD, _meaning('failed_after_d0', _delta(current.get('failed_after_d0_pct'), baseline.get('failed_after_d0_pct')))),
+            _rate_observation(name, 'close_below_be', current, baseline, False, CLOSE_BE_THRESHOLD, _meaning('close_below_be', _delta(current.get('close_below_be_pct'), baseline.get('close_below_be_pct')))),
+            _rate_observation(name, 'retested_after_d0', current, baseline, False, RATE_CHANGE_THRESHOLD, _meaning('retested_after_d0', _delta(current.get('retested_after_d0_pct'), baseline.get('retested_after_d0_pct')))),
+            _return_observation(name, 'median_current', current, baseline, True, 'showing whether names are holding current progress.'),
+            _return_observation(name, 'median_max', current, baseline, True, 'showing whether names are still producing upside progress.'),
+        ]
+        observations.extend(item for item in checks if item is not None)
+        max_delta = _delta(current.get('median_max'), baseline.get('median_max'))
+        active_delta = _delta(current.get('active_pct'), baseline.get('active_pct'))
+        if max_delta is not None and max_delta >= RETURN_CHANGE_THRESHOLD and (active_delta is None or active_delta < RATE_CHANGE_THRESHOLD):
+            observations.append({
+                'section': 'Short-Term Shifts' if label in {'last2_vs_last5', 'last5_vs_previous5'} else 'Current Read',
+                'comparison': name,
+                'metric': 'max_without_active',
+                'direction': 'mixed',
+                'text': f"{name}: Median Max improved while Active % did not materially improve, suggesting names are moving but not holding gains.",
+            })
+    observations.extend(_trigger_observations(history, overview))
+    if notable_tickers.get('top_active_by_current'):
+        leaders = ', '.join(item['ticker'] for item in notable_tickers['top_active_by_current'][:3])
+        observations.append({
+            'section': 'Notable Names',
+            'comparison': 'Current leaders',
+            'metric': 'top_active',
+            'direction': 'leader',
+            'text': f"Top active names by Current %: {leaders}, highlighting where follow-through is still present.",
+        })
+    if notable_tickers.get('failed_after_initially_working'):
+        faded = ', '.join(item['ticker'] for item in notable_tickers['failed_after_initially_working'][:3])
+        observations.append({
+            'section': 'Notable Names',
+            'comparison': 'Faded leaders',
+            'metric': 'failed_after_initially_working',
+            'direction': 'risk',
+            'text': f"Names with max progress that later failed include {faded}, highlighting movement that did not stay active.",
+        })
+    if portfolio.get('top_current_progress'):
+        observations.append({
+            'section': 'Portfolio Snapshot',
+            'comparison': 'Current Progress',
+            'metric': 'portfolio_leaders',
+            'direction': 'leader',
+            'text': f"Current Progress portfolio leaders: {', '.join(portfolio.get('top_current_progress', [])[:3])}.",
+        })
+    limits = {'Current Read': 5, 'Trigger Read': 5, 'Short-Term Shifts': 4, 'Notable Names': 3, 'Portfolio Snapshot': 1}
+    counts = {section: 0 for section in limits}
+    filtered = []
+    for item in observations:
+        section = item.get('section')
+        if section not in limits:
+            continue
+        if counts[section] >= limits[section]:
+            continue
+        filtered.append(item)
+        counts[section] += 1
+    return filtered
+
+
 def build_daily_report_payload(history: pd.DataFrame, overview: dict) -> dict:
     history = history.copy() if history is not None else pd.DataFrame()
+    overview = overview or {}
+    comparisons = _comparison_payload(history, overview)
+    notable_tickers = _notable_tickers(history)
+    portfolio = _portfolio_summary(history)
     return {
         'latest_setup_date_summary': _latest_setup_date_summary(history),
-        'recent_window_summary': _recent_window_summary(history, overview or {}),
-        'trigger_summary': _trigger_summary(overview or {}),
-        'notable_tickers': _notable_tickers(history),
-        'portfolio_summary': _portfolio_summary(history),
+        'recent_window_summary': _recent_window_summary(history, overview),
+        'comparison_summary': comparisons,
+        'trigger_summary': _trigger_summary(overview),
+        'notable_tickers': notable_tickers,
+        'portfolio_summary': portfolio,
+        'material_observations': _material_observations(history, overview, comparisons, notable_tickers, portfolio),
     }
 
 
@@ -250,61 +541,40 @@ def _line_for_count(label: str, payload: dict) -> str:
 
 def render_daily_report_markdown(report_payload: dict) -> str:
     latest = report_payload.get('latest_setup_date_summary', {})
-    windows = report_payload.get('recent_window_summary', {})
-    triggers = report_payload.get('trigger_summary', {})
-    names = report_payload.get('notable_tickers', {})
-    portfolio = report_payload.get('portfolio_summary', {})
-    last5 = windows.get('Last 5 Setup Dates', {})
-    previous5 = windows.get('Previous 5 Setup Dates', {})
+    observations = report_payload.get('material_observations', [])
 
-    def ticker_list(items: list[dict] | list[str]) -> str:
-        if not items:
-            return '-'
-        if isinstance(items[0], str):
-            return ', '.join(items)
-        return ', '.join(f"{item['ticker']} ({item['current']} current, {item['max']} max)" for item in items[:5])
+    def section_lines(section: str) -> list[str]:
+        rows = [item for item in observations if item.get('section') == section]
+        return [f"- {item.get('text')}" for item in rows]
 
-    shifts = triggers.get('notable_shifts', [])
-    shift_text = '; '.join(f"{item['trigger']} {item['metric']} {item['direction']}" for item in shifts[:5]) or '-'
-    failure_rates = [
-        f"{item['trigger']} {item['fail_pct']}"
-        for item in triggers.get('failure_rates', [])
-        if item.get('window') == 'Last 5 Setup Dates' and item.get('triggered', 0)
-    ]
+    no_shift = '- No material behavior shifts detected across the selected comparison windows.'
 
-    return '\n'.join([
+    lines = [
         '# Daily Intelligence Report',
         '',
         '## Latest Setup Date',
         f"- Date: {latest.get('latest_setup_date') or '-'}",
         f"- Setups: {latest.get('setup_count', 0)}",
-        f"- {_line_for_count('Active', latest.get('active', {}))}",
-        f"- {_line_for_count('Failed D0', latest.get('failed_d0', {}))}",
-        f"- {_line_for_count('Close < BE', latest.get('close_below_be', {}))}",
         '',
         '## Current Read',
-        f"- Last 5 active rate: {_pct_text(last5.get('active_pct'))}; Previous 5 active rate: {_pct_text(previous5.get('active_pct'))}",
-        f"- Last 5 median current: {_return_text(last5.get('median_current'))}; median max: {_return_text(last5.get('median_max'))}",
+        *(section_lines('Current Read') or [no_shift]),
         '',
         '## Trigger Read',
-        f"- Last 5 failure rates: {', '.join(failure_rates) if failure_rates else '-'}",
+        *(section_lines('Trigger Read') or [no_shift]),
         '',
         '## Short-Term Shifts',
-        f"- {shift_text}",
+        *(section_lines('Short-Term Shifts') or [no_shift]),
         '',
         '## Notable Names',
-        f"- Top active by Current %: {ticker_list(names.get('top_active_by_current', []))}",
-        f"- Failed after initially working: {ticker_list(names.get('failed_after_initially_working', []))}",
-        f"- Close < BE: {ticker_list(names.get('close_below_be', []))}",
-        f"- Strongest Max %: {ticker_list(names.get('strongest_max', []))}",
+        *(section_lines('Notable Names') or [no_shift]),
         '',
         '## Portfolio Snapshot',
-        f"- Current Progress count: {portfolio.get('current_progress_count', 0)}",
-        f"- Top Current Progress: {ticker_list(portfolio.get('top_current_progress', []))}",
-        f"- Longest Open: {ticker_list(portfolio.get('longest_open', []))}",
-        f"- Ratings in Current Progress: {portfolio.get('rated_5_count', 0)} rated 5; {portfolio.get('rated_4_count', 0)} rated 4",
+        *(section_lines('Portfolio Snapshot') or [no_shift]),
         '',
-    ])
+    ]
+    if not observations:
+        lines.insert(4, '- No material behavior shifts detected across the selected comparison windows.')
+    return '\n'.join(lines)
 
 
 def build_llm_report_prompt(report_payload: dict) -> str:

@@ -101,6 +101,23 @@ def test_daily_report_payload_includes_trigger_failure_rates_and_shifts():
     assert any(item['trigger'] == '1m ORH' and item['metric'] == 'Failed' for item in shifts)
 
 
+def test_daily_report_payload_includes_material_comparison_observations():
+    history = _report_history()
+    payload = build_daily_report_payload(history, _overview(history))
+
+    observations = payload['material_observations']
+
+    assert set(payload['comparison_summary']) == {
+        'latest_vs_prior',
+        'latest_vs_last5',
+        'last2_vs_last5',
+        'last5_vs_previous5',
+    }
+    assert any('Latest setup date vs prior setup date' in item['text'] for item in observations)
+    assert any(item['section'] == 'Trigger Read' and 'failure rate' in item['text'] for item in observations)
+    assert any(item['section'] == 'Short-Term Shifts' for item in observations)
+
+
 def test_daily_report_payload_includes_top_active_names():
     history = _report_history()
     payload = build_daily_report_payload(history, _overview(history))
@@ -119,6 +136,28 @@ def test_daily_report_markdown_headers_and_no_recommendation_language():
         assert header in markdown
     for forbidden in ['buy', 'sell', 'recommendation']:
         assert forbidden not in markdown
+
+
+def test_daily_report_markdown_omits_raw_metric_dump_and_handles_no_material_shifts():
+    history = _report_history()
+    history['Current Status'] = 'Active'
+    history['Trigger Day'] = 'Success'
+    history['1m ORH'] = 'success'
+    history['Close < BE'] = 'No'
+    history['Retests'] = ''
+    history['current_pct_raw'] = 0.05
+    history['max_pct_raw'] = 0.10
+    payload = build_daily_report_payload(history, _overview(history))
+    payload['notable_tickers'] = {'top_active_by_current': [], 'failed_after_initially_working': [], 'close_below_be': [], 'strongest_max': []}
+    payload['portfolio_summary'] = {'current_progress_count': 0, 'top_current_progress': [], 'longest_open': [], 'rated_4_count': 0, 'rated_5_count': 0}
+    payload['material_observations'] = []
+
+    markdown = render_daily_report_markdown(payload)
+
+    assert 'No material behavior shifts detected across the selected comparison windows.' in markdown
+    assert 'Active:' not in markdown
+    assert 'Failed D0:' not in markdown
+    assert 'Last 5 active rate' not in markdown
 
 
 def test_llm_prompt_uses_structured_summary_not_raw_row_dump():
