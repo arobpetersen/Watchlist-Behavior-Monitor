@@ -304,12 +304,24 @@ def _direction(delta: float, higher_is_better: bool) -> str:
     return 'improved' if improved else 'deteriorated'
 
 
+def _sample_note(current: dict, baseline: dict) -> str:
+    current_total = int(current.get('setup_count', 0) or 0)
+    baseline_total = int(baseline.get('setup_count', 0) or 0)
+    if min(current_total, baseline_total) < 5:
+        return ' Small sample.'
+    return ''
+
+
 def _rate_observation(comparison: str, metric: str, current: dict, baseline: dict, higher_is_better: bool, threshold: float, meaning: str) -> dict | None:
     delta = _delta(current.get(f'{metric}_pct'), baseline.get(f'{metric}_pct'))
     if delta is None or abs(delta) < threshold:
         return None
-    count_delta = int(current.get(f'{metric}_count', 0)) - int(baseline.get(f'{metric}_count', 0))
-    if abs(count_delta) < COUNT_CHANGE_THRESHOLD and min(current.get('setup_count', 0), baseline.get('setup_count', 0)) >= 10:
+    current_count = int(current.get(f'{metric}_count', 0) or 0)
+    baseline_count = int(baseline.get(f'{metric}_count', 0) or 0)
+    current_total = int(current.get('setup_count', 0) or 0)
+    baseline_total = int(baseline.get('setup_count', 0) or 0)
+    count_delta = current_count - baseline_count
+    if abs(count_delta) < COUNT_CHANGE_THRESHOLD and min(current_total, baseline_total) >= 10:
         return None
     label = metric.replace('_', ' ').title()
     change_word = 'increased' if delta > 0 else 'decreased'
@@ -321,7 +333,8 @@ def _rate_observation(comparison: str, metric: str, current: dict, baseline: dic
         'direction': _direction(delta, higher_is_better),
         'text': (
             f"{comparison}: {label} {change_word} from {_pct_text(baseline.get(f'{metric}_pct'))} to "
-            f"{_pct_text(current.get(f'{metric}_pct'))}, {meaning}"
+            f"{_pct_text(current.get(f'{metric}_pct'))} "
+            f"({baseline_count}/{baseline_total} to {current_count}/{current_total} setups). {meaning}{_sample_note(current, baseline)}"
         ),
     }
 
@@ -340,26 +353,27 @@ def _return_observation(comparison: str, metric: str, current: dict, baseline: d
         'direction': _direction(delta, higher_is_better),
         'text': (
             f"{comparison}: {label} {change_word} from {_return_text(baseline.get(metric))} to "
-            f"{_return_text(current.get(metric))}, {meaning}"
+            f"{_return_text(current.get(metric))} "
+            f"({baseline.get('setup_count', 0)} to {current.get('setup_count', 0)} setups). {meaning}{_sample_note(current, baseline)}"
         ),
     }
 
 
 def _meaning(metric: str, delta: float | None) -> str:
     if metric == 'active':
-        return 'suggesting follow-through improved.' if delta and delta > 0 else 'suggesting follow-through weakened.'
+        return 'This measures whether setups are staying active.' if delta and delta > 0 else 'This marks weaker active retention.'
     if metric == 'failed_d0':
-        return 'showing setups failed faster on trigger day.' if delta and delta > 0 else 'showing fewer setups failed immediately.'
+        return 'This shows more setup-day failures.' if delta and delta > 0 else 'This shows fewer setup-day failures.'
     if metric == 'failed_after_d0':
-        return 'showing more setups worked first but failed later.' if delta and delta > 0 else 'showing fewer setups failed after initially working.'
+        return 'This flags setups that worked first but failed later.' if delta and delta > 0 else 'This shows fewer later failures after initial success.'
     if metric == 'close_below_be':
-        return 'which points to weaker end-of-day follow-through.' if delta and delta > 0 else 'which points to fewer end-of-day follow-through breaks.'
+        return 'This highlights weaker end-of-day follow-through.' if delta and delta > 0 else 'This shows fewer end-of-day follow-through breaks.'
     if metric == 'retested_after_d0':
-        return 'which shows retests became more common after setup day.' if delta and delta > 0 else 'which shows post-D0 retests eased.'
+        return 'This shows more post-D0 retest activity.' if delta and delta > 0 else 'This shows post-D0 retest activity eased.'
     return 'highlighting a material behavior shift.'
 
 
-def _trigger_share(rows: pd.DataFrame) -> dict[str, float]:
+def _trigger_share(rows: pd.DataFrame) -> dict[str, dict]:
     if rows.empty or 'Trigger' not in rows:
         return {}
     success = rows[_trigger_day_text(rows).eq('Success')]
@@ -367,13 +381,13 @@ def _trigger_share(rows: pd.DataFrame) -> dict[str, float]:
     if total == 0:
         return {}
     return {
-        str(trigger): round((count / total) * 100, 1)
+        str(trigger): {'pct': round((count / total) * 100, 1), 'count': int(count), 'total': int(total)}
         for trigger, count in success['Trigger'].fillna('').astype(str).value_counts().items()
         if trigger and trigger != 'No Trigger'
     }
 
 
-def _trigger_failure_rates(rows: pd.DataFrame) -> dict[str, float]:
+def _trigger_failure_rates(rows: pd.DataFrame) -> dict[str, dict]:
     if rows.empty or 'Trigger' not in rows:
         return {}
     out = {}
@@ -382,7 +396,8 @@ def _trigger_failure_rates(rows: pd.DataFrame) -> dict[str, float]:
             continue
         total = len(group)
         if total:
-            out[trigger] = round((_trigger_day_text(group).eq('Fail').sum() / total) * 100, 1)
+            failed = int(_trigger_day_text(group).eq('Fail').sum())
+            out[trigger] = {'pct': round((failed / total) * 100, 1), 'failed': failed, 'total': int(total)}
     return out
 
 
@@ -410,9 +425,12 @@ def _trigger_observations(history: pd.DataFrame, overview: dict) -> list[dict]:
         current_share = _trigger_share(current_rows)
         baseline_share = _trigger_share(baseline_rows)
         for trigger in sorted(set(current_share) | set(baseline_share)):
-            delta = current_share.get(trigger, 0.0) - baseline_share.get(trigger, 0.0)
+            current = current_share.get(trigger, {'pct': 0.0, 'count': 0, 'total': 0})
+            baseline = baseline_share.get(trigger, {'pct': 0.0, 'count': 0, 'total': 0})
+            delta = current['pct'] - baseline['pct']
             if abs(delta) >= RATE_CHANGE_THRESHOLD:
                 word = 'larger' if delta > 0 else 'smaller'
+                note = ' Small sample.' if min(current['total'], baseline['total']) < 5 else ''
                 observations.append({
                     'section': 'Trigger Read',
                     'comparison': label,
@@ -420,17 +438,21 @@ def _trigger_observations(history: pd.DataFrame, overview: dict) -> list[dict]:
                     'direction': 'changed',
                     'text': (
                         f"{label}: {trigger} contributed a {word} share of successful triggers "
-                        f"({_pct_text(baseline_share.get(trigger, 0.0))} to {_pct_text(current_share.get(trigger, 0.0))}), "
-                        "which points to a changing trigger mix."
+                        f"({_pct_text(baseline['pct'])} to {_pct_text(current['pct'])}; "
+                        f"{baseline['count']}/{baseline['total']} to {current['count']}/{current['total']} successes). "
+                        f"This identifies a trigger-mix shift.{note}"
                     ),
                 })
         current_fail = _trigger_failure_rates(current_rows)
         baseline_fail = _trigger_failure_rates(baseline_rows)
         for trigger in sorted(set(current_fail) | set(baseline_fail)):
-            delta = current_fail.get(trigger, 0.0) - baseline_fail.get(trigger, 0.0)
+            current = current_fail.get(trigger, {'pct': 0.0, 'failed': 0, 'total': 0})
+            baseline = baseline_fail.get(trigger, {'pct': 0.0, 'failed': 0, 'total': 0})
+            delta = current['pct'] - baseline['pct']
             if abs(delta) >= RATE_CHANGE_THRESHOLD:
                 word = 'higher' if delta > 0 else 'lower'
-                meaning = 'pointing to faster trigger failures.' if delta > 0 else 'suggesting that trigger held better.'
+                meaning = 'This points to faster trigger failures.' if delta > 0 else 'This shows that trigger held more often.'
+                note = ' Small sample.' if min(current['total'], baseline['total']) < 5 else ''
                 observations.append({
                     'section': 'Trigger Read',
                     'comparison': label,
@@ -438,8 +460,9 @@ def _trigger_observations(history: pd.DataFrame, overview: dict) -> list[dict]:
                     'direction': 'deteriorated' if delta > 0 else 'improved',
                     'text': (
                         f"{label}: {trigger} failure rate was {word} "
-                        f"({_pct_text(baseline_fail.get(trigger, 0.0))} to {_pct_text(current_fail.get(trigger, 0.0))}), "
-                        f"{meaning}"
+                        f"({_pct_text(baseline['pct'])} to {_pct_text(current['pct'])}; "
+                        f"{baseline['failed']}/{baseline['total']} to {current['failed']}/{current['total']} triggered attempts failed). "
+                        f"{meaning}{note}"
                     ),
                 })
     return observations[:8]
@@ -475,26 +498,36 @@ def _material_observations(history: pd.DataFrame, overview: dict, comparisons: d
                 'comparison': name,
                 'metric': 'max_without_active',
                 'direction': 'mixed',
-                'text': f"{name}: Median Max improved while Active % did not materially improve, suggesting names are moving but not holding gains.",
+                'text': (
+                    f"{name}: Median Max improved from {_return_text(baseline.get('median_max'))} to {_return_text(current.get('median_max'))} "
+                    f"while Active % did not materially improve ({_pct_text(baseline.get('active_pct'))} to {_pct_text(current.get('active_pct'))}). "
+                    "This flags movement that did not translate into active retention."
+                ),
             })
     observations.extend(_trigger_observations(history, overview))
     if notable_tickers.get('top_active_by_current'):
-        leaders = ', '.join(item['ticker'] for item in notable_tickers['top_active_by_current'][:3])
+        leaders = ', '.join(
+            f"{item['ticker']} ({item['current']} current, {item['max']} max)"
+            for item in notable_tickers['top_active_by_current'][:3]
+        )
         observations.append({
             'section': 'Notable Names',
             'comparison': 'Current leaders',
             'metric': 'top_active',
             'direction': 'leader',
-            'text': f"Top active names by Current %: {leaders}, highlighting where follow-through is still present.",
+            'text': f"Top active names by Current %: {leaders}. This identifies where follow-through is still present.",
         })
     if notable_tickers.get('failed_after_initially_working'):
-        faded = ', '.join(item['ticker'] for item in notable_tickers['failed_after_initially_working'][:3])
+        faded = ', '.join(
+            f"{item['ticker']} ({item['max']} max, {item['status']})"
+            for item in notable_tickers['failed_after_initially_working'][:3]
+        )
         observations.append({
             'section': 'Notable Names',
             'comparison': 'Faded leaders',
             'metric': 'failed_after_initially_working',
             'direction': 'risk',
-            'text': f"Names with max progress that later failed include {faded}, highlighting movement that did not stay active.",
+            'text': f"Names with max progress that later failed include {faded}. This highlights movement that did not stay active.",
         })
     if portfolio.get('top_current_progress'):
         observations.append({
@@ -502,7 +535,10 @@ def _material_observations(history: pd.DataFrame, overview: dict, comparisons: d
             'comparison': 'Current Progress',
             'metric': 'portfolio_leaders',
             'direction': 'leader',
-            'text': f"Current Progress portfolio leaders: {', '.join(portfolio.get('top_current_progress', [])[:3])}.",
+            'text': (
+                f"Current Progress portfolio has {portfolio.get('current_progress_count', 0)} qualifying names; "
+                f"leaders are {', '.join(portfolio.get('top_current_progress', [])[:3])}."
+            ),
         })
     limits = {'Current Read': 5, 'Trigger Read': 5, 'Short-Term Shifts': 4, 'Notable Names': 3, 'Portfolio Snapshot': 1}
     counts = {section: 0 for section in limits}

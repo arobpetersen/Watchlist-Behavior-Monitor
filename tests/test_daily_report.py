@@ -116,6 +116,8 @@ def test_daily_report_payload_includes_material_comparison_observations():
     assert any('Latest setup date vs prior setup date' in item['text'] for item in observations)
     assert any(item['section'] == 'Trigger Read' and 'failure rate' in item['text'] for item in observations)
     assert any(item['section'] == 'Short-Term Shifts' for item in observations)
+    assert any('/' in item['text'] and 'setups' in item['text'] for item in observations)
+    assert any('Small sample.' in item['text'] for item in observations)
 
 
 def test_daily_report_payload_includes_top_active_names():
