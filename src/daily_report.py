@@ -47,6 +47,13 @@ def _pct_text(value: float | None) -> str:
     return '-' if value is None else f'{value:.1f}%'
 
 
+def _pts_text(value: float | None) -> str:
+    if value is None:
+        return '-'
+    sign = '+' if value > 0 else ''
+    return f'{sign}{value:.1f} pts'
+
+
 def _return_text(value: Any) -> str:
     numeric = pd.to_numeric(pd.Series([value]), errors='coerce').iloc[0]
     if pd.isna(numeric):
@@ -330,6 +337,11 @@ def _rate_observation(comparison: str, metric: str, current: dict, baseline: dic
         'section': section,
         'comparison': comparison,
         'metric': metric,
+        'metric_label': label,
+        'prior': _pct_text(baseline.get(f'{metric}_pct')),
+        'current': _pct_text(current.get(f'{metric}_pct')),
+        'change': _pts_text(delta),
+        'read': _short_read(metric, delta, current, baseline),
         'direction': _direction(delta, higher_is_better),
         'text': (
             f"{comparison}: {label} {change_word} from {_pct_text(baseline.get(f'{metric}_pct'))} to "
@@ -350,6 +362,11 @@ def _return_observation(comparison: str, metric: str, current: dict, baseline: d
         'section': section,
         'comparison': comparison,
         'metric': metric,
+        'metric_label': label,
+        'prior': _return_text(baseline.get(metric)),
+        'current': _return_text(current.get(metric)),
+        'change': _pts_text(delta * 100),
+        'read': 'Current progress improved' if metric == 'median_current' and delta > 0 else 'Current progress weakened' if metric == 'median_current' else 'Max progress improved' if delta > 0 else 'Max progress weakened',
         'direction': _direction(delta, higher_is_better),
         'text': (
             f"{comparison}: {label} {change_word} from {_return_text(baseline.get(metric))} to "
@@ -357,6 +374,23 @@ def _return_observation(comparison: str, metric: str, current: dict, baseline: d
             f"({baseline.get('setup_count', 0)} to {current.get('setup_count', 0)} setups). {meaning}{_sample_note(current, baseline)}"
         ),
     }
+
+
+def _short_read(metric: str, delta: float | None, current: dict | None = None, baseline: dict | None = None) -> str:
+    sample = 'Small sample' if current is not None and baseline is not None and min(int(current.get('setup_count', 0) or 0), int(baseline.get('setup_count', 0) or 0)) < 5 else ''
+    if metric == 'active':
+        read = 'Improved active rate' if delta and delta > 0 else 'Weaker active rate'
+    elif metric == 'failed_d0':
+        read = 'More setup-day failures' if delta and delta > 0 else 'Fewer setup-day failures'
+    elif metric == 'failed_after_d0':
+        read = 'More later failures' if delta and delta > 0 else 'Fewer later failures'
+    elif metric == 'close_below_be':
+        read = 'More weak closes' if delta and delta > 0 else 'Fewer weak closes'
+    elif metric == 'retested_after_d0':
+        read = 'More post-D0 retests' if delta and delta > 0 else 'Fewer post-D0 retests'
+    else:
+        read = 'Material shift'
+    return f'{read}; {sample}' if sample else read
 
 
 def _meaning(metric: str, delta: float | None) -> str:
@@ -468,6 +502,66 @@ def _trigger_observations(history: pd.DataFrame, overview: dict) -> list[dict]:
     return observations[:8]
 
 
+def _trigger_read_rows(history: pd.DataFrame) -> list[dict]:
+    windows = {
+        'Latest': _rows_for_latest_n_setup_dates(history, 1),
+        'Last 2': _rows_for_latest_n_setup_dates(history, 2),
+        'Last 5': _rows_for_latest_n_setup_dates(history, 5),
+        'Previous 5': _rows_for_latest_n_setup_dates(history, 5, offset=5),
+    }
+    rows = []
+    for label, window_rows in windows.items():
+        if window_rows.empty or 'Trigger' not in window_rows:
+            continue
+        for trigger, group in window_rows.groupby(window_rows['Trigger'].fillna('').astype(str)):
+            if not trigger or trigger == 'No Trigger':
+                continue
+            triggered = int(len(group))
+            if triggered <= 0:
+                continue
+            failed = int(_trigger_day_text(group).eq('Fail').sum())
+            success = int(_trigger_day_text(group).eq('Success').sum())
+            read = 'Small sample' if triggered < 3 else 'Elevated failures' if _pct(failed, triggered) is not None and _pct(failed, triggered) >= 50 else 'Tracked trigger behavior'
+            rows.append({
+                'trigger': trigger,
+                'window': label,
+                'triggered': triggered,
+                'failed': failed,
+                'success': success,
+                'failure_rate': _pct_text(_pct(failed, triggered)),
+                'read': read,
+            })
+    return rows[:10]
+
+
+def _notable_name_rows(notable_tickers: dict, portfolio: dict) -> list[dict]:
+    out = []
+    seen = set()
+
+    def add(item: dict, why: str) -> None:
+        ticker = item.get('ticker')
+        if not ticker or ticker in seen or len(out) >= 5:
+            return
+        seen.add(ticker)
+        out.append({
+            'ticker': ticker,
+            'why': why,
+            'current': item.get('current', '-'),
+            'max': item.get('max', '-'),
+            'status': item.get('status', '-'),
+        })
+
+    for item in notable_tickers.get('top_active_by_current', [])[:3]:
+        add(item, 'Top active mover')
+    for item in notable_tickers.get('failed_after_initially_working', [])[:3]:
+        add(item, 'Max move later failed')
+    for item in notable_tickers.get('close_below_be', [])[:3]:
+        add(item, 'Close < BE')
+    for ticker in portfolio.get('top_current_progress', [])[:3]:
+        add({'ticker': ticker, 'current': '-', 'max': '-', 'status': 'Portfolio'}, 'Portfolio name')
+    return out
+
+
 def _material_observations(history: pd.DataFrame, overview: dict, comparisons: dict, notable_tickers: dict, portfolio: dict) -> list[dict]:
     observations: list[dict] = []
     comparison_labels = {
@@ -497,6 +591,11 @@ def _material_observations(history: pd.DataFrame, overview: dict, comparisons: d
                 'section': 'Short-Term Shifts' if label in {'last2_vs_last5', 'last5_vs_previous5'} else 'Current Read',
                 'comparison': name,
                 'metric': 'max_without_active',
+                'metric_label': 'Median Max / Active %',
+                'prior': f"{_return_text(baseline.get('median_max'))} / {_pct_text(baseline.get('active_pct'))}",
+                'current': f"{_return_text(current.get('median_max'))} / {_pct_text(current.get('active_pct'))}",
+                'change': _pts_text(max_delta * 100),
+                'read': 'Max progress improved without active-rate improvement',
                 'direction': 'mixed',
                 'text': (
                     f"{name}: Median Max improved from {_return_text(baseline.get('median_max'))} to {_return_text(current.get('median_max'))} "
@@ -566,6 +665,8 @@ def build_daily_report_payload(history: pd.DataFrame, overview: dict) -> dict:
         'comparison_summary': comparisons,
         'trigger_summary': _trigger_summary(overview),
         'notable_tickers': notable_tickers,
+        'trigger_read_rows': _trigger_read_rows(history),
+        'notable_name_rows': _notable_name_rows(notable_tickers, portfolio),
         'portfolio_summary': portfolio,
         'material_observations': _material_observations(history, overview, comparisons, notable_tickers, portfolio),
     }
@@ -575,41 +676,110 @@ def _line_for_count(label: str, payload: dict) -> str:
     return f"{label}: {payload.get('count', 0)} ({_pct_text(payload.get('pct'))})"
 
 
+def _markdown_table(headers: list[str], rows: list[list[Any]]) -> str:
+    if not rows:
+        return ''
+    header = '| ' + ' | '.join(headers) + ' |'
+    align = '| ' + ' | '.join(['---'] + ['---:' if name in {'Value', 'Count', 'Prior', 'Current', 'Change', 'Triggered', 'Failed', 'Success', 'Failure Rate'} else '---' for name in headers[1:]]) + ' |'
+    body = ['| ' + ' | '.join(str(value) for value in row) + ' |' for row in rows]
+    return '\n'.join([header, align, *body])
+
+
+def _count_text(payload: dict, total: int) -> str:
+    return f"{payload.get('count', 0)} / {total}"
+
+
+def _executive_snapshot_table(latest: dict) -> str:
+    total = int(latest.get('setup_count', 0) or 0)
+    rows = [
+        ['Latest Setup Date', latest.get('latest_setup_date') or '-', '-'],
+        ['Setups', str(total), str(total)],
+        ['Active', _pct_text(latest.get('active', {}).get('pct')), _count_text(latest.get('active', {}), total)],
+        ['Failed D0', _pct_text(latest.get('failed_d0', {}).get('pct')), _count_text(latest.get('failed_d0', {}), total)],
+        ['Failed After D0', _pct_text(latest.get('failed_after_d0', {}).get('pct')), _count_text(latest.get('failed_after_d0', {}), total)],
+        ['Unresolved', _pct_text(latest.get('unresolved', {}).get('pct')), _count_text(latest.get('unresolved', {}), total)],
+        ['Close < BE', _pct_text(latest.get('close_below_be', {}).get('pct')), _count_text(latest.get('close_below_be', {}), total)],
+        ['Retested D0 Only', _pct_text(latest.get('retested_d0_only', {}).get('pct')), _count_text(latest.get('retested_d0_only', {}), total)],
+        ['Retested After D0', _pct_text(latest.get('retested_after_d0', {}).get('pct')), _count_text(latest.get('retested_after_d0', {}), total)],
+    ]
+    return _markdown_table(['Metric', 'Value', 'Count'], rows)
+
+
+def _material_shifts_table(observations: list[dict]) -> str:
+    rows = [
+        [
+            item.get('comparison', '-'),
+            item.get('metric_label') or item.get('metric', '-'),
+            item.get('prior', '-'),
+            item.get('current', '-'),
+            item.get('change', '-'),
+            item.get('read', '-'),
+        ]
+        for item in observations
+        if item.get('section') in {'Current Read', 'Short-Term Shifts'}
+    ]
+    return _markdown_table(['Comparison', 'Metric', 'Prior', 'Current', 'Change', 'Read'], rows)
+
+
+def _trigger_read_table(rows: list[dict]) -> str:
+    return _markdown_table(
+        ['Trigger', 'Window', 'Triggered', 'Failed', 'Success', 'Failure Rate', 'Read'],
+        [
+            [row['trigger'], row['window'], row['triggered'], row['failed'], row['success'], row['failure_rate'], row['read']]
+            for row in rows
+        ],
+    )
+
+
+def _notable_names_table(rows: list[dict]) -> str:
+    return _markdown_table(
+        ['Ticker', 'Why Notable', 'Current %', 'Max %', 'Status'],
+        [[row['ticker'], row['why'], row['current'], row['max'], row['status']] for row in rows],
+    )
+
+
+def _portfolio_snapshot_table(portfolio: dict) -> str:
+    leaders = ', '.join(portfolio.get('top_current_progress', [])[:3]) or '-'
+    longest = ', '.join(portfolio.get('longest_open', [])[:3]) or '-'
+    rows = [
+        ['Qualifying names', portfolio.get('current_progress_count', 0)],
+        ['Leaders', leaders],
+        ['Longest Open', longest],
+        ['Rated 5 / Rated 4', f"{portfolio.get('rated_5_count', 0)} / {portfolio.get('rated_4_count', 0)}"],
+    ]
+    return _markdown_table(['Metric', 'Value'], rows)
+
+
 def render_daily_report_markdown(report_payload: dict) -> str:
     latest = report_payload.get('latest_setup_date_summary', {})
     observations = report_payload.get('material_observations', [])
 
-    def section_lines(section: str) -> list[str]:
-        rows = [item for item in observations if item.get('section') == section]
-        return [f"- {item.get('text')}" for item in rows]
-
-    no_shift = '- No material behavior shifts detected across the selected comparison windows.'
+    no_shift = 'No material behavior shifts detected across the selected comparison windows.'
+    material_table = _material_shifts_table(observations)
+    trigger_table = _trigger_read_table(report_payload.get('trigger_read_rows', []))
+    names_table = _notable_names_table(report_payload.get('notable_name_rows', []))
 
     lines = [
         '# Daily Intelligence Report',
         '',
-        '## Latest Setup Date',
-        f"- Date: {latest.get('latest_setup_date') or '-'}",
-        f"- Setups: {latest.get('setup_count', 0)}",
+        '## Executive Snapshot',
+        _executive_snapshot_table(latest),
         '',
-        '## Current Read',
-        *(section_lines('Current Read') or [no_shift]),
+        '## Material Shifts',
+        material_table or no_shift,
         '',
         '## Trigger Read',
-        *(section_lines('Trigger Read') or [no_shift]),
-        '',
-        '## Short-Term Shifts',
-        *(section_lines('Short-Term Shifts') or [no_shift]),
+        trigger_table or no_shift,
         '',
         '## Notable Names',
-        *(section_lines('Notable Names') or [no_shift]),
+        names_table or no_shift,
         '',
         '## Portfolio Snapshot',
-        *(section_lines('Portfolio Snapshot') or [no_shift]),
+        _portfolio_snapshot_table(report_payload.get('portfolio_summary', {})),
         '',
     ]
     if not observations:
-        lines.insert(4, '- No material behavior shifts detected across the selected comparison windows.')
+        lines.insert(4, no_shift)
     return '\n'.join(lines)
 
 
@@ -617,7 +787,8 @@ def build_llm_report_prompt(report_payload: dict) -> str:
     structured_summary = json.dumps(report_payload, indent=2, default=str)
     return (
         'Summarize the following structured Watchlist Behavior Monitor metrics only from the provided data.\n'
-        'Do not make trade recommendations. Do not infer from raw database rows. Call out notable shifts, data limitations, '
-        'and keep the report concise.\n\n'
+        'Do not make trade recommendations. Do not infer from raw database rows. Use the Executive Snapshot, '
+        'Material Shifts, Trigger Read, Notable Names, and Portfolio Snapshot fields when present. Call out notable '
+        'shifts, data limitations, and keep the report concise.\n\n'
         f'STRUCTURED_SUMMARY:\n{structured_summary}'
     )

@@ -134,10 +134,23 @@ def test_daily_report_markdown_headers_and_no_recommendation_language():
     history = _report_history()
     markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history))).lower()
 
-    for header in ['latest setup date', 'current read', 'trigger read', 'short-term shifts', 'notable names', 'portfolio snapshot']:
+    for header in ['executive snapshot', 'material shifts', 'trigger read', 'notable names', 'portfolio snapshot']:
         assert header in markdown
     for forbidden in ['buy', 'sell', 'recommendation']:
         assert forbidden not in markdown
+
+
+def test_daily_report_markdown_renders_table_first_sections():
+    history = _report_history()
+    markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
+
+    assert '| Metric | Value | Count |' in markdown
+    assert '| Comparison | Metric | Prior | Current | Change | Read |' in markdown
+    assert '| Trigger | Window | Triggered | Failed | Success | Failure Rate | Read |' in markdown
+    assert '| Ticker | Why Notable | Current % | Max % | Status |' in markdown
+    assert '| Qualifying names |' in markdown
+    assert '| 1m ORH | Latest | 1 | 0 | 1 | 0.0% | Small sample |' in markdown
+    assert '- Latest setup date vs prior setup date:' not in markdown
 
 
 def test_daily_report_markdown_omits_raw_metric_dump_and_handles_no_material_shifts():
