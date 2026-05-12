@@ -66,6 +66,21 @@ def _overview(history: pd.DataFrame) -> dict:
     }
 
 
+def _section(markdown: str, header: str) -> str:
+    start = markdown.index(f'## {header}')
+    rest = markdown[start + len(f'## {header}'):]
+    next_header = rest.find('\n## ')
+    return rest if next_header == -1 else rest[:next_header]
+
+
+def _table_body_rows(section: str) -> list[str]:
+    return [
+        line for line in section.splitlines()
+        if line.startswith('| ') and not line.startswith('| ---') and not line.startswith('| Metric |')
+        and not line.startswith('| Area |') and not line.startswith('| Trigger |') and not line.startswith('| Ticker |')
+    ]
+
+
 def test_daily_report_payload_includes_latest_setup_date_summary():
     history = _report_history()
     payload = build_daily_report_payload(history, _overview(history))
@@ -134,23 +149,76 @@ def test_daily_report_markdown_headers_and_no_recommendation_language():
     history = _report_history()
     markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history))).lower()
 
-    for header in ['executive snapshot', 'material shifts', 'trigger read', 'notable names', 'portfolio snapshot']:
+    for header in ['summary read', 'executive snapshot', 'key shifts', 'trigger read', 'notable names', 'portfolio snapshot']:
         assert header in markdown
     for forbidden in ['buy', 'sell', 'recommendation']:
         assert forbidden not in markdown
 
 
-def test_daily_report_markdown_renders_table_first_sections():
+def test_daily_report_markdown_renders_hybrid_sections():
     history = _report_history()
     markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
 
     assert '| Metric | Value | Count |' in markdown
-    assert '| Comparison | Metric | Prior | Current | Change | Read |' in markdown
-    assert '| Trigger | Window | Triggered | Failed | Success | Failure Rate | Read |' in markdown
+    assert '| Area | Change | Evidence | Read |' in markdown
+    assert '| Trigger | Window | Evidence | Read |' in markdown
     assert '| Ticker | Why Notable | Current % | Max % | Status |' in markdown
-    assert '| Qualifying names |' in markdown
-    assert '| 1m ORH | Latest | 1 | 0 | 1 | 0.0% | Small sample |' in markdown
+    assert 'Current Progress portfolio: 0 qualifying names. Leaders: -.' in markdown
+    assert '| 1m ORH | Latest | 1 triggered, 0 failed, 1 success (0.0% fail) | Small sample |' in markdown
     assert '- Latest setup date vs prior setup date:' not in markdown
+
+
+def test_daily_report_summary_read_is_capped_and_evidence_based():
+    history = _report_history()
+    markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
+    summary = _section(markdown, 'Summary Read')
+    bullets = [line for line in summary.splitlines() if line.startswith('- ')]
+
+    assert 1 <= len(bullets) <= 4
+    assert any('moved from' in bullet or 'triggered' in bullet for bullet in bullets)
+
+
+def test_daily_report_executive_snapshot_omits_low_value_zero_rows():
+    history = _report_history()
+    markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
+    snapshot = _section(markdown, 'Executive Snapshot')
+
+    assert '| Unresolved |' not in snapshot
+    assert '| Retested D0 Only |' not in snapshot
+    assert '| Retested After D0 | 0.0% | 0 / 1 |' in snapshot
+
+
+def test_daily_report_key_shifts_are_capped_and_suppress_duplicates():
+    history = _report_history()
+    markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
+    key_shifts = _section(markdown, 'Key Shifts')
+    rows = _table_body_rows(key_shifts)
+
+    assert len(rows) <= 5
+    assert sum('| Active |' in row for row in rows) == 1
+    assert '| Area | Change | Evidence | Read |' in key_shifts
+
+
+def test_daily_report_trigger_read_is_filtered_and_labels_small_samples():
+    history = _report_history()
+    markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
+    trigger_read = _section(markdown, 'Trigger Read')
+    rows = _table_body_rows(trigger_read)
+
+    assert len(rows) <= 5
+    assert 'Small sample' in trigger_read
+    assert 'triggered' in trigger_read and 'failed' in trigger_read and 'success' in trigger_read
+
+
+def test_daily_report_notable_names_caps_at_five_rows_and_portfolio_is_compact():
+    history = _report_history()
+    markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
+    notable_names = _section(markdown, 'Notable Names')
+    portfolio = _section(markdown, 'Portfolio Snapshot')
+
+    assert len(_table_body_rows(notable_names)) <= 5
+    assert 'Current Progress portfolio:' in portfolio
+    assert '| Qualifying names |' not in portfolio
 
 
 def test_daily_report_markdown_omits_raw_metric_dump_and_handles_no_material_shifts():

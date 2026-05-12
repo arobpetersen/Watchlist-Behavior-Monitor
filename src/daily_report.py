@@ -697,36 +697,96 @@ def _executive_snapshot_table(latest: dict) -> str:
         ['Active', _pct_text(latest.get('active', {}).get('pct')), _count_text(latest.get('active', {}), total)],
         ['Failed D0', _pct_text(latest.get('failed_d0', {}).get('pct')), _count_text(latest.get('failed_d0', {}), total)],
         ['Failed After D0', _pct_text(latest.get('failed_after_d0', {}).get('pct')), _count_text(latest.get('failed_after_d0', {}), total)],
-        ['Unresolved', _pct_text(latest.get('unresolved', {}).get('pct')), _count_text(latest.get('unresolved', {}), total)],
         ['Close < BE', _pct_text(latest.get('close_below_be', {}).get('pct')), _count_text(latest.get('close_below_be', {}), total)],
-        ['Retested D0 Only', _pct_text(latest.get('retested_d0_only', {}).get('pct')), _count_text(latest.get('retested_d0_only', {}), total)],
         ['Retested After D0', _pct_text(latest.get('retested_after_d0', {}).get('pct')), _count_text(latest.get('retested_after_d0', {}), total)],
     ]
+    unresolved = latest.get('unresolved', {})
+    if int(unresolved.get('count', 0) or 0) > 0:
+        rows.insert(5, ['Unresolved', _pct_text(unresolved.get('pct')), _count_text(unresolved, total)])
+    retested_d0 = latest.get('retested_d0_only', {})
+    if int(retested_d0.get('count', 0) or 0) > 0 and float(retested_d0.get('pct', 0) or 0) >= 25:
+        rows.append(['Retested D0 Only', _pct_text(retested_d0.get('pct')), _count_text(retested_d0, total)])
     return _markdown_table(['Metric', 'Value', 'Count'], rows)
 
 
+def _change_magnitude(item: dict) -> float:
+    value = pd.to_numeric(
+        str(item.get('change', '0')).replace('pts', '').replace('+', '').strip(),
+        errors='coerce',
+    )
+    return 0.0 if pd.isna(value) else abs(float(value))
+
+
+def _key_shift_items(observations: list[dict], limit: int = 5) -> list[dict]:
+    priorities = {
+        'active': 0,
+        'failed_d0': 1,
+        'failed_after_d0': 2,
+        'close_below_be': 3,
+        'retested_after_d0': 4,
+        'max_without_active': 5,
+        'median_current': 6,
+        'median_max': 7,
+    }
+    candidates = [
+        item for item in observations
+        if item.get('section') in {'Current Read', 'Short-Term Shifts'}
+    ]
+    best_by_metric: dict[str, dict] = {}
+    for item in candidates:
+        metric = str(item.get('metric', ''))
+        change = _change_magnitude(item)
+        existing = best_by_metric.get(metric)
+        existing_change = -1 if existing is None else _change_magnitude(existing)
+        if existing is None or change > existing_change:
+            best_by_metric[metric] = item
+    return sorted(
+        best_by_metric.values(),
+        key=lambda item: (priorities.get(str(item.get('metric')), 99), -_change_magnitude(item), str(item.get('comparison'))),
+    )[:limit]
+
+
 def _material_shifts_table(observations: list[dict]) -> str:
+    selected = _key_shift_items(observations)
     rows = [
         [
             item.get('comparison', '-'),
             item.get('metric_label') or item.get('metric', '-'),
-            item.get('prior', '-'),
-            item.get('current', '-'),
-            item.get('change', '-'),
+            f"{item.get('prior', '-')} -> {item.get('current', '-')}",
             item.get('read', '-'),
         ]
-        for item in observations
-        if item.get('section') in {'Current Read', 'Short-Term Shifts'}
+        for item in selected
     ]
-    return _markdown_table(['Comparison', 'Metric', 'Prior', 'Current', 'Change', 'Read'], rows)
+    return _markdown_table(['Area', 'Change', 'Evidence', 'Read'], rows)
+
+
+def _trigger_read_items(rows: list[dict], limit: int = 5) -> list[dict]:
+    def score(row: dict) -> tuple[int, int]:
+        triggered = int(row.get('triggered', 0))
+        failed = int(row.get('failed', 0))
+        if triggered >= 3 and failed:
+            return (0, -triggered)
+        if row.get('window') == 'Latest':
+            return (1, -triggered)
+        if triggered >= 3:
+            return (2, -triggered)
+        return (3, -triggered)
+
+    return sorted(rows, key=score)[:limit]
 
 
 def _trigger_read_table(rows: list[dict]) -> str:
+    selected = _trigger_read_items(rows)
     return _markdown_table(
-        ['Trigger', 'Window', 'Triggered', 'Failed', 'Success', 'Failure Rate', 'Read'],
+        ['Trigger', 'Window', 'Evidence', 'Read'],
         [
-            [row['trigger'], row['window'], row['triggered'], row['failed'], row['success'], row['failure_rate'], row['read']]
-            for row in rows
+            [
+                row['trigger'],
+                row['window'],
+                f"{row['triggered']} triggered, {row['failed']} failed, {row['success']} success ({row['failure_rate']} fail)",
+                row['read'],
+            ]
+            for row in selected
         ],
     )
 
@@ -738,16 +798,31 @@ def _notable_names_table(rows: list[dict]) -> str:
     )
 
 
-def _portfolio_snapshot_table(portfolio: dict) -> str:
+def _portfolio_snapshot_line(portfolio: dict) -> str:
     leaders = ', '.join(portfolio.get('top_current_progress', [])[:3]) or '-'
-    longest = ', '.join(portfolio.get('longest_open', [])[:3]) or '-'
-    rows = [
-        ['Qualifying names', portfolio.get('current_progress_count', 0)],
-        ['Leaders', leaders],
-        ['Longest Open', longest],
-        ['Rated 5 / Rated 4', f"{portfolio.get('rated_5_count', 0)} / {portfolio.get('rated_4_count', 0)}"],
-    ]
-    return _markdown_table(['Metric', 'Value'], rows)
+    return f"Current Progress portfolio: {portfolio.get('current_progress_count', 0)} qualifying names. Leaders: {leaders}."
+
+
+def _summary_read_lines(report_payload: dict) -> list[str]:
+    lines: list[str] = []
+    observations = report_payload.get('material_observations', [])
+    for item in _key_shift_items(observations, limit=3):
+        lines.append(
+            f"- {item.get('read', 'Material shift')}: {item.get('comparison', '-')} "
+            f"moved from {item.get('prior', '-')} to {item.get('current', '-')}."
+        )
+        if len(lines) >= 3:
+            break
+
+    trigger_items = _trigger_read_items(report_payload.get('trigger_read_rows', []), limit=3)
+    thin_trigger = next((row for row in trigger_items if int(row.get('triggered', 0) or 0) < 3), None)
+    if thin_trigger and len(lines) < 4:
+        lines.append(
+            f"- Trigger samples are thin for {thin_trigger.get('trigger', '-')} in {thin_trigger.get('window', '-')} "
+            f"({thin_trigger.get('triggered', 0)} triggered), so trigger-specific reads should be treated cautiously."
+        )
+
+    return lines[:4]
 
 
 def render_daily_report_markdown(report_payload: dict) -> str:
@@ -758,14 +833,18 @@ def render_daily_report_markdown(report_payload: dict) -> str:
     material_table = _material_shifts_table(observations)
     trigger_table = _trigger_read_table(report_payload.get('trigger_read_rows', []))
     names_table = _notable_names_table(report_payload.get('notable_name_rows', []))
+    summary = _summary_read_lines(report_payload)
 
     lines = [
         '# Daily Intelligence Report',
         '',
+        '## Summary Read',
+        *(summary or [no_shift]),
+        '',
         '## Executive Snapshot',
         _executive_snapshot_table(latest),
         '',
-        '## Material Shifts',
+        '## Key Shifts',
         material_table or no_shift,
         '',
         '## Trigger Read',
@@ -775,11 +854,9 @@ def render_daily_report_markdown(report_payload: dict) -> str:
         names_table or no_shift,
         '',
         '## Portfolio Snapshot',
-        _portfolio_snapshot_table(report_payload.get('portfolio_summary', {})),
+        _portfolio_snapshot_line(report_payload.get('portfolio_summary', {})),
         '',
     ]
-    if not observations:
-        lines.insert(4, no_shift)
     return '\n'.join(lines)
 
 
@@ -787,8 +864,8 @@ def build_llm_report_prompt(report_payload: dict) -> str:
     structured_summary = json.dumps(report_payload, indent=2, default=str)
     return (
         'Summarize the following structured Watchlist Behavior Monitor metrics only from the provided data.\n'
-        'Do not make trade recommendations. Do not infer from raw database rows. Use the Executive Snapshot, '
-        'Material Shifts, Trigger Read, Notable Names, and Portfolio Snapshot fields when present. Call out notable '
+        'Do not make trade recommendations. Do not infer from raw database rows. Use the Summary Read, Executive '
+        'Snapshot, Key Shifts, Trigger Read, Notable Names, and Portfolio Snapshot fields when present. Call out notable '
         'shifts, data limitations, and keep the report concise.\n\n'
         f'STRUCTURED_SUMMARY:\n{structured_summary}'
     )
