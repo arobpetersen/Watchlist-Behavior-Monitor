@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import ast
 import json
 
 import duckdb
 import pandas as pd
+import pytest
 
 from src.rolling_setup_monitor import (
+    ACTIVE_LIFECYCLE_AUDIT_COLUMNS,
     _format_section_table,
     _follow_through,
     _vwap_reclaim_fields,
     apply_setup_rating_updates,
     apply_weak_close_note,
+    audit_active_lifecycle_violations,
     day_summary,
+    daily_follow_through_returns,
     derive_trigger_reference,
     detail_table,
     entry_tactic_dropdown_options,
@@ -19,6 +24,9 @@ from src.rolling_setup_monitor import (
     format_monitor_table_html,
     format_summary_blocks_html,
     main_table,
+    manual_metadata_candidates,
+    later_lifecycle_failure_day,
+    lifecycle_fail_day,
     opening_range_result,
     opening_range_width_notes,
     orh_trigger_assessment,
@@ -35,6 +43,22 @@ from src.rolling_setup_monitor import (
     trigger_day_status,
 )
 from src.trigger_resolution import resolve_display_triggers
+
+
+def _rolling_page_helpers():
+    source = open('pages/3_Rolling_Setup_Monitor.py', encoding='utf-8').read()
+    tree = ast.parse(source)
+    helper_nodes = []
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name.startswith('_'):
+            helper_nodes.append(node)
+        elif isinstance(node, ast.Assign) and any(getattr(target, 'id', None) == 'perf' for target in node.targets):
+            break
+    module = ast.Module(body=helper_nodes, type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {'escape': __import__('html').escape}
+    exec(compile(module, 'rolling_page_helpers', 'exec'), namespace)
+    return namespace
 
 
 def _or(**kwargs):
@@ -67,6 +91,238 @@ def _daily(lows=None):
         'low': lows,
         'close': [10.8, 11.1, 10.9, 11.0],
     })
+
+
+def test_daily_follow_through_returns_use_full_horizon_for_max_and_d3_for_d3_high():
+    daily = pd.DataFrame({
+        'ticker': ['SYN'] * 6,
+        'trading_date': pd.to_datetime([
+            '2026-04-01',
+            '2026-04-02',
+            '2026-04-03',
+            '2026-04-06',
+            '2026-04-07',
+            '2026-04-08',
+        ]),
+        'high': [105.0, 110.0, 112.0, 114.0, 140.0, 165.0],
+        'low': [95.0, 101.0, 103.0, 104.0, 120.0, 130.0],
+        'close': [100.0, 108.0, 111.0, 113.0, 135.0, 160.0],
+    })
+
+    result = daily_follow_through_returns('SYN', '2026-04-01', 100.0, 100.0, daily)
+
+    assert result['latest_trading_date'] == pd.Timestamp('2026-04-08').date()
+    assert result['latest_close'] == 160.0
+    assert result['current_pct'] == pytest.approx(0.60)
+    assert result['max_high'] == 165.0
+    assert result['max_high_date'] == pd.Timestamp('2026-04-08').date()
+    assert result['max_pct'] == pytest.approx(0.65)
+    assert result['d3_high_pct'] == pytest.approx(0.14)
+
+
+def test_follow_through_does_not_use_d3_high_as_max_pct():
+    daily = pd.DataFrame({
+        'ticker': ['SYN'] * 6,
+        'trading_date': pd.to_datetime([
+            '2026-04-01',
+            '2026-04-02',
+            '2026-04-03',
+            '2026-04-06',
+            '2026-04-07',
+            '2026-04-08',
+        ]),
+        'high': [105.0, 110.0, 112.0, 114.0, 140.0, 165.0],
+        'low': [95.0, 101.0, 103.0, 104.0, 120.0, 130.0],
+        'close': [100.0, 108.0, 111.0, 113.0, 135.0, 160.0],
+    })
+    row = {
+        'ticker': 'SYN',
+        'watchlist_date': '2026-04-01',
+        'trigger_level': 100.0,
+        'reference_low': 95.0,
+        'trigger_type': '1m ORH',
+        'trigger_break_time': pd.Timestamp('2026-04-01 09:31'),
+        'close_price': 100.0,
+    }
+
+    result = _follow_through(row, daily, pd.DataFrame())
+
+    assert result['current_pct'] == pytest.approx(0.60)
+    assert result['max_pct'] == pytest.approx(0.65)
+    assert result['d3_high_pct'] == pytest.approx(0.14)
+
+
+def test_lifecycle_failure_uses_full_horizon_stop_reference_breach():
+    daily = pd.DataFrame({
+        'ticker': ['SYN'] * 6,
+        'trading_date': pd.to_datetime([
+            '2026-04-01',
+            '2026-04-02',
+            '2026-04-03',
+            '2026-04-06',
+            '2026-04-07',
+            '2026-04-08',
+        ]),
+        'high': [105.0, 110.0, 112.0, 114.0, 118.0, 116.0],
+        'low': [99.0, 104.0, 106.0, 108.0, 99.0, 98.5],
+        'close': [104.0, 109.0, 111.0, 113.0, 105.0, 106.0],
+    })
+
+    assert lifecycle_fail_day(pd.DataFrame(), daily, None, 100.0, 100.0) == 4
+
+
+def test_lifecycle_failure_uses_later_close_below_breakeven():
+    daily = pd.DataFrame({
+        'ticker': ['SYN'] * 4,
+        'trading_date': pd.to_datetime(['2026-04-01', '2026-04-02', '2026-04-03', '2026-04-06']),
+        'high': [105.0, 110.0, 112.0, 108.0],
+        'low': [99.0, 102.0, 101.0, 97.5],
+        'close': [104.0, 109.0, 101.0, 98.0],
+    })
+
+    assert later_lifecycle_failure_day(daily, reference_low=90.0, breakeven_price=100.0) == 3
+
+
+def test_lifecycle_retest_without_breach_remains_active():
+    daily = pd.DataFrame({
+        'ticker': ['SYN'] * 5,
+        'trading_date': pd.to_datetime(['2026-04-01', '2026-04-02', '2026-04-03', '2026-04-06', '2026-04-07']),
+        'high': [105.0, 110.0, 112.0, 114.0, 116.0],
+        'low': [99.0, 104.0, 100.0, 101.0, 100.0],
+        'close': [104.0, 109.0, 101.0, 103.0, 102.0],
+    })
+
+    assert lifecycle_fail_day(pd.DataFrame(), daily, None, reference_low=99.0, breakeven_price=100.0) is None
+
+
+def test_follow_through_marks_later_failed_without_limiting_max_or_d3():
+    daily = pd.DataFrame({
+        'ticker': ['SYN'] * 6,
+        'trading_date': pd.to_datetime([
+            '2026-04-01',
+            '2026-04-02',
+            '2026-04-03',
+            '2026-04-06',
+            '2026-04-07',
+            '2026-04-08',
+        ]),
+        'high': [105.0, 110.0, 112.0, 118.0, 115.0, 116.0],
+        'low': [99.0, 104.0, 106.0, 108.0, 100.0, 94.0],
+        'close': [104.0, 109.0, 111.0, 117.0, 103.0, 106.0],
+    })
+    row = {
+        'ticker': 'SYN',
+        'watchlist_date': '2026-04-01',
+        'trigger_level': 100.0,
+        'reference_low': 95.0,
+        'trigger_type': 'PDH',
+        'trigger_break_time': pd.Timestamp('2026-04-01 09:31'),
+        'close_price': 104.0,
+    }
+
+    result = _follow_through(row, daily, pd.DataFrame())
+    raw = pd.DataFrame([{**_base_formatted_record(), **row, **result, 'status': 'Active'}])
+    table = _format_section_table(raw)
+
+    assert result['fail_day'] == 5
+    assert result['max_pct'] == pytest.approx(0.18)
+    assert result['d3_high_pct'] == pytest.approx(0.18)
+    assert table.loc[0, 'Current Status'] == 'Failed D5'
+    assert table.loc[0, 'Retests'] == 'D4, D5'
+
+
+def test_active_lifecycle_audit_flags_impossible_active_rows():
+    rows = pd.DataFrame([
+        {
+            'Ticker': 'LOWFAIL',
+            'Setup Date': '2026-04-01',
+            'Current Status': 'Active',
+            'Trigger': 'PDH',
+            'Trigger Level': '100.00',
+            'Reference Low': '95.00',
+        },
+        {
+            'Ticker': 'CLOSEFAIL',
+            'Setup Date': '2026-04-01',
+            'Current Status': 'Active',
+            'Trigger': '1m ORH',
+            'Trigger Level': '100.00',
+            'Reference Low': '90.00',
+        },
+        {
+            'Ticker': 'DONE',
+            'Setup Date': '2026-04-01',
+            'Current Status': 'Failed D1',
+            'Trigger': 'PDH',
+            'Trigger Level': '100.00',
+            'Reference Low': '95.00',
+        },
+    ])
+    daily = pd.DataFrame({
+        'ticker': ['LOWFAIL', 'LOWFAIL', 'LOWFAIL', 'CLOSEFAIL', 'CLOSEFAIL', 'DONE', 'DONE'],
+        'trading_date': pd.to_datetime([
+            '2026-04-01',
+            '2026-04-02',
+            '2026-04-03',
+            '2026-04-01',
+            '2026-04-02',
+            '2026-04-01',
+            '2026-04-02',
+        ]),
+        'high': [105.0, 106.0, 107.0, 105.0, 103.0, 105.0, 103.0],
+        'low': [99.0, 96.0, 94.0, 99.0, 97.0, 99.0, 94.0],
+        'close': [104.0, 102.0, 101.0, 104.0, 98.0, 104.0, 98.0],
+    })
+
+    audit = audit_active_lifecycle_violations(rows, daily)
+
+    assert audit.to_dict('records') == [
+        {
+            'Ticker': 'LOWFAIL',
+            'Setup Date': '2026-04-01',
+            'Trigger': 'PDH',
+            'Trigger Level': '100.00',
+            'Reference Low': '95.00',
+            'Breach Date': '2026-04-03',
+            'Breach Day Index': 2,
+            'Breach Reason': 'low below reference low',
+        },
+        {
+            'Ticker': 'CLOSEFAIL',
+            'Setup Date': '2026-04-01',
+            'Trigger': '1m ORH',
+            'Trigger Level': '100.00',
+            'Reference Low': '90.00',
+            'Breach Date': '2026-04-02',
+            'Breach Day Index': 1,
+            'Breach Reason': 'close below breakeven',
+        },
+    ]
+
+
+def test_active_lifecycle_audit_passes_valid_active_rows():
+    rows = pd.DataFrame([
+        {
+            'Ticker': 'VALID',
+            'Setup Date': '2026-04-01',
+            'Current Status': 'Active',
+            'Trigger': 'VWAP Reclaim',
+            'Trigger Level': '100.00',
+            'Reference Low': '95.00',
+        },
+    ])
+    daily = pd.DataFrame({
+        'ticker': ['VALID', 'VALID', 'VALID'],
+        'trading_date': pd.to_datetime(['2026-04-01', '2026-04-02', '2026-04-03']),
+        'high': [105.0, 106.0, 107.0],
+        'low': [99.0, 100.0, 95.0],
+        'close': [104.0, 101.0, 100.0],
+    })
+
+    audit = audit_active_lifecycle_violations(rows, daily)
+
+    assert audit.empty
+    assert audit.columns.tolist() == ACTIVE_LIFECYCLE_AUDIT_COLUMNS
 
 
 def _base_formatted_record():
@@ -1696,7 +1952,7 @@ def test_sezl_style_retest_and_close_below_be_remains_active():
     assert table.loc[0, 'Close < BE'] == 'Yes'
 
 
-def test_successful_non_vwap_close_below_be_remains_active():
+def test_successful_non_vwap_close_below_be_marks_later_failed():
     raw = pd.DataFrame([{
         **_base_formatted_record(),
         'trigger_type': '1m ORH',
@@ -1706,7 +1962,7 @@ def test_successful_non_vwap_close_below_be_remains_active():
 
     table = _format_section_table(raw)
 
-    assert table.loc[0, 'Current Status'] == 'Active'
+    assert table.loc[0, 'Current Status'] == 'Failed D2'
     assert table.loc[0, 'Close < BE'] == 'Yes'
 
 
@@ -1935,7 +2191,8 @@ def test_rolling_setup_monitor_page_uses_db_backed_cache_token_and_perf_debug():
     assert "Edit Setup / Entry Tactic / Rating" in page
     assert "display[['Ticker', 'Setup', 'Entry Tactic', 'Rating']]" in page
     assert 'entry_tactic_dropdown_options(table)' in page
-    assert 'st.cache_data.clear()' in page
+    assert 'refresh_derived_watchlist_views(load_rolling_setup_sections)' in page
+    assert 'st.cache_data.clear()' not in page
     assert "st.success('Saved setup/rating changes.')" in page
 
 
@@ -2012,6 +2269,117 @@ def test_format_summary_blocks_html_uses_zero_percent_when_no_setups():
     assert 'Gap</span><strong>0 (0%)</strong>' in html
     assert 'Failed 1m</span><strong>0 (0%)</strong>' in html
     assert 'No Trigger</span><strong>0 (0%)</strong>' in html
+
+
+def test_rolling_monitor_page_uses_readable_market_and_day_read_layout():
+    page = open('pages/3_Rolling_Setup_Monitor.py', encoding='utf-8').read()
+
+    assert 'def _market_context_banner(context)' in page
+    assert 'def _day_read_banner(summary: dict, table)' in page
+    assert 'def _trigger_read_strip(summary: dict)' in page
+    assert 'market-read-banner' in page
+    assert 'day-read-banner' in page
+    assert 'trigger-read-banner' in page
+    assert 'monitor-top-grid' in page
+    assert '@media (max-width: 900px)' in page
+    assert 'market-chip' in page
+    assert 'day-metric-grid' in page
+    assert 'day-metric-tile' in page
+    assert 'tile-value' in page
+    assert 'trigger-mini-card' in page
+    assert 'read-separator' not in page
+    assert 'trigger-read-card' not in page
+    assert '_follow_through_card' not in page
+    assert 'Market context unavailable for this setup date.' in page
+    assert 'format_summary_blocks_html(section' not in page
+
+
+def test_day_read_counts_trigger_day_fail_as_d0_fail():
+    helpers = _rolling_page_helpers()
+    table = pd.DataFrame([
+        {'Current Status': 'Active', 'Trigger Day': 'Success', 'Close < BE': 'No'},
+        {'Current Status': 'Active', 'Trigger Day': 'Success', 'Close < BE': 'No'},
+        {'Current Status': 'Active', 'Trigger Day': 'Success', 'Close < BE': 'No'},
+        {'Current Status': 'Active', 'Trigger Day': 'Success', 'Close < BE': 'No'},
+        {'Current Status': 'Active', 'Trigger Day': 'Success', 'Close < BE': 'No'},
+        {'Current Status': '', 'Trigger Day': 'Fail', 'Trigger': 'Failed PDH Trigger', 'PDH': 'failed', 'Close < BE': 'No'},
+    ])
+    summary = {'Setups': 6, 'Median Current %': '7.9%', 'Median Max %': '14.7%', 'Retested': 0}
+
+    counts = helpers['_status_counts'](table)
+    html = helpers['_day_read_banner'](summary, table)
+
+    assert counts['active'] == 5
+    assert counts['failed_d0'] == 1
+    assert counts['failed_after_d0'] == 0
+    assert 'D0 Fail' in html
+    assert '1 / 17%' in html
+    assert 'Failed After D0' in html
+    assert '0 / 0%' in html
+    assert 'Median Current' not in html
+    assert 'Median Max' not in html
+
+
+def test_day_read_d0_fail_dedupes_status_and_trigger_day():
+    helpers = _rolling_page_helpers()
+    table = pd.DataFrame([
+        {'Current Status': 'Failed D0', 'Trigger Day': 'Success'},
+        {'Current Status': 'Failed D0', 'Trigger Day': 'Fail'},
+        {'Current Status': '', 'Trigger Day': 'Fail'},
+        {'Current Status': 'Failed D1', 'Trigger Day': 'Success'},
+    ])
+
+    counts = helpers['_status_counts'](table)
+
+    assert counts['failed_d0'] == 3
+    assert counts['failed_after_d0'] == 1
+
+
+def test_day_read_includes_d3_high_when_available_without_current_or_max():
+    helpers = _rolling_page_helpers()
+    table = pd.DataFrame([
+        {'Current Status': 'Active', 'Trigger Day': 'Success', 'Close < BE': 'No'},
+        {'Current Status': 'Active', 'Trigger Day': 'Success', 'Close < BE': 'Yes'},
+    ])
+    summary = {
+        'Setups': 2,
+        'Median Current %': '4.0%',
+        'Median Max %': '8.0%',
+        'Median D3 High %': '12.0%',
+        'Retested': 1,
+    }
+
+    html = helpers['_day_read_banner'](summary, table)
+
+    assert 'Median D3 High' in html
+    assert '12.0%' in html
+    assert 'Close &lt; BE' in html
+    assert 'Retested' in html
+    assert 'Median Current' not in html
+    assert 'Median Max' not in html
+
+
+def test_trigger_read_suppresses_empty_other_block():
+    helpers = _rolling_page_helpers()
+    html = helpers['_trigger_read_strip']({
+        'PDH': 1,
+        'Failed PDH Trigger': 1,
+        'PDH Gap': 4,
+        'VWAP Trigger': 2,
+        'VWAP Failed': 0,
+        'Clean 1m': 2,
+        '1m Failed': 2,
+        'Clean 5m': 0,
+        '5m Failed': 1,
+        'Alt Required': 0,
+        'No Trigger': 0,
+        'Unresolved': 0,
+    })
+
+    assert 'PDH' in html
+    assert '1 success / 1 failed / 4 gap' in html
+    assert 'VWAP' in html
+    assert 'Other' not in html
 
 
 def test_format_section_table_formats_nan_day_values_as_blank():
@@ -2770,3 +3138,98 @@ def test_apply_setup_rating_updates_rejects_invalid_entry_tactic():
         assert 'Invalid Entry Tactic: Chase' in str(exc)
     else:
         raise AssertionError('Expected ValueError')
+
+
+def test_daily_snapshot_metadata_candidates_use_watchlist_candidate_source():
+    con = duckdb.connect(':memory:')
+    con.execute(
+        """
+        create table watchlist_candidates (
+            candidate_id bigint,
+            watchlist_date date,
+            ticker text,
+            setup text,
+            rating double
+        )
+        """
+    )
+    con.execute("insert into watchlist_candidates values (1, '2026-05-01', 'ZZZ', 'EP', 5)")
+    con.execute("insert into watchlist_candidates values (2, '2026-05-01', 'AAA', null, null)")
+    con.execute("insert into watchlist_candidates values (3, '2026-04-30', 'OLD', 'Pullback', 4)")
+
+    out = manual_metadata_candidates(con, '2026-05-01')
+
+    assert out.columns.tolist() == ['candidate_id', 'Ticker', 'Setup', 'Entry Tactic', 'Rating']
+    assert out['Ticker'].tolist() == ['AAA', 'ZZZ']
+    assert out.loc[out['Ticker'].eq('AAA'), ['Setup', 'Entry Tactic', 'Rating']].iloc[0].to_dict() == {
+        'Setup': '',
+        'Entry Tactic': '',
+        'Rating': '',
+    }
+    assert out.loc[out['Ticker'].eq('ZZZ'), 'Rating'].iloc[0] == '5'
+    assert 'entry_tactic' in [row[1] for row in con.execute("pragma table_info('watchlist_candidates')").fetchall()]
+
+
+def test_daily_snapshot_metadata_edit_updates_only_manual_columns():
+    con = duckdb.connect(':memory:')
+    con.execute(
+        """
+        create table watchlist_candidates (
+            candidate_id bigint,
+            watchlist_date date,
+            ticker text,
+            setup text,
+            entry_tactic text,
+            rating double,
+            trigger_type text,
+            current_status text
+        )
+        """
+    )
+    con.execute("insert into watchlist_candidates values (1, '2026-05-01', 'AAPL', 'EP', null, 2, 'PDH', 'Active')")
+    original = manual_metadata_candidates(con, '2026-05-01')
+    edited = original.copy()
+    edited.loc[0, 'Setup'] = 'Pullback'
+    edited.loc[0, 'Entry Tactic'] = 'Bias Flip'
+    edited.loc[0, 'Rating'] = '4'
+
+    changed = apply_setup_rating_updates(con, original, edited)
+    row = con.execute(
+        'select setup, entry_tactic, rating, trigger_type, current_status from watchlist_candidates where candidate_id=1'
+    ).fetchone()
+
+    assert changed == 1
+    assert row == ('Pullback', 'Bias Flip', 4.0, 'PDH', 'Active')
+
+
+def test_daily_snapshot_metadata_edit_uses_candidate_id_for_duplicate_tickers():
+    con = duckdb.connect(':memory:')
+    con.execute(
+        """
+        create table watchlist_candidates (
+            candidate_id bigint,
+            watchlist_date date,
+            ticker text,
+            setup text,
+            entry_tactic text,
+            rating double
+        )
+        """
+    )
+    con.execute("insert into watchlist_candidates values (1, '2026-05-01', 'DUP', 'EP', null, 2)")
+    con.execute("insert into watchlist_candidates values (2, '2026-05-01', 'DUP', 'Pullback', null, 3)")
+    original = manual_metadata_candidates(con, '2026-05-01')
+    selected = original.loc[original['candidate_id'].eq(2)].copy()
+    edited = selected.copy()
+    edited.loc[edited.index[0], 'Setup'] = 'High Tight Pivot'
+    edited.loc[edited.index[0], 'Entry Tactic'] = 'Reclaim'
+    edited.loc[edited.index[0], 'Rating'] = '5'
+
+    changed = apply_setup_rating_updates(con, selected, edited)
+    rows = con.execute('select candidate_id, setup, entry_tactic, rating from watchlist_candidates order by candidate_id').fetchall()
+
+    assert changed == 1
+    assert rows == [
+        (1, 'EP', None, 2.0),
+        (2, 'High Tight Pivot', 'Reclaim', 5.0),
+    ]

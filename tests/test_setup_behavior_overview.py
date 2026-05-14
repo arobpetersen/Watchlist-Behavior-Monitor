@@ -1822,6 +1822,8 @@ def test_setup_behavior_page_uses_successful_triggers_section_title():
     assert "'VWAP Reclaim'" in page
     assert "OVERVIEW_CACHE_VERSION = 'setup-overview-daily-report-v1'" in page
     assert "overview_cache_token = f'{OVERVIEW_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
+    assert "st.button('Refresh derived views from database'" in page
+    assert 'refresh_derived_watchlist_views(load_setup_behavior_overview)' in page
     assert "PerfTimer('Setup Behavior Overview')" in page
     assert 'render_perf_debug(st, perf)' in page
 

@@ -51,11 +51,13 @@ def run_daily_pipeline(ingest_result: dict | None = None) -> dict:
                 failures.append(str(e))
         today = datetime.now(timezone.utc).date()
         daily_requests = cands[['ticker','watchlist_date']].drop_duplicates()
+        market_requests = cands[['watchlist_date']].drop_duplicates().assign(ticker='QQQ')
+        daily_requests = pd.concat([daily_requests, market_requests], ignore_index=True).drop_duplicates()
         for _, c in daily_requests.iterrows():
             try:
                 watchlist_date = pd.to_datetime(c['watchlist_date']).date()
                 from_date = watchlist_date - timedelta(days=45)
-                to_date = min(watchlist_date + timedelta(days=7), today)
+                to_date = today
                 df = client.fetch_daily(c['ticker'], from_date, to_date)
                 if df.empty:
                     continue

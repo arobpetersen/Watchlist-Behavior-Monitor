@@ -17,6 +17,7 @@ from src.setup_behavior_overview import (
     trigger_event_shift_highlights,
     trigger_event_main_tables,
 )
+from src.view_refresh import DERIVED_REFRESH_MESSAGE, refresh_derived_watchlist_views
 
 
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
@@ -64,6 +65,12 @@ perf = PerfTimer('Setup Behavior Overview')
 st.title('Setup Behavior Overview')
 st.caption('Rolling summary of Back-Watch setup behavior across recent setup-date windows.')
 st.caption('D3 High only includes setups with completed D3 data.')
+if st.button('Refresh derived views from database', key='setup_overview_refresh_derived'):
+    refresh_derived_watchlist_views(load_setup_behavior_overview)
+    st.session_state['derived_views_refreshed'] = True
+    st.rerun()
+if st.session_state.pop('derived_views_refreshed', False):
+    st.success(DERIVED_REFRESH_MESSAGE)
 overview_cache_token = f'{OVERVIEW_CACHE_VERSION}:{data_health_cache_token(db_path)}'
 monitor_history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{data_health_cache_token(db_path)}'
 with perf.measure('Data Health load'):

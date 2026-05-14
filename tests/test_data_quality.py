@@ -3,6 +3,8 @@ from __future__ import annotations
 import pandas as pd
 
 from src.data_quality import (
+    ACTIVE_DAILY_BAR_COVERAGE_COLUMNS,
+    active_daily_bar_coverage,
     build_data_health_summary,
     data_health_line,
     duplicate_candidate_keys,
@@ -109,6 +111,135 @@ def test_partial_intraday_sessions_from_db_reads_cached_bars():
     assert bool(out.loc[0, 'Missing Open Period']) is True
 
 
+def test_active_daily_bar_coverage_flags_active_rows_stale_to_global_latest():
+    con = get_connection(':memory:')
+    con.execute("""
+        insert into daily_bars
+        values
+        ('OLD', '2026-05-01', 1, 1, 1, 1, 1, null, 'test', current_timestamp),
+        ('OLD', '2026-05-02', 1, 1, 1, 1, 1, null, 'test', current_timestamp),
+        ('CUR', '2026-05-01', 1, 1, 1, 1, 1, null, 'test', current_timestamp),
+        ('CUR', '2026-05-05', 1, 1, 1, 1, 1, null, 'test', current_timestamp),
+        ('FAIL', '2026-05-05', 1, 1, 1, 1, 1, null, 'test', current_timestamp)
+    """)
+    history = pd.DataFrame([
+        {'Ticker': 'OLD', 'Setup Date': '2026-04-22', 'Current Status': 'Active'},
+        {'Ticker': 'CUR', 'Setup Date': '2026-05-01', 'Current Status': 'Active'},
+        {'Ticker': 'FAIL', 'Setup Date': '2026-05-01', 'Current Status': 'Failed D1'},
+    ])
+
+    active_count, missing_count, max_gap, stale = active_daily_bar_coverage(con, history=history)
+
+    assert active_count == 2
+    assert missing_count == 1
+    assert max_gap == 1
+    assert stale.to_dict('records') == [{
+        'Ticker': 'OLD',
+        'Setup Date': '2026-04-22',
+        'Ticker Latest Bar Date': '2026-05-02',
+        'Global Latest Bar Date': '2026-05-05',
+        'Stale Trading-Day Gap': 1,
+    }]
+
+
+def test_active_daily_bar_coverage_uses_candidate_fallback_without_history():
+    con = get_connection(':memory:')
+    con.execute("""
+        insert into watchlist_candidates
+        values
+        (1, '2026-04-22', 'OLD', null, '', null, '', null, '2026-04-22_watchlist.csv', current_timestamp),
+        (2, '2026-05-01', 'CUR', null, '', null, '', null, '2026-05-01_watchlist.csv', current_timestamp)
+    """)
+    con.execute("""
+        insert into daily_bars
+        values
+        ('OLD', '2026-05-01', 1, 1, 1, 1, 1, null, 'test', current_timestamp),
+        ('CUR', '2026-05-01', 1, 1, 1, 1, 1, null, 'test', current_timestamp),
+        ('CUR', '2026-05-02', 1, 1, 1, 1, 1, null, 'test', current_timestamp)
+    """)
+
+    active_count, missing_count, max_gap, stale = active_daily_bar_coverage(con)
+
+    assert active_count == 2
+    assert missing_count == 1
+    assert max_gap == 1
+    assert stale.to_dict('records') == [{
+        'Ticker': 'OLD',
+        'Setup Date': '2026-04-22',
+        'Ticker Latest Bar Date': '2026-05-01',
+        'Global Latest Bar Date': '2026-05-02',
+        'Stale Trading-Day Gap': 1,
+    }]
+
+
+def test_active_daily_bar_coverage_can_still_use_precomputed_monitor_history():
+    con = get_connection(':memory:')
+    con.execute("""
+        insert into watchlist_candidates
+        values
+        (1, '2026-04-22', 'OLD', null, '', null, '', null, '2026-04-22_watchlist.csv', current_timestamp),
+        (2, '2026-05-01', 'CUR', null, '', null, '', null, '2026-05-01_watchlist.csv', current_timestamp)
+    """)
+    con.execute("""
+        insert into daily_bars
+        values
+        ('OLD', '2026-05-01', 1, 1, 1, 1, 1, null, 'test', current_timestamp),
+        ('CUR', '2026-05-02', 1, 1, 1, 1, 1, null, 'test', current_timestamp)
+    """)
+    history = pd.DataFrame([
+        {'Ticker': 'OLD', 'Setup Date': '2026-04-22', 'Current Status': 'Failed D1'},
+        {'Ticker': 'CUR', 'Setup Date': '2026-05-01', 'Current Status': 'Active'},
+    ])
+
+    active_count, missing_count, max_gap, stale = active_daily_bar_coverage(con, history=history)
+
+    assert active_count == 1
+    assert missing_count == 0
+    assert max_gap == 0
+    assert stale.empty
+
+
+def test_active_daily_bar_coverage_only_calls_monitor_history_when_opted_in(monkeypatch):
+    con = get_connection(':memory:')
+    con.execute("""
+        insert into watchlist_candidates
+        values (1, '2026-05-01', 'CUR', null, '', null, '', null, '2026-05-01_watchlist.csv', current_timestamp)
+    """)
+    con.execute("""
+        insert into daily_bars
+        values ('CUR', '2026-05-02', 1, 1, 1, 1, 1, null, 'test', current_timestamp)
+    """)
+
+    import src.setup_behavior_overview as setup_behavior_overview
+
+    called = {'value': False}
+
+    def fake_monitor_history(_con):
+        called['value'] = True
+        return pd.DataFrame([{'Ticker': 'CUR', 'Setup Date': '2026-05-01', 'Current Status': 'Active'}])
+
+    monkeypatch.setattr(setup_behavior_overview, 'monitor_history', fake_monitor_history)
+
+    active_count, _, _, _ = active_daily_bar_coverage(con)
+    assert active_count == 1
+    assert called['value'] is False
+
+    active_count, _, _, _ = active_daily_bar_coverage(con, allow_monitor_history=True)
+    assert active_count == 1
+    assert called['value'] is True
+
+
+def test_active_daily_bar_coverage_handles_empty_history():
+    con = get_connection(':memory:')
+
+    active_count, missing_count, max_gap, stale = active_daily_bar_coverage(con, history=pd.DataFrame())
+
+    assert active_count == 0
+    assert missing_count == 0
+    assert max_gap == 0
+    assert stale.columns.tolist() == ACTIVE_DAILY_BAR_COVERAGE_COLUMNS
+
+
 def _insert_full_market_data(con) -> None:
     con.execute("""
         insert into watchlist_candidates
@@ -163,6 +294,24 @@ def test_data_health_summary_ok_when_core_data_has_no_obvious_issues():
     assert summary.duplicate_candidate_key_count == 0
     assert summary.partial_intraday_session_count == 0
     assert summary.reason == ''
+    assert summary.active_daily_bar_coverage_source == 'Watchlist candidates (fast coverage check)'
+
+
+def test_data_health_summary_does_not_invoke_monitor_history_by_default(monkeypatch):
+    con = get_connection(':memory:')
+    _insert_full_market_data(con)
+
+    import src.setup_behavior_overview as setup_behavior_overview
+
+    def fail_monitor_history(_con):
+        raise AssertionError('Data Health should not build full monitor history by default')
+
+    monkeypatch.setattr(setup_behavior_overview, 'monitor_history', fail_monitor_history)
+
+    summary = build_data_health_summary(con)
+
+    assert summary.status == 'OK'
+    assert summary.active_daily_bar_coverage_source == 'Watchlist candidates (fast coverage check)'
 
 
 def test_data_health_latest_setup_matches_latest_candidate_date():

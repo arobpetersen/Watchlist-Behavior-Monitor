@@ -87,3 +87,56 @@ def test_read_timeout_for_one_ticker_does_not_stop_other_tickers(tmp_path: Path,
     assert con.execute("select count(*) from intraday_bars_1m where ticker='MSFT'").fetchone()[0] == 1
     assert con.execute("select count(*) from intraday_bars_1m where ticker='OKLO'").fetchone()[0] == 0
     assert con.execute("select count(*) from entry_day_features where ticker='OKLO'").fetchone()[0] == 0
+
+
+def test_daily_fetch_extends_historical_candidates_through_today(tmp_path: Path, monkeypatch):
+    db_path = tmp_path / 'watchlist.duckdb'
+    watchlists_dir = tmp_path / 'watchlists'
+    watchlists_dir.mkdir()
+    con = get_connection(str(db_path))
+    con.execute(
+        """
+        insert into watchlist_candidates values
+        (1, '2026-04-01', 'SYN', null, '', null, '', null, '2026-04-01_backwatch.csv', current_timestamp)
+        """
+    )
+    con.close()
+
+    calls = []
+
+    class FrozenDateTime:
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 5, 12, tzinfo=tz)
+
+    class FakeMassiveClient:
+        def __init__(self, api_key, base_url):
+            pass
+
+        def fetch_intraday_1m(self, ticker, trading_date):
+            return pd.DataFrame()
+
+        def fetch_daily(self, ticker, from_date, to_date):
+            calls.append((ticker, str(from_date), str(to_date)))
+            return pd.DataFrame()
+
+    monkeypatch.setattr(
+        'src.run_daily.get_settings',
+        lambda: SimpleNamespace(
+            db_path=db_path,
+            watchlists_dir=watchlists_dir,
+            massive_api_key='secret-key',
+            massive_base_url='https://api.polygon.io',
+        ),
+    )
+    monkeypatch.setattr('src.run_daily.datetime', FrozenDateTime)
+    monkeypatch.setattr('src.run_daily.MassiveClient', FakeMassiveClient)
+    monkeypatch.setattr('src.run_daily.compute_features', lambda con, candidate: False)
+    monkeypatch.setattr('src.run_daily.assign_labels_for_date', lambda con, d: 0)
+
+    run_daily_pipeline(_empty_ingest())
+
+    assert calls == [
+        ('SYN', '2026-02-15', '2026-05-12'),
+        ('QQQ', '2026-02-15', '2026-05-12'),
+    ]

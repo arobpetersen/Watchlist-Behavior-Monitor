@@ -143,6 +143,8 @@ def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
     assert "top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_watchlist_top_movers(db_path, top_movers_cache_token, base_history)' in page
     assert 'load_cached_monitor_history(db_path, monitor_history_cache_token)' in page
+    assert "st.button('Refresh derived views from database'" in page
+    assert 'refresh_derived_watchlist_views(load_watchlist_top_movers)' in page
     assert "PerfTimer('Watchlist Top Movers')" in page
     assert 'render_perf_debug(st, perf)' in page
     assert "st.caption(f'Active rows: {len(all_active_result.active_table)}')" in page
@@ -379,7 +381,7 @@ def test_visible_column_contract():
 
 
 def test_entry_based_return_beats_setup_close_return_in_active_table():
-    history = pd.DataFrame([
+    history = _entry_history([
         {
             'Ticker': 'GAP',
             'Setup Date': '2026-04-01',
@@ -698,6 +700,42 @@ def test_hypothetical_portfolio_excludes_missing_low_rating_and_close_below_be()
     assert 'rating below 4' in audit.loc['LOW', 'Portfolio Exclusion Reason']
     assert 'missing rating' in audit.loc['MISS', 'Portfolio Exclusion Reason']
     assert 'close below breakeven' in audit.loc['BE', 'Portfolio Exclusion Reason']
+
+
+def test_metadata_rating_refresh_can_make_current_progress_candidate_qualify():
+    history = _entry_history([
+        {
+            'Ticker': 'MU',
+            'Setup Date': '2026-04-01',
+            'Trigger': 'PDH',
+            'Current Status': 'Active',
+            'Latest Status Date': '2026-04-30',
+            'Ticker Latest Bar Date': '2026-04-30',
+            'Global Latest Bar Date': '2026-04-30',
+            'Rating': 3,
+            'Current %': '25.0%',
+            'Max %': '40.0%',
+            'current_pct_raw': 0.25,
+            'max_pct_raw': 0.40,
+            'Close < BE': 'No',
+            'Setup': 'EP',
+            'Entry Tactic': '',
+        },
+    ])
+
+    before = top_movers_from_history(history, latest_date='2026-04-30', portfolio_view='Current Progress')
+    refreshed_history = history.copy()
+    refreshed_history.loc[0, 'Rating'] = 5
+    refreshed_history.loc[0, 'Setup'] = 'Pullback'
+    refreshed_history.loc[0, 'Entry Tactic'] = 'Reclaim'
+    after = top_movers_from_history(refreshed_history, latest_date='2026-04-30', portfolio_view='Current Progress')
+
+    assert before.portfolio_table.empty
+    assert 'rating below 4' in before.audit.loc[0, 'Portfolio Exclusion Reason']
+    assert after.portfolio_table['Ticker'].tolist() == ['MU']
+    assert after.portfolio_table.loc[0, 'Setup'] == 'Pullback'
+    assert after.portfolio_table.loc[0, 'Entry Tactic'] == 'Reclaim'
+    assert after.portfolio_table.loc[0, 'Rating'] == '5'
 
 
 def test_hypothetical_portfolio_exclusion_reason_identifies_stale_status():

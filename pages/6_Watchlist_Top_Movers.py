@@ -19,6 +19,7 @@ from src.watchlist_top_movers import (
     portfolio_summary,
     top_movers_from_history,
 )
+from src.view_refresh import DERIVED_REFRESH_MESSAGE, refresh_derived_watchlist_views
 
 
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
@@ -40,6 +41,12 @@ perf = PerfTimer('Watchlist Top Movers')
 
 st.title('Watchlist Top Movers')
 st.caption('Top-performing ticker/setup instances from uploaded Back-Watch setup data.')
+if st.button('Refresh derived views from database', key='top_movers_refresh_derived'):
+    refresh_derived_watchlist_views(load_watchlist_top_movers)
+    st.session_state['derived_views_refreshed'] = True
+    st.rerun()
+if st.session_state.pop('derived_views_refreshed', False):
+    st.success(DERIVED_REFRESH_MESSAGE)
 with perf.measure('Data Health load'):
     health_summary = load_data_health_summary(db_path, data_health_cache_token(db_path))
 render_data_health_indicator(health_summary)

@@ -125,6 +125,29 @@ DAILY_TABLE_COLUMNS = {
 }
 
 
+DAILY_WORKFLOW_COLUMNS = [
+    'Ticker',
+    'Current Status',
+    'Trigger Day',
+    'Trigger',
+    'PDH',
+    '1m ORH',
+    'VWAP Reclaim',
+    '5m ORH',
+    'Notes',
+    'Current %',
+    'Max %',
+    'Close < BE',
+    'D3 High %',
+    'Retests',
+    'Setup',
+    'Entry Tactic',
+    'Rating',
+]
+
+DAILY_WORKFLOW_INTERNAL_COLUMNS = ['candidate_id', *DAILY_WORKFLOW_COLUMNS]
+
+
 GROUP_SUMMARY_COLUMNS = {
     'group_value': 'Group',
     'count': 'Count',
@@ -235,6 +258,178 @@ def snapshot_table(con, d):
     })
     df = df[['ticker','rating','setup','focus','primary_label','secondary_labels','1m OR result','5m OR result','15m OR result','VWAP result','close_location','close_bucket','range_vs_atr20','relative_volume_20d','broke_setup_day_high_within_3d','broke_setup_day_low_within_3d']]
     return _rename(df, DAILY_TABLE_COLUMNS)
+
+
+def _count_pct(count: int, total: int) -> str:
+    pct = 0 if total <= 0 else round((int(count) / total) * 100)
+    return f'{int(count)} ({pct}%)'
+
+
+def _compact_pct(value):
+    return DISPLAY_NULL if _is_missing(value) else f'{float(value) * 100:.1f}%'
+
+
+def _compact_num(value):
+    return DISPLAY_NULL if _is_missing(value) else f'{float(value):.2f}'
+
+
+def _status_sort(value) -> int:
+    text = '' if _is_missing(value) else str(value).strip()
+    if text == 'Active':
+        return 0
+    return 1
+
+
+def _trigger_day_sort(value) -> int:
+    text = '' if _is_missing(value) else str(value).strip()
+    if text == 'Success':
+        return 0
+    if text == 'Fail':
+        return 1
+    if text == 'Unresolved':
+        return 2
+    return 3
+
+
+def _numeric_sort(series: pd.Series) -> pd.Series:
+    text = series.fillna('').astype(str).str.replace('%', '', regex=False)
+    return pd.to_numeric(text, errors='coerce').fillna(float('-inf'))
+
+
+def _rating_sort(series: pd.Series) -> pd.Series:
+    return pd.to_numeric(series, errors='coerce').fillna(float('-inf'))
+
+
+def daily_snapshot_monitor_table(con, d, include_candidate_id: bool = False) -> pd.DataFrame:
+    """Build the selected date through the Rolling Setup Monitor semantics."""
+    selected = str(pd.to_datetime(d).date())
+
+    from src.rolling_setup_monitor import main_table, rolling_setup_monitor_for_date, sort_monitor_rows
+
+    sections = rolling_setup_monitor_for_date(con, selected)
+    matching = next((section for section in sections if section.get('setup_date') == selected), None)
+    if matching is None:
+        columns = DAILY_WORKFLOW_INTERNAL_COLUMNS if include_candidate_id else DAILY_WORKFLOW_COLUMNS
+        return pd.DataFrame(columns=columns)
+
+    source = sort_monitor_rows(matching['table']).reset_index(drop=True)
+    table = main_table(matching['table']).reset_index(drop=True)
+    if include_candidate_id:
+        table.insert(0, 'candidate_id', source['candidate_id'].tolist() if 'candidate_id' in source else [''] * len(table))
+    for column in DAILY_WORKFLOW_COLUMNS:
+        if column not in table:
+            table[column] = ''
+    columns = DAILY_WORKFLOW_INTERNAL_COLUMNS if include_candidate_id else DAILY_WORKFLOW_COLUMNS
+    table = table[columns].copy()
+    if table.empty:
+        return table
+
+    table['_status_sort'] = table['Current Status'].apply(_status_sort)
+    table['_trigger_day_sort'] = table['Trigger Day'].apply(_trigger_day_sort)
+    table['_current_sort'] = _numeric_sort(table['Current %'])
+    table['_max_sort'] = _numeric_sort(table['Max %'])
+    table['_rating_sort'] = _rating_sort(table['Rating'])
+    table = table.sort_values(
+        ['_status_sort', '_trigger_day_sort', '_current_sort', '_max_sort', '_rating_sort', 'Ticker'],
+        ascending=[True, True, False, False, False, True],
+    )
+    return table[columns].reset_index(drop=True)
+
+
+def _retest_days(value) -> set[int]:
+    if _is_missing(value):
+        return set()
+    out = set()
+    for part in str(value).replace('+', ',').split(','):
+        text = part.strip().lstrip('D')
+        if not text or not text.split()[0].isdigit():
+            continue
+        out.add(int(text.split()[0]))
+    return out
+
+
+def daily_snapshot_summary_groups(metrics: dict, monitor_table: pd.DataFrame) -> list[dict]:
+    total = len(monitor_table)
+    status = monitor_table['Current Status'].fillna('').astype(str) if 'Current Status' in monitor_table else pd.Series(dtype=str)
+    trigger_day = monitor_table['Trigger Day'].fillna('').astype(str) if 'Trigger Day' in monitor_table else pd.Series(dtype=str)
+    trigger = monitor_table['Trigger'].fillna('').astype(str) if 'Trigger' in monitor_table else pd.Series(dtype=str)
+    pdh = monitor_table['PDH'].fillna('').astype(str) if 'PDH' in monitor_table else pd.Series(dtype=str)
+    one = monitor_table['1m ORH'].fillna('').astype(str) if '1m ORH' in monitor_table else pd.Series(dtype=str)
+    vwap = monitor_table['VWAP Reclaim'].fillna('').astype(str) if 'VWAP Reclaim' in monitor_table else pd.Series(dtype=str)
+    five = monitor_table['5m ORH'].fillna('').astype(str) if '5m ORH' in monitor_table else pd.Series(dtype=str)
+    close_be = monitor_table['Close < BE'].fillna('').astype(str) if 'Close < BE' in monitor_table else pd.Series(dtype=str)
+    retests = monitor_table['Retests'].fillna('').astype(str) if 'Retests' in monitor_table else pd.Series(dtype=str)
+
+    active = int(status.eq('Active').sum())
+    failed_d0 = int(status.eq('Failed D0').sum())
+    failed_after_d0 = int(status.str.match(r'^Failed D[1-9]\d*$').sum() + status.isin({'Failed', 'Later Failed'}).sum())
+    unresolved = int(trigger_day.eq('Unresolved').sum())
+    close_be_count = int(close_be.str.casefold().eq('yes').sum())
+    retest_days = retests.apply(_retest_days) if not retests.empty else pd.Series(dtype=object)
+    retested_d0 = int(retest_days.apply(lambda days: 0 in days).sum()) if not retest_days.empty else 0
+    retested_after_d0 = int(retest_days.apply(lambda days: any(day > 0 for day in days)).sum()) if not retest_days.empty else 0
+
+    current = _numeric_sort(monitor_table['Current %']) / 100 if 'Current %' in monitor_table else pd.Series(dtype=float)
+    max_pct = _numeric_sort(monitor_table['Max %']) / 100 if 'Max %' in monitor_table else pd.Series(dtype=float)
+    d3_high = _numeric_sort(monitor_table['D3 High %']) / 100 if 'D3 High %' in monitor_table else pd.Series(dtype=float)
+    rating = pd.to_numeric(monitor_table['Rating'], errors='coerce') if 'Rating' in monitor_table else pd.Series(dtype=float)
+
+    overall = [
+        ('Setups', str(int(metrics.get('setup_candidate_count') or total or 0))),
+        ('Active', _count_pct(active, total)),
+        ('Failed D0', _count_pct(failed_d0, total)),
+        ('Failed After D0', _count_pct(failed_after_d0, total)),
+    ]
+    if unresolved:
+        overall.append(('Unresolved', _count_pct(unresolved, total)))
+    median_rating = rating.dropna().median()
+    if not pd.isna(median_rating):
+        overall.append(('Median Rating', _compact_num(median_rating)))
+
+    trigger_quality = [
+        ('PDH Success', _count_pct(int(pdh.eq('success').sum()), total)),
+        ('PDH Fail', _count_pct(int(pdh.eq('failed').sum()), total)),
+        ('PDH Gap', _count_pct(int(pdh.eq('Gap').sum()), total)),
+        ('1m ORH Success', _count_pct(int(one.eq('success').sum()), total)),
+        ('1m ORH Fail', _count_pct(int(one.eq('failed').sum()), total)),
+        ('VWAP Reclaim Success', _count_pct(int(vwap.eq('success').sum()), total)),
+        ('VWAP Reclaim Fail', _count_pct(int(vwap.eq('failed').sum()), total)),
+        ('5m ORH Success', _count_pct(int(five.eq('success').sum()), total)),
+        ('5m ORH Fail', _count_pct(int(five.eq('failed').sum()), total)),
+    ]
+    alt_count = int(trigger.eq('Alt Required').sum())
+    no_trigger_count = int(trigger.eq('No Trigger').sum())
+    if alt_count:
+        trigger_quality.append(('Alt Required', _count_pct(alt_count, total)))
+    if no_trigger_count:
+        trigger_quality.append(('No Trigger', _count_pct(no_trigger_count, total)))
+
+    follow = [
+        ('Median Current %', _compact_pct(current[current > float('-inf')].median() if not current.empty else None)),
+        ('Median Max %', _compact_pct(max_pct[max_pct > float('-inf')].median() if not max_pct.empty else None)),
+        ('Close < BE', _count_pct(close_be_count, total)),
+        ('Retested D0', _count_pct(retested_d0, total)),
+        ('Retested After D0', _count_pct(retested_after_d0, total)),
+    ]
+    d3_values = d3_high[d3_high > float('-inf')]
+    if not d3_values.empty:
+        follow.append(('Median D3 High', _compact_pct(d3_values.median())))
+
+    opening = [
+        ('Closed Above VWAP %', _compact_pct(metrics.get('pct_closed_above_vwap'))),
+        ('Closed Near HOD %', _compact_pct(metrics.get('pct_closed_near_hod'))),
+        ('Median Close Location', _compact_num(metrics.get('median_close_location'))),
+        ('Median Range / ATR14', _compact_num(metrics.get('median_range_vs_atr20'))),
+        ('Median RVOL', _compact_num(metrics.get('median_relative_volume'))),
+        ('High Broke 3D %', _compact_pct(metrics.get('pct_broke_setup_day_high_within_3d'))),
+        ('Low Broke 3D %', _compact_pct(metrics.get('pct_broke_setup_day_low_within_3d'))),
+    ]
+    return [
+        {'title': 'Overall', 'metrics': overall},
+        {'title': 'Trigger Quality', 'metrics': trigger_quality},
+        {'title': 'Follow-Through', 'metrics': follow},
+        {'title': 'Opening / Intraday Character', 'metrics': opening},
+    ]
 
 
 def group_summaries(con, d, field: str):

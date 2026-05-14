@@ -130,6 +130,17 @@ DETAIL_COLUMNS = [
     '1m Follow-Through / ATR14',
 ]
 
+ACTIVE_LIFECYCLE_AUDIT_COLUMNS = [
+    'Ticker',
+    'Setup Date',
+    'Trigger',
+    'Trigger Level',
+    'Reference Low',
+    'Breach Date',
+    'Breach Day Index',
+    'Breach Reason',
+]
+
 STATUS_PRIORITY = {
     'Active': 0,
     'Failed D0': 1,
@@ -386,6 +397,9 @@ def current_status_display(
         return '\u2014'
     if fail_day_number is not None and fail_day_number > 0:
         return f'Failed D{fail_day_number}'
+    close_day_number = _status_day(close_below_be_day)
+    if close_below_be and close_day_number is not None and close_day_number > 0:
+        return f'Failed D{close_day_number}'
     return 'Active'
 
 
@@ -935,7 +949,9 @@ def weak_close_assessment(record: dict) -> dict:
     if trigger_day_status(trigger_type, record.get('fail_day')) != 'Success':
         return {'close_below_be': None, 'close_below_be_day': None}
 
-    close = _num(record.get('close_price'))
+    close = _num(record.get('latest_close'))
+    if close is None:
+        close = _num(record.get('close_price'))
     breakeven = _num(record.get('trigger_level'))
     if breakeven is None:
         breakeven = _num(record.get('base_price'))
@@ -944,7 +960,9 @@ def weak_close_assessment(record: dict) -> dict:
             breakeven = _num(record.get(key))
 
     below_breakeven = close is not None and breakeven is not None and close < breakeven
-    close_below_be_day = 0 if below_breakeven else None
+    close_below_be_day = _status_day(record.get('latest_day')) if below_breakeven else None
+    if close_below_be_day is None and below_breakeven:
+        close_below_be_day = 0
     if close is None or breakeven is None:
         current_pct = _num(record.get('current_pct'))
         if current_pct is None:
@@ -999,6 +1017,52 @@ def _daily_for_ticker(daily_bars: pd.DataFrame, ticker: str, setup_date) -> pd.D
     return bars[bars['trading_date'] >= setup_date].sort_values('trading_date')
 
 
+def daily_follow_through_returns(
+    ticker: str,
+    setup_date,
+    base_price: float | None,
+    setup_close: float | None,
+    daily_bars: pd.DataFrame,
+) -> dict:
+    """Calculate current/max returns from all available daily bars for a setup."""
+    daily = _daily_for_ticker(daily_bars, ticker, pd.to_datetime(setup_date).date())
+    if daily.empty:
+        return {
+            'latest_trading_date': None,
+            'latest_day': None,
+            'latest_close': None,
+            'current_pct': None,
+            'max_pct': None,
+            'max_high': None,
+            'max_high_date': None,
+            'd3_high_pct': None,
+            'current_pct_from_setup_close': None,
+            'max_gain_from_setup_close': None,
+        }
+
+    latest = daily.iloc[-1]
+    latest_close = _num(latest.get('close'))
+    max_high = _num(daily['high'].max())
+    max_high_date = None
+    if max_high is not None:
+        max_idx = pd.to_numeric(daily['high'], errors='coerce').idxmax()
+        max_high_date = daily.loc[max_idx, 'trading_date']
+    d3 = daily.iloc[:4]
+    d3_high = _num(d3['high'].max()) if len(d3) >= 4 else None
+    return {
+        'latest_trading_date': latest['trading_date'],
+        'latest_day': len(daily) - 1,
+        'latest_close': latest_close,
+        'current_pct': _change_pct(latest_close, base_price),
+        'max_pct': _change_pct(max_high, base_price),
+        'max_high': max_high,
+        'max_high_date': max_high_date,
+        'd3_high_pct': _change_pct(d3_high, base_price),
+        'current_pct_from_setup_close': _change_pct(latest_close, setup_close),
+        'max_gain_from_setup_close': _change_pct(max_high, setup_close),
+    }
+
+
 def _prior_day_high_for_ticker(daily_bars: pd.DataFrame, ticker: str, setup_date) -> float | None:
     if daily_bars.empty:
         return None
@@ -1038,6 +1102,110 @@ def fail_day(intraday: pd.DataFrame, daily: pd.DataFrame, trigger_break_time, re
         if _num(row.get('low')) is not None and float(row['low']) < float(reference_low):
             return day_number
     return None
+
+
+def later_lifecycle_failure_day(
+    daily: pd.DataFrame,
+    reference_low: float | None,
+    breakeven_price: float | None = None,
+) -> int | None:
+    if daily.empty:
+        return None
+    after_setup = daily.iloc[1:]
+    for day_number, (_, row) in enumerate(after_setup.iterrows(), start=1):
+        low = _num(row.get('low'))
+        close = _num(row.get('close'))
+        if reference_low is not None and low is not None and float(low) < float(reference_low):
+            return day_number
+        if breakeven_price is not None and close is not None and float(close) < float(breakeven_price):
+            return day_number
+    return None
+
+
+def lifecycle_fail_day(
+    intraday: pd.DataFrame,
+    daily: pd.DataFrame,
+    trigger_break_time,
+    reference_low: float | None,
+    breakeven_price: float | None = None,
+) -> int | None:
+    if reference_low is not None and day0_fail(intraday, trigger_break_time, reference_low):
+        return 0
+    return later_lifecycle_failure_day(daily, reference_low, breakeven_price)
+
+
+def _row_value(row: pd.Series, names: list[str]) -> Any:
+    for name in names:
+        if name in row:
+            return row.get(name)
+    return None
+
+
+def _empty_active_lifecycle_audit() -> pd.DataFrame:
+    return pd.DataFrame(columns=ACTIVE_LIFECYCLE_AUDIT_COLUMNS)
+
+
+def audit_active_lifecycle_violations(rows: pd.DataFrame, daily_bars: pd.DataFrame) -> pd.DataFrame:
+    """Return active rows that already violate the canonical later-failure rule."""
+    if rows is None or rows.empty or daily_bars is None or daily_bars.empty:
+        return _empty_active_lifecycle_audit()
+
+    if 'Current Status' in rows:
+        status = rows['Current Status']
+    elif 'current_status' in rows:
+        status = rows['current_status']
+    else:
+        return _empty_active_lifecycle_audit()
+    active = rows[status.fillna('').astype(str).str.strip().eq('Active')].copy()
+    if active.empty:
+        return _empty_active_lifecycle_audit()
+
+    bars = daily_bars.copy()
+    if 'ticker' not in bars or 'trading_date' not in bars:
+        return _empty_active_lifecycle_audit()
+    bars['ticker'] = bars['ticker'].astype(str)
+    bars['trading_date'] = pd.to_datetime(bars['trading_date'], errors='coerce')
+    bars = bars.dropna(subset=['trading_date']).sort_values(['ticker', 'trading_date'])
+
+    out = []
+    for _, row in active.iterrows():
+        ticker = _blank(_row_value(row, ['Ticker', 'ticker']))
+        setup_date_value = _row_value(row, ['Setup Date', 'watchlist_date', 'setup_date'])
+        setup_date = pd.to_datetime(setup_date_value, errors='coerce')
+        trigger = _blank(_row_value(row, ['Trigger', 'trigger_type']))
+        trigger_level = _num(_row_value(row, ['Trigger Level', 'trigger_level', 'Entry Ref', 'base_price']))
+        reference_low = _num(_row_value(row, ['Reference Low', 'reference_low']))
+        if not ticker or pd.isna(setup_date):
+            continue
+        daily = bars[(bars['ticker'].eq(ticker)) & (bars['trading_date'].dt.date >= setup_date.date())].copy()
+        if daily.empty:
+            continue
+        for day_number, (_, daily_row) in enumerate(daily.iloc[1:].iterrows(), start=1):
+            low = _num(daily_row.get('low'))
+            close = _num(daily_row.get('close'))
+            reason = ''
+            if reference_low is not None and low is not None and float(low) < float(reference_low):
+                reason = 'low below reference low'
+            elif trigger_level is not None and close is not None and float(close) < float(trigger_level):
+                reason = 'close below breakeven'
+            if not reason:
+                continue
+            breach_date = pd.to_datetime(daily_row.get('trading_date'), errors='coerce')
+            out.append({
+                'Ticker': ticker,
+                'Setup Date': setup_date.date().isoformat(),
+                'Trigger': trigger,
+                'Trigger Level': '' if trigger_level is None else f'{trigger_level:.2f}',
+                'Reference Low': '' if reference_low is None else f'{reference_low:.2f}',
+                'Breach Date': '' if pd.isna(breach_date) else breach_date.date().isoformat(),
+                'Breach Day Index': day_number,
+                'Breach Reason': reason,
+            })
+            break
+
+    if not out:
+        return _empty_active_lifecycle_audit()
+    return pd.DataFrame(out, columns=ACTIVE_LIFECYCLE_AUDIT_COLUMNS)
 
 
 def retest_day(intraday: pd.DataFrame, daily: pd.DataFrame, trigger_break_time, trigger_level: float | None) -> int | None:
@@ -1117,11 +1285,12 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
     trigger_level = row.get('trigger_level')
     reference_low = row.get('reference_low')
     setup_close = _num(row.get('close_price'))
+    base_price = trigger_level if trigger_level is not None else setup_close
     preset_fail_day = row.get('framework_fail_day')
     current_fail_day = (
         preset_fail_day
         if row.get('trigger_type') in {'Failed OR Trigger', 'Failed PDH Trigger'}
-        else fail_day(intraday, daily, row.get('trigger_break_time'), reference_low)
+        else lifecycle_fail_day(intraday, daily, row.get('trigger_break_time'), reference_low, base_price)
     )
     current_retest_days, current_retest_dates = retest_events(
         intraday,
@@ -1132,7 +1301,6 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
     )
 
     if daily.empty:
-        base_price = trigger_level if trigger_level is not None else setup_close
         return {
             'latest_trading_date': None,
             'latest_day': None,
@@ -1149,30 +1317,18 @@ def _follow_through(row: dict, daily_bars: pd.DataFrame, intraday_bars: pd.DataF
             'base_price': base_price,
         }
 
-    latest = daily.iloc[-1]
-    latest_close = _num(latest.get('close'))
-    base_price = trigger_level if trigger_level is not None else setup_close
-    max_high = _num(daily['high'].max())
-    d3 = daily.iloc[:4]
-    d3_high = _num(d3['high'].max()) if len(d3) >= 4 else None
+    returns = daily_follow_through_returns(row['ticker'], setup_date, base_price, setup_close, daily_bars)
     current_retest_days, current_retest_dates = retest_events(
         intraday,
         daily,
         row.get('trigger_break_time'),
         trigger_level,
         current_fail_day,
-        latest.get('trading_date'),
+        returns.get('latest_trading_date'),
     )
 
     return {
-        'latest_trading_date': latest['trading_date'],
-        'latest_day': len(daily) - 1,
-        'latest_close': latest_close,
-        'current_pct': _change_pct(latest_close, base_price),
-        'max_pct': _change_pct(max_high, base_price),
-        'd3_high_pct': _change_pct(d3_high, base_price),
-        'current_pct_from_setup_close': _change_pct(latest_close, setup_close),
-        'max_gain_from_setup_close': _change_pct(max_high, setup_close),
+        **returns,
         'fail_day': current_fail_day,
         'retest_day': current_retest_days[0] if current_retest_days else None,
         'retest_days': current_retest_days,
@@ -1441,6 +1597,29 @@ def ensure_manual_metadata_columns(con) -> None:
     con.execute('alter table watchlist_candidates add column if not exists entry_tactic text')
 
 
+def manual_metadata_candidates(con, setup_date) -> pd.DataFrame:
+    ensure_manual_metadata_columns(con)
+    raw = con.execute(
+        """
+        select candidate_id, ticker, setup, entry_tactic, rating
+        from watchlist_candidates
+        where watchlist_date=?
+        order by ticker
+        """,
+        [setup_date],
+    ).df()
+    if raw.empty:
+        return pd.DataFrame(columns=['candidate_id', 'Ticker', 'Setup', 'Entry Tactic', 'Rating'])
+    rating = raw['rating'].apply(lambda v: '' if _num(v) is None else str(int(float(v))) if float(v).is_integer() else str(float(v)))
+    return pd.DataFrame({
+        'candidate_id': raw['candidate_id'],
+        'Ticker': raw['ticker'].astype(str),
+        'Setup': raw['setup'].apply(_blank),
+        'Entry Tactic': raw['entry_tactic'].apply(_blank),
+        'Rating': rating,
+    })
+
+
 def apply_setup_rating_updates(con, original: pd.DataFrame, edited: pd.DataFrame) -> int:
     if original.empty or edited.empty:
         return 0
@@ -1604,6 +1783,8 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         '5m Post-Trigger Stop Breach': raw.get('five_min_post_trigger_stop_breached', blank_series).apply(lambda v: 'Yes' if v is True else ''),
         'Latest Close': raw['latest_close'].apply(_fmt_price),
         'Latest Status Date': raw.get('latest_trading_date', blank_series).apply(lambda v: '' if pd.isna(v) else pd.to_datetime(v).date().isoformat()),
+        'Max High': raw.get('max_high', blank_series).apply(_fmt_price),
+        'Max Date': raw.get('max_high_date', blank_series).apply(lambda v: '' if pd.isna(v) else pd.to_datetime(v).date().isoformat()),
         'Setup Close': raw['close_price'].apply(_fmt_price),
         'Setup High': raw['high_price'].apply(_fmt_price),
         'Setup Low': raw['low_price'].apply(_fmt_price),
@@ -1627,17 +1808,7 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
     return display
 
 
-def rolling_setup_monitor(con, setup_dates: int = 5, perf=None) -> list[dict]:
-    start = perf_counter()
-    dates = [
-        r[0]
-        for r in con.execute(
-            'select distinct watchlist_date from watchlist_candidates where watchlist_date is not null order by watchlist_date desc limit ?',
-            [setup_dates],
-        ).fetchall()
-    ]
-    if perf is not None:
-        perf.add('Rolling Setup Monitor SQL: setup dates', perf_counter() - start)
+def _rolling_setup_monitor_for_dates(con, dates: list, perf=None) -> list[dict]:
     if not dates:
         return []
 
@@ -1776,3 +1947,22 @@ def rolling_setup_monitor(con, setup_dates: int = 5, perf=None) -> list[dict]:
     if perf is not None:
         perf.add('Rolling Setup Monitor dataframe formatting', perf_counter() - start)
     return sections
+
+
+def rolling_setup_monitor_for_date(con, setup_date, perf=None) -> list[dict]:
+    selected = pd.to_datetime(setup_date).date()
+    return _rolling_setup_monitor_for_dates(con, [selected], perf=perf)
+
+
+def rolling_setup_monitor(con, setup_dates: int = 5, perf=None) -> list[dict]:
+    start = perf_counter()
+    dates = [
+        r[0]
+        for r in con.execute(
+            'select distinct watchlist_date from watchlist_candidates where watchlist_date is not null order by watchlist_date desc limit ?',
+            [setup_dates],
+        ).fetchall()
+    ]
+    if perf is not None:
+        perf.add('Rolling Setup Monitor SQL: setup dates', perf_counter() - start)
+    return _rolling_setup_monitor_for_dates(con, dates, perf=perf)
