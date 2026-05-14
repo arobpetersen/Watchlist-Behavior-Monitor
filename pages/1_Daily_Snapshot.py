@@ -1,18 +1,18 @@
 import pandas as pd
 import streamlit as st
+from html import escape
 
 from src.config import get_settings
 from src.dashboard_queries import (
     DAILY_WORKFLOW_COLUMNS,
     daily_snapshot_monitor_table,
-    daily_snapshot_summary_groups,
     dates,
     group_summaries,
-    snapshot_metrics,
     snapshot_table,
 )
 from src.database import get_connection
-from src.market_context import format_market_context_strip, market_context_for_setup_date
+from src.daily_snapshot_read import daily_snapshot_day_read_metrics, daily_snapshot_trigger_read_groups
+from src.market_context import market_context_for_setup_date, market_move_label
 from src.rolling_setup_monitor import (
     apply_setup_rating_updates,
     entry_tactic_dropdown_options,
@@ -20,7 +20,6 @@ from src.rolling_setup_monitor import (
     rating_dropdown_options,
     setup_dropdown_options,
 )
-from src.setup_behavior_overview import metric_cards_html
 from src.view_refresh import DERIVED_REFRESH_MESSAGE, refresh_derived_watchlist_views
 
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
@@ -31,11 +30,110 @@ def _missing(value):
 
 
 def _fmt_pct(value):
-    return '—' if _missing(value) else f'{value * 100:.0f}%'
+    return '-' if _missing(value) else f'{value * 100:.0f}%'
 
 
 def _fmt_num(value):
-    return '—' if _missing(value) else f'{value:.2f}'
+    return '-' if _missing(value) else f'{value:.2f}'
+
+
+def _fmt_whole_pct(value):
+    return '-' if _missing(value) else f'{value * 100:.0f}%'
+
+
+def _fmt_atr_multiple(value):
+    return '-' if _missing(value) else f'{value:.2f}x ATR(14)'
+
+
+def _snapshot_styles():
+    return '''
+<style>
+.snapshot-top-grid { display: grid; grid-template-columns: minmax(280px, 0.9fr) minmax(420px, 1.55fr); gap: 0.6rem; align-items: stretch; margin: 0.35rem 0 0.65rem 0; }
+.snapshot-read-panel { border: 1px solid rgba(250, 250, 250, 0.14); border-radius: 8px; background: rgba(250, 250, 250, 0.045); padding: 0.78rem 0.9rem; }
+.snapshot-market-panel { border-left: 3px solid rgba(96, 165, 250, 0.78); }
+.snapshot-day-panel { background: rgba(250, 250, 250, 0.06); }
+.snapshot-panel-title { color: rgba(250, 250, 250, 0.70); font-size: 0.92rem; font-weight: 850; text-transform: uppercase; margin-bottom: 0.44rem; }
+.snapshot-chip-row, .snapshot-trigger-row { display: flex; flex-wrap: wrap; gap: 0.54rem; }
+.snapshot-chip { display: inline-flex; align-items: baseline; gap: 0.42rem; padding: 0.44rem 0.64rem; border-radius: 7px; border: 1px solid rgba(250, 250, 250, 0.10); background: rgba(250, 250, 250, 0.064); }
+.snapshot-chip span, .snapshot-tile-label { color: rgba(250, 250, 250, 0.62); font-size: 0.82rem; font-weight: 760; }
+.snapshot-chip strong { color: rgba(250, 250, 250, 0.96); font-size: 1.08rem; font-weight: 850; }
+.snapshot-read-secondary { margin-top: 0.52rem; color: rgba(250, 250, 250, 0.74); font-size: 0.98rem; }
+.snapshot-tile-grid { display: grid; grid-template-columns: repeat(4, minmax(112px, 1fr)); gap: 0.55rem; }
+.snapshot-tile, .snapshot-trigger-tile { border: 1px solid rgba(250, 250, 250, 0.12); border-radius: 8px; background: rgba(250, 250, 250, 0.075); padding: 0.58rem 0.68rem; }
+.snapshot-tile-value { color: rgba(250, 250, 250, 0.98); font-size: 1.18rem; font-weight: 880; line-height: 1.18; margin-top: 0.3rem; }
+.snapshot-trigger-panel { margin: 0.55rem 0 0.85rem 0; }
+.snapshot-trigger-tile { flex: 0 1 auto; min-width: 10rem; }
+.snapshot-trigger-tile h4 { margin: 0 0 0.3rem 0; color: rgba(250, 250, 250, 0.94); font-size: 1.02rem; }
+.snapshot-trigger-tile div { color: rgba(250, 250, 250, 0.78); font-size: 0.98rem; }
+@media (max-width: 900px) { .snapshot-top-grid { grid-template-columns: 1fr; } .snapshot-tile-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); } }
+</style>
+'''
+
+
+def _chip(label, value):
+    return f'<span class="snapshot-chip"><span>{escape(str(label))}</span><strong>{escape(str(value))}</strong></span>'
+
+
+def _tile(label, value):
+    return (
+        '<section class="snapshot-tile">'
+        f'<div class="snapshot-tile-label">{escape(str(label))}</div>'
+        f'<div class="snapshot-tile-value">{escape(str(value))}</div>'
+        '</section>'
+    )
+
+
+def _market_context_panel(context):
+    if context is None or not getattr(context, 'available', False):
+        return '''
+<section class="snapshot-read-panel snapshot-market-panel">
+  <div class="snapshot-panel-title">Market Context</div>
+  <div class="snapshot-read-secondary">Market context unavailable for selected setup date.</div>
+</section>
+'''
+    chips = [
+        _chip(context.proxy, _fmt_pct(context.pct_change)),
+        _chip('Move', market_move_label(context.pct_change)),
+        _chip('Character', context.day_type),
+        _chip('Gap', _fmt_pct(context.gap_pct)),
+        _chip('Close Position', _fmt_whole_pct(context.close_location)),
+        _chip('Range', _fmt_atr_multiple(context.range_vs_atr14)),
+    ]
+    return f'''
+<section class="snapshot-read-panel snapshot-market-panel">
+  <div class="snapshot-panel-title">Market Context</div>
+  <div class="snapshot-chip-row">{''.join(chips)}</div>
+  <div class="snapshot-read-secondary">{escape(context.read)}</div>
+</section>
+'''
+
+
+def _day_read_panel(workflow_table):
+    tiles = ''.join(_tile(label, value) for label, value in daily_snapshot_day_read_metrics(workflow_table))
+    return f'''
+<section class="snapshot-read-panel snapshot-day-panel">
+  <div class="snapshot-panel-title">Day Read</div>
+  <div class="snapshot-tile-grid">{tiles}</div>
+</section>
+'''
+
+
+def _trigger_read_panel(workflow_table):
+    groups = daily_snapshot_trigger_read_groups(workflow_table)
+    body = ''.join(
+        '<section class="snapshot-trigger-tile">'
+        f'<h4>{escape(label)}</h4><div>{escape(value)}</div>'
+        '</section>'
+        for label, value in groups
+    )
+    if not body:
+        body = '<div class="snapshot-read-secondary">No notable trigger events.</div>'
+    return f'''
+<section class="snapshot-read-panel snapshot-trigger-panel">
+  <div class="snapshot-panel-title">Trigger Read</div>
+  <div class="snapshot-trigger-row">{body}</div>
+</section>
+'''
 
 
 con = get_connection(str(get_settings().db_path))
@@ -51,15 +149,18 @@ if not all_dates:
     st.info('No data yet. Run python -m src.run_daily')
 else:
     d = st.selectbox('Setup Date', all_dates)
-    market_context = market_context_for_setup_date(con, d)
-    st.caption(f'Market Context: {format_market_context_strip(market_context)}')
-    if market_context.available:
-        st.caption(market_context.read)
-    m = snapshot_metrics(con, d)
     workflow_table = daily_snapshot_monitor_table(con, d, include_candidate_id=True)
     workflow_display = workflow_table[DAILY_WORKFLOW_COLUMNS] if 'candidate_id' in workflow_table else workflow_table
-    summary_groups = daily_snapshot_summary_groups(m, workflow_table)
-    st.markdown(metric_cards_html(summary_groups), unsafe_allow_html=True)
+    market_context = market_context_for_setup_date(con, d)
+    st.markdown(_snapshot_styles(), unsafe_allow_html=True)
+    st.markdown(
+        '<div class="snapshot-top-grid">'
+        + _market_context_panel(market_context)
+        + _day_read_panel(workflow_table)
+        + '</div>'
+        + _trigger_read_panel(workflow_table),
+        unsafe_allow_html=True,
+    )
 
     st.subheader('Setup Candidates')
     st.markdown(format_monitor_table_html(workflow_display), unsafe_allow_html=True)
@@ -142,3 +243,4 @@ else:
     tabs[0].dataframe(group_summaries(con, d, 'rating_bucket'), width='stretch', hide_index=True)
     tabs[1].dataframe(group_summaries(con, d, 'setup'), width='stretch', hide_index=True)
     tabs[2].dataframe(group_summaries(con, d, 'focus'), width='stretch', hide_index=True)
+

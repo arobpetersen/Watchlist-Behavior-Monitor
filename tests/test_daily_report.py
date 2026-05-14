@@ -4,7 +4,6 @@ import pandas as pd
 
 from src.daily_report import (
     build_daily_report_payload,
-    build_llm_report_prompt,
     render_daily_report_markdown,
 )
 from src.setup_behavior_overview import (
@@ -178,76 +177,90 @@ def test_daily_report_markdown_headers_and_no_recommendation_language():
     history = _report_history()
     markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history))).lower()
 
-    for header in ['summary read', 'watchlist pulse', 'trigger failure snapshot', 'progression quality by setup cohort', 'trigger quality', 'names to review', 'portfolio snapshot']:
+    for header in ['summary read', 'market context', 'day read', 'trigger read', 'names to review', 'portfolio snapshot']:
         assert header in markdown
     for forbidden in ['buy', 'sell', 'recommendation']:
         assert forbidden not in markdown
 
 
-def test_daily_report_markdown_renders_watchlist_workflow_sections():
+def test_daily_report_markdown_renders_concise_top_read_sections():
     history = _report_history()
-    markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
+    markdown = render_daily_report_markdown(
+        build_daily_report_payload(
+            history,
+            _overview(history),
+            market_context='QQQ -0.8% | Down Day | Volatile Recovery | Gap -0.7% | Close Position 78% | Range 1.38x ATR(14)',
+        )
+    )
 
-    assert '| Metric | Latest Setup Date | Recent 5 Setup Dates | Prior 5 Setup Dates | Rolling Avg |' in markdown
-    assert '| Setup Cohort | Setups | Reached +5% | Reached +10% | Reached +20% | Retested After D0 |' in markdown
-    assert 'Median Days to Max' not in markdown
-    assert '| Trigger | Window | Sample | Clean Active | Median Max % | Fail Rate | Read |' in markdown
+    assert 'QQQ -0.8% | Down Day | Volatile Recovery | Gap -0.7% | Close Position 78% | Range 1.38x ATR(14)' in markdown
+    assert '| Metric | Read |' in markdown
+    assert '| Setups | 1 |' in markdown
+    assert '| Active | 1 / 100% |' in markdown
+    assert '| D0 Fail | 0 / 0% |' in markdown
+    assert '| Failed After D0 | 0 / 0% |' in markdown
+    assert '| Close < BE | 1 / 100% |' in markdown
+    assert '| Retested | 0 / 0% |' in markdown
+    assert 'Median Current' not in _section(markdown, 'Day Read')
+    assert 'Median Max' not in _section(markdown, 'Day Read')
+    assert '| Trigger | Read |' in markdown
+    assert '| 1m ORH | 1 success |' in markdown
     assert '| Ticker | Review Reason | Evidence | Status |' in markdown
     assert 'Current Progress portfolio: 0 qualifying names. Leaders: -. Median current progress: -.' in markdown
-    assert '| 1m ORH | Recent 5 Setup Dates | 5 | 0 / 5 (0.0%) | 22.0% | 60.0% | Elevated failures |' in markdown
-    assert '## Key Shifts' not in markdown
+    assert '## Watchlist Pulse' not in markdown
+    assert '## Trigger Failure Snapshot' not in markdown
+    assert '## Progression Quality by Setup Cohort' not in markdown
+    assert '## Trigger Quality' not in markdown
 
 
-def test_daily_report_replaces_ambiguous_window_labels_in_rendered_report():
+def test_daily_report_uses_latest_setup_day_language_in_rendered_report():
     history = _report_history()
     markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
 
-    assert 'Latest Setup Date' in markdown
-    assert 'Recent 5 Setup Dates' in markdown
-    assert 'Prior 5 Setup Dates' in markdown
+    assert 'Latest setup date: 2026-05-10' in markdown
+    assert 'D0 Fail' in markdown
+    assert 'Failed After D0' in markdown
     assert '| Metric | Latest | Last 5 | Previous 5 |' not in markdown
-    assert '| Last 5 |' not in markdown
-    assert '| Previous 5 |' not in markdown
+    assert 'Clean Active' not in _section(markdown, 'Summary Read')
 
 
-def test_daily_report_trigger_failure_snapshot_appears_below_watchlist_pulse():
+def test_daily_report_market_context_has_stable_unavailable_message():
     history = _report_history()
     markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
-    snapshot = _section(markdown, 'Trigger Failure Snapshot')
+    market = _section(markdown, 'Market Context')
+    summary = _section(markdown, 'Summary Read')
 
-    assert markdown.index('## Watchlist Pulse') < markdown.index('## Trigger Failure Snapshot') < markdown.index('## Progression Quality by Setup Cohort')
-    assert 'Format: Triggered / Failed / Fail %' in snapshot
-    assert '| Trigger | Latest Setup Date | Recent 5 Setup Dates | Prior 5 Setup Dates | Rolling Avg |' in snapshot
-    assert '| 1m ORH | 1 / 0 / 0% | 5 / 3 / 60% | 5 / 0 / 0% | 10 / 3 / 30% |' in snapshot
-    assert len(_table_body_rows(snapshot)) <= 4
+    assert 'Market context unavailable for latest setup date.' in market
+    assert '- Market context unavailable for latest setup date.' in summary
 
 
-def test_daily_report_trigger_failure_snapshot_zero_attempts_are_compact():
+def test_daily_report_trigger_read_uses_latest_setup_date_groups():
     history = _report_history()
     history.loc[history.index[-1], 'Trigger'] = 'PDH'
+    history.loc[history.index[-1], 'PDH'] = 'success'
+    history.loc[history.index[-1], '1m ORH'] = '-'
 
-    snapshot = build_daily_report_payload(history, _overview(history))['trigger_failure_snapshot']
-    markdown = render_daily_report_markdown({
-        'watchlist_pulse': build_daily_report_payload(history, _overview(history))['watchlist_pulse'],
-        'trigger_failure_snapshot': snapshot,
-        'trigger_quality_rows': [],
-        'notable_name_rows': [],
-        'portfolio_summary': {},
-    })
+    payload = build_daily_report_payload(history, _overview(history))
+    markdown = render_daily_report_markdown(payload)
 
-    section = _section(markdown, 'Trigger Failure Snapshot')
-    assert '| PDH | 1 / 0 / 0% | 1 / 0 / 0% | 0 / - / - | 1 / 0 / 0% |' in section
+    section = _section(markdown, 'Trigger Read')
+    assert '| PDH | 1 success |' in section
+    assert '0 / - / -' not in section
 
 
 def test_daily_report_summary_read_is_capped_and_evidence_based():
     history = _report_history()
-    markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
+    markdown = render_daily_report_markdown(
+        build_daily_report_payload(history, _overview(history), market_context='QQQ +1.1% | Up Day | Trend Up')
+    )
     summary = _section(markdown, 'Summary Read')
     bullets = [line for line in summary.splitlines() if line.startswith('- ')]
 
-    assert 1 <= len(bullets) <= 4
-    assert any('Clean Active' in bullet and 'Recent 5' in bullet and 'Prior 5' in bullet for bullet in bullets)
-    assert any('samples' in bullet and 'failed' in bullet for bullet in bullets)
+    assert len(bullets) == 4
+    assert any('Latest setup date: 2026-05-10' in bullet and 'D0 fail' in bullet for bullet in bullets)
+    assert any('Market context: QQQ +1.1% | Up Day | Trend Up.' in bullet for bullet in bullets)
+    assert any('Trigger read:' in bullet and '1m ORH 1 success' in bullet for bullet in bullets)
+    assert any('Early follow-through:' in bullet and 'Close < BE 1 / 100%' in bullet for bullet in bullets)
     assert 'moved from' not in summary
     assert 'Clean Active is' not in summary
     assert 'setup dates are' not in summary
@@ -256,16 +269,50 @@ def test_daily_report_summary_read_is_capped_and_evidence_based():
     assert 'Progression:' not in summary
 
 
-def test_daily_report_watchlist_pulse_includes_progress_and_hold_quality():
+def test_daily_report_day_read_matches_snapshot_definitions():
     history = _report_history()
-    markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
-    pulse = _section(markdown, 'Watchlist Pulse')
+    failed_d0_status = history.iloc[[-1]].copy()
+    failed_d0_status['Ticker'] = 'D0STATUS'
+    failed_d0_status['Current Status'] = 'Failed D0'
+    failed_d0_status['Trigger Day'] = 'Success'
+    failed_d0_status['Close < BE'] = 'No'
+    failed_d0_status['Retests'] = 'D0'
+    failed_d0_status['D3 High %'] = '14.0%'
+    trigger_fail = history.iloc[[-1]].copy()
+    trigger_fail['Ticker'] = 'TRIGFAIL'
+    trigger_fail['Current Status'] = '-'
+    trigger_fail['Trigger Day'] = 'Fail'
+    trigger_fail['Close < BE'] = 'No'
+    trigger_fail['Retests'] = ''
+    trigger_fail['D3 High %'] = '10.0%'
+    duplicate = history.iloc[[-1]].copy()
+    duplicate['Ticker'] = 'BOTH'
+    duplicate['Current Status'] = 'Failed D0'
+    duplicate['Trigger Day'] = 'Fail'
+    duplicate['Close < BE'] = 'No'
+    duplicate['Retests'] = ''
+    duplicate['D3 High %'] = '20.0%'
+    later = history.iloc[[-1]].copy()
+    later['Ticker'] = 'LATER'
+    later['Current Status'] = 'Failed D2'
+    later['Trigger Day'] = 'Success'
+    later['Close < BE'] = 'Yes'
+    later['Retests'] = 'D1'
+    later['D3 High %'] = '12.0%'
+    history = pd.concat([history, failed_d0_status, trigger_fail, duplicate, later], ignore_index=True)
 
-    assert '| Clean Active | 0/1 (0%) | 0/5 (0%) | 5/5 (100%) | 5/10 (50%) |' in pulse
-    assert '0.0%)' not in pulse
-    assert '| Median Current % | 12.0% | 10.0% | 5.0% | 7.5% |' in pulse
-    assert '| Median Max % | 26.0% | 22.0% | 12.0% | 17.0% |' in pulse
-    assert '| Hold Ratio | - | - | 41.7% (5 samples) | 41.7% (5 samples) |' in pulse
+    markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
+    day_read = _section(markdown, 'Day Read')
+
+    assert '| Setups | 5 |' in day_read
+    assert '| Active | 1 / 20% |' in day_read
+    assert '| D0 Fail | 3 / 60% |' in day_read
+    assert '| Failed After D0 | 1 / 20% |' in day_read
+    assert '| Close < BE | 2 / 40% |' in day_read
+    assert '| Retested | 2 / 40% |' in day_read
+    assert '| Median D3 High | 13.0% |' in day_read
+    assert 'Median Current' not in day_read
+    assert 'Median Max' not in day_read
 
 
 def test_daily_report_rolling_average_uses_latest_20_setup_dates():
@@ -291,31 +338,20 @@ def test_daily_report_rolling_average_uses_latest_20_setup_dates():
     assert payload['trigger_failure_snapshot'][0]['cells']['Rolling Avg']['triggered'] == 20
 
 
-def test_daily_report_progression_quality_includes_threshold_follow_through():
+def test_daily_report_omits_progression_quality_section_from_markdown():
     history = _report_history()
     markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
-    progression = _section(markdown, 'Progression Quality by Setup Cohort')
-    rows = _table_body_rows(progression)
 
-    assert len(rows) == 3
-    assert 'Thresholds use max move; older setup cohorts have had more time to reach levels.' in progression
-    assert '| Recent 5 Setup Dates | 5 | 5 / 5 (100.0%) | 5 / 5 (100.0%) | 4 / 5 (80.0%) | 2 / 5 (40.0%) |' in progression
-    assert 'Median Days to Max' not in progression
+    assert '## Progression Quality by Setup Cohort' not in markdown
+    assert 'Thresholds use max move' not in markdown
 
 
-def test_daily_report_trigger_quality_includes_movement_and_failure_quality():
+def test_daily_report_omits_trigger_quality_section_from_markdown():
     history = _report_history()
     markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
-    trigger_quality = _section(markdown, 'Trigger Quality')
-    rows = _table_body_rows(trigger_quality)
 
-    assert len(rows) <= 5
-    assert 'Small sample' in trigger_quality
-    assert 'Median Max %' in trigger_quality
-    assert 'Fail Rate' in trigger_quality
-    assert rows[0].startswith('| 1m ORH | Recent 5 Setup Dates |')
-    assert 'Elevated failures' in rows[0]
-    assert rows.index(next(row for row in rows if '| Prior 5 Setup Dates |' in row)) < rows.index(next(row for row in rows if '| Latest Setup Date |' in row))
+    assert '## Trigger Quality' not in markdown
+    assert '| Trigger | Window | Sample | Clean Active | Median Max % | Fail Rate | Read |' not in markdown
 
 
 def test_daily_report_names_to_review_caps_at_five_rows_and_portfolio_is_compact():
@@ -472,12 +508,3 @@ def test_daily_report_markdown_omits_raw_metric_dump_and_handles_no_material_shi
     assert 'Failed D0:' not in markdown
     assert 'Last 5 active rate' not in markdown
 
-
-def test_llm_prompt_uses_structured_summary_not_raw_row_dump():
-    history = _report_history()
-    prompt = build_llm_report_prompt(build_daily_report_payload(history, _overview(history)))
-
-    assert 'STRUCTURED_SUMMARY' in prompt
-    assert 'Do not make trade recommendations' in prompt
-    assert 'candidate_id' not in prompt
-    assert 'current_pct_raw' not in prompt

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import pandas as pd
 
+from src.daily_snapshot_read import (
+    daily_snapshot_day_read_metrics,
+    daily_snapshot_status_counts,
+    daily_snapshot_trigger_read_groups,
+)
 from src.setup_behavior_overview import (
     trigger_event_shift_highlights,
     trigger_outcome_comparison,
@@ -24,6 +28,7 @@ REPORT_WINDOW_LABELS = {
     'Last 5': 'Recent 5 Setup Dates',
     'Previous 5': 'Prior 5 Setup Dates',
 }
+MARKET_CONTEXT_UNAVAILABLE = 'Market context unavailable for latest setup date.'
 
 
 def _display(value: Any) -> str:
@@ -121,6 +126,12 @@ def _failed_after_d0_mask(rows: pd.DataFrame) -> pd.Series:
     return status.str.match(r'Failed D[1-9]\d*', na=False)
 
 
+def _failed_d0_mask(rows: pd.DataFrame) -> pd.Series:
+    status = _status_text(rows)
+    trigger_day = _trigger_day_text(rows)
+    return status.eq('Failed D0') | trigger_day.eq('Fail')
+
+
 def _latest_setup_date_summary(history: pd.DataFrame) -> dict:
     if history.empty or 'Setup Date' not in history:
         return {'latest_setup_date': None, 'setup_count': 0}
@@ -130,15 +141,15 @@ def _latest_setup_date_summary(history: pd.DataFrame) -> dict:
         return {'latest_setup_date': None, 'setup_count': 0}
     rows = history[dates.dt.date.eq(latest.date())].copy()
     total = len(rows)
-    trigger_day = _trigger_day_text(rows)
     status = _status_text(rows)
+    failed_d0 = _failed_d0_mask(rows)
     return {
         'latest_setup_date': latest.date().isoformat(),
         'setup_count': total,
         'active': _count_payload(int(status.eq('Active').sum()), total),
-        'failed_d0': _count_payload(int(trigger_day.eq('Fail').sum()), total),
+        'failed_d0': _count_payload(int(failed_d0.sum()), total),
         'failed_after_d0': _count_payload(int(_failed_after_d0_mask(rows).sum()), total),
-        'unresolved': _count_payload(int(trigger_day.eq('Unresolved').sum()), total),
+        'unresolved': _count_payload(int(_trigger_day_text(rows).eq('Unresolved').sum()), total),
         'close_below_be': _count_payload(int(_close_be_mask(rows).sum()), total),
         'retested_d0_only': _count_payload(int(_retested_d0_only_mask(rows).sum()), total),
         'retested_after_d0': _count_payload(int(_retested_after_d0_mask(rows).sum()), total),
@@ -162,11 +173,11 @@ def _recent_window_summary(history: pd.DataFrame, overview: dict) -> dict:
         rows = _window_rows(history, overview, label)
         total = len(rows)
         status = _status_text(rows)
-        trigger_day = _trigger_day_text(rows)
+        failed_d0 = _failed_d0_mask(rows)
         summaries[label] = {
             'setup_count': total,
             'active_pct': _pct(int(status.eq('Active').sum()), total),
-            'failed_d0_pct': _pct(int(trigger_day.eq('Fail').sum()), total),
+            'failed_d0_pct': _pct(int(failed_d0.sum()), total),
             'failed_after_d0_pct': _pct(int(_failed_after_d0_mask(rows).sum()), total),
             'median_current': None if rows.empty else _numeric_series(rows, 'current_pct_raw').median(),
             'median_max': None if rows.empty else _numeric_series(rows, 'max_pct_raw').median(),
@@ -194,12 +205,13 @@ def _snapshot(rows: pd.DataFrame) -> dict:
     total = len(rows)
     status = _status_text(rows)
     trigger_day = _trigger_day_text(rows)
+    failed_d0 = _failed_d0_mask(rows)
     return {
         'setup_count': total,
         'active_count': int(status.eq('Active').sum()),
         'active_pct': _pct(int(status.eq('Active').sum()), total),
-        'failed_d0_count': int(trigger_day.eq('Fail').sum()),
-        'failed_d0_pct': _pct(int(trigger_day.eq('Fail').sum()), total),
+        'failed_d0_count': int(failed_d0.sum()),
+        'failed_d0_pct': _pct(int(failed_d0.sum()), total),
         'failed_after_d0_count': int(_failed_after_d0_mask(rows).sum()),
         'failed_after_d0_pct': _pct(int(_failed_after_d0_mask(rows).sum()), total),
         'unresolved_count': int(trigger_day.eq('Unresolved').sum()),
@@ -275,7 +287,7 @@ def _window_quality_summary(rows: pd.DataFrame) -> dict:
     max_values = _numeric_series(rows, 'max_pct_raw').dropna()
     eligible_max = int(max_values.shape[0])
     clean_active = _clean_active_mask(rows)
-    failed_d0 = _trigger_day_text(rows).eq('Fail')
+    failed_d0 = _failed_d0_mask(rows)
     close_be = _close_be_mask(rows)
     retested_after = _retested_after_d0_mask(rows)
     return {
@@ -1006,7 +1018,26 @@ def _material_observations(history: pd.DataFrame, overview: dict, comparisons: d
     return filtered
 
 
-def build_daily_report_payload(history: pd.DataFrame, overview: dict) -> dict:
+def _latest_day_read(history: pd.DataFrame) -> dict:
+    latest_rows = _rows_for_latest_n_setup_dates(history, 1)
+    return {
+        'metrics': [
+            {'label': label, 'value': value}
+            for label, value in daily_snapshot_day_read_metrics(latest_rows)
+        ],
+        'counts': daily_snapshot_status_counts(latest_rows),
+    }
+
+
+def _latest_trigger_read(history: pd.DataFrame) -> list[dict]:
+    latest_rows = _rows_for_latest_n_setup_dates(history, 1)
+    return [
+        {'trigger': trigger, 'read': read}
+        for trigger, read in daily_snapshot_trigger_read_groups(latest_rows)
+    ]
+
+
+def build_daily_report_payload(history: pd.DataFrame, overview: dict, market_context: str | None = None) -> dict:
     history = history.copy() if history is not None else pd.DataFrame()
     overview = overview or {}
     comparisons = _comparison_payload(history, overview)
@@ -1022,6 +1053,9 @@ def build_daily_report_payload(history: pd.DataFrame, overview: dict) -> dict:
         'trigger_summary': _trigger_summary(overview),
         'notable_tickers': notable_tickers,
         'trigger_read_rows': _trigger_read_rows(history),
+        'latest_trigger_read': _latest_trigger_read(history),
+        'day_read': _latest_day_read(history),
+        'market_context': market_context or MARKET_CONTEXT_UNAVAILABLE,
         'trigger_failure_snapshot': _trigger_failure_snapshot(history, overview),
         'trigger_quality_rows': _trigger_quality_rows(history, overview),
         'notable_name_rows': _notable_name_rows(notable_tickers, portfolio, prepared_rows),
@@ -1348,64 +1382,88 @@ def _portfolio_snapshot_line(portfolio: dict) -> str:
     )
 
 
+def _day_read_metric_value(day_read: dict, label: str) -> str:
+    for item in day_read.get('metrics', []):
+        if item.get('label') == label:
+            return str(item.get('value', '-'))
+    return '-'
+
+
+def _market_context_text(report_payload: dict) -> str:
+    text = str(report_payload.get('market_context') or '').strip()
+    return text or MARKET_CONTEXT_UNAVAILABLE
+
+
+def _day_read_table(day_read: dict) -> str:
+    preferred = [
+        'Setups',
+        'Active',
+        'D0 Fail',
+        'Failed After D0',
+        'Close < BE',
+        'Retested',
+        'Median D3 High',
+    ]
+    by_label = {
+        str(item.get('label')): str(item.get('value', '-'))
+        for item in day_read.get('metrics', [])
+    }
+    rows = [[label, by_label[label]] for label in preferred if label in by_label]
+    return _markdown_table(['Metric', 'Read'], rows)
+
+
+def _latest_trigger_read_table(rows: list[dict]) -> str:
+    return _markdown_table(
+        ['Trigger', 'Read'],
+        [[row.get('trigger', '-'), row.get('read', '-')] for row in rows],
+    )
+
+
 def _summary_read_lines(report_payload: dict) -> list[str]:
-    pulse = report_payload.get('watchlist_pulse', {})
-    trigger_rows = report_payload.get('trigger_quality_rows', [])
-    lines: list[str] = []
+    latest = report_payload.get('latest_setup_date_summary', {})
+    day_read = report_payload.get('day_read', {})
+    trigger_rows = report_payload.get('latest_trigger_read', [])
+    total = int(latest.get('setup_count', 0) or 0)
+    latest_date = latest.get('latest_setup_date') or '-'
 
-    last5 = pulse.get('Last 5', {})
-    previous5 = pulse.get('Previous 5', {})
-    latest = pulse.get('Latest', {})
-
-    if last5 and previous5:
-        clean_delta = _delta(last5.get('clean_active_pct'), previous5.get('clean_active_pct'))
-        if clean_delta is not None:
-            label = 'cleaner' if clean_delta > 0 else 'weaker' if clean_delta < 0 else 'stable'
-            lines.append(
-                f"- Recent 5 are {label}: Clean Active "
-                f"{_compact_count_rate_text(last5.get('clean_active_count', 0), last5.get('setup_count', 0))} vs "
-                f"Prior 5 at {_compact_count_rate_text(previous5.get('clean_active_count', 0), previous5.get('setup_count', 0))}."
-            )
-
-    thresholds = last5.get('thresholds', {}) if last5 else {}
-    if thresholds:
-        ten = thresholds.get('10', {})
-        twenty = thresholds.get('20', {})
-        lines.append(
-            f"- Follow-through is broad: {_compact_count_rate_text(ten.get('count', 0), ten.get('total', 0))} reached +10%, with "
-            f"{_compact_count_rate_text(twenty.get('count', 0), twenty.get('total', 0))} reaching +20% in Recent 5."
+    lines = [
+        (
+            f"- Latest setup date: {latest_date}: {total} setups, "
+            f"{_day_read_metric_value(day_read, 'Active')} active, "
+            f"{_day_read_metric_value(day_read, 'D0 Fail')} D0 fail, "
+            f"{_day_read_metric_value(day_read, 'Failed After D0')} failed after D0."
         )
+    ]
 
-    hold = last5.get('hold_ratio', {}) if last5 else {}
-    if hold.get('value') is not None and len(lines) < 4:
-        lines.append(
-            f"- Hold quality is strong among clean active names: {_hold_ratio_text(hold)} retained from max progress in Recent 5 setup dates."
-        )
-    elif latest.get('hold_ratio', {}).get('value') is not None and len(lines) < 4:
-        lines.append(
-            f"- Hold quality is visible in the latest batch: {_hold_ratio_text(latest.get('hold_ratio', {}))} retained from max progress."
-        )
+    market_context = _market_context_text(report_payload)
+    if market_context != MARKET_CONTEXT_UNAVAILABLE:
+        lines.append(f"- Market context: {market_context}.")
+    else:
+        lines.append(f"- {MARKET_CONTEXT_UNAVAILABLE}")
 
-    if trigger_rows and len(lines) < 4:
-        row = trigger_rows[0]
-        sample = int(row.get('sample', 0) or 0)
-        small = ' Small sample.' if sample < 3 else ''
-        lines.append(
-            f"- {row.get('trigger', '-')} is the weak trigger: {sample} samples, "
-            f"{int(row.get('failed', 0) or 0)} failed ({_whole_pct_text(row.get('fail_rate'))}), "
-            f"{row.get('clean_active', 0)} clean active, "
-            f"{_return_text(row.get('median_max'))} median max in {_window_display(row.get('window', '-'))}.{small}"
+    if trigger_rows:
+        trigger_text = '; '.join(
+            f"{row.get('trigger', '-')} {row.get('read', '-')}"
+            for row in trigger_rows[:3]
         )
+        lines.append(f"- Trigger read: {trigger_text}.")
+
+    follow_parts = [
+        f"Retested {_day_read_metric_value(day_read, 'Retested')}",
+        f"Close < BE {_day_read_metric_value(day_read, 'Close < BE')}",
+    ]
+    d3 = _day_read_metric_value(day_read, 'Median D3 High')
+    if d3 != '-':
+        follow_parts.append(f"Median D3 High {d3}")
+    lines.append(f"- Early follow-through: {'; '.join(follow_parts)}.")
 
     return lines[:4]
 
 
 def render_daily_report_markdown(report_payload: dict) -> str:
     no_data = 'No reportable watchlist behavior data is available.'
-    pulse_table = _watchlist_pulse_table(report_payload.get('watchlist_pulse', {}))
-    trigger_failure_table = _trigger_failure_snapshot_table(report_payload.get('trigger_failure_snapshot', []))
-    progression_table = _progression_quality_table(report_payload.get('watchlist_pulse', {}))
-    trigger_table = _trigger_quality_table(report_payload.get('trigger_quality_rows', []))
+    day_read_table = _day_read_table(report_payload.get('day_read', {}))
+    trigger_read_table = _latest_trigger_read_table(report_payload.get('latest_trigger_read', []))
     names_table = _notable_names_table(report_payload.get('notable_name_rows', []))
     summary = _summary_read_lines(report_payload)
 
@@ -1415,21 +1473,14 @@ def render_daily_report_markdown(report_payload: dict) -> str:
         '## Summary Read',
         *(summary or [no_data]),
         '',
-        '## Watchlist Pulse',
-        pulse_table or no_data,
+        '## Market Context',
+        _market_context_text(report_payload),
         '',
-        '## Trigger Failure Snapshot',
-        'Format: Triggered / Failed / Fail %',
+        '## Day Read',
+        day_read_table or no_data,
         '',
-        trigger_failure_table or no_data,
-        '',
-        '## Progression Quality by Setup Cohort',
-        'Thresholds use max move; older setup cohorts have had more time to reach levels.',
-        '',
-        progression_table or no_data,
-        '',
-        '## Trigger Quality',
-        trigger_table or no_data,
+        '## Trigger Read',
+        trigger_read_table or no_data,
         '',
         '## Names to Review',
         names_table or no_data,
@@ -1439,14 +1490,3 @@ def render_daily_report_markdown(report_payload: dict) -> str:
         '',
     ]
     return '\n'.join(lines)
-
-
-def build_llm_report_prompt(report_payload: dict) -> str:
-    structured_summary = json.dumps(report_payload, indent=2, default=str)
-    return (
-        'Summarize the following structured Watchlist Behavior Monitor metrics only from the provided data.\n'
-        'Do not make trade recommendations. Do not infer from raw database rows. Use the Summary Read, '
-        'Watchlist Pulse, Trigger Failure Snapshot, Progression Quality by Setup Cohort, Trigger Quality, Names to Review, and Portfolio Snapshot fields when present. Call out notable '
-        'shifts, data limitations, and keep the report concise.\n\n'
-        f'STRUCTURED_SUMMARY:\n{structured_summary}'
-    )

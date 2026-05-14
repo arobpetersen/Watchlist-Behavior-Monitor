@@ -3,7 +3,8 @@ import streamlit as st
 from src.config import get_settings
 from src.data_health_indicator import data_health_cache_token, load_data_health_summary, render_data_health_indicator
 from src.database import get_connection
-from src.daily_report import build_daily_report_payload, build_llm_report_prompt, render_daily_report_markdown
+from src.daily_report import build_daily_report_payload, render_daily_report_markdown
+from src.market_context import format_market_context_strip, market_context_for_setup_date
 from src.monitor_history_loader import MONITOR_HISTORY_CACHE_VERSION, load_cached_monitor_history
 from src.performance import PerfTimer, render_perf_debug
 from src.setup_behavior_overview import (
@@ -116,10 +117,11 @@ else:
     with st.expander('Daily Intelligence Report', expanded=False):
         report_payload = build_daily_report_payload(history, overview)
         latest_date = report_payload.get('latest_setup_date_summary', {}).get('latest_setup_date') or '-'
+        if latest_date != '-':
+            report_con = get_connection(db_path)
+            report_payload['market_context'] = format_market_context_strip(market_context_for_setup_date(report_con, latest_date))
         st.caption(f'Latest setup date: {latest_date}')
         st.markdown(render_daily_report_markdown(report_payload))
-        with st.expander('LLM-ready structured prompt', expanded=False):
-            st.code(build_llm_report_prompt(report_payload), language='text')
 
     st.subheader('Selected Window Snapshot')
     with perf.measure('snapshot display preparation'):

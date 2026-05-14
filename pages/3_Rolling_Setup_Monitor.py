@@ -4,7 +4,7 @@ from html import escape
 from src.config import get_settings
 from src.data_health_indicator import data_health_cache_token
 from src.database import get_connection
-from src.market_context import market_context_for_setup_dates
+from src.market_context import market_context_for_setup_dates, market_move_label
 from src.or_trigger_audit import audit_for_candidate, setup_dates, tickers_for_setup_date
 from src.performance import PerfTimer, render_perf_debug
 from src.rolling_setup_monitor import (
@@ -50,6 +50,24 @@ def _fmt_num(value) -> str:
         if value is None or value != value:
             return '-'
         return f'{float(value):.2f}'
+    except (TypeError, ValueError):
+        return '-'
+
+
+def _fmt_whole_pct(value) -> str:
+    try:
+        if value is None or value != value:
+            return '-'
+        return f'{float(value) * 100:.0f}%'
+    except (TypeError, ValueError):
+        return '-'
+
+
+def _fmt_atr_multiple(value) -> str:
+    try:
+        if value is None or value != value:
+            return '-'
+        return f'{float(value):.2f}x ATR(14)'
     except (TypeError, ValueError):
         return '-'
 
@@ -101,10 +119,11 @@ def _market_context_banner(context) -> str:
     day_type = getattr(context, 'day_type', 'Mixed')
     chips = [
         _metric_chip(context.proxy, _fmt_pct(getattr(context, 'pct_change', None))),
+        _metric_chip('Move', market_move_label(getattr(context, 'pct_change', None))),
         _metric_chip('Day Type', day_type, 'day-type-chip'),
         _metric_chip('Gap', _fmt_pct(getattr(context, 'gap_pct', None))),
-        _metric_chip('Close Loc', _fmt_num(getattr(context, 'close_location', None))),
-        _metric_chip('Range/ATR', _fmt_num(getattr(context, 'range_vs_atr14', None))),
+        _metric_chip('Close Position', _fmt_whole_pct(getattr(context, 'close_location', None))),
+        _metric_chip('Range', _fmt_atr_multiple(getattr(context, 'range_vs_atr14', None))),
     ]
     secondary = getattr(context, 'read', '')
     secondary_html = f'<div class="read-banner-secondary">{escape(secondary)}</div>' if secondary else ''

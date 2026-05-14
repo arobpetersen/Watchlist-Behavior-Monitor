@@ -21,7 +21,6 @@ VISIBLE_COLUMNS = [
     'Setup Date',
     'Trigger',
     'Current Status',
-    'Entry Ref',
     'Current %',
     'Max %',
     'Close < BE',
@@ -41,13 +40,8 @@ ACTIVE_VISIBLE_COLUMNS = [
     'Max High',
     'Days Since Setup',
     'Retested',
-<<<<<<< HEAD
     'Setup',
     'Entry Tactic',
-=======
-    'Breakeven / D1 Eligible',
-    'Setup',
->>>>>>> 1c39cb9bf82910106d939b283705eb1ffba7f71a
     'Notes',
 ]
 PORTFOLIO_VISIBLE_COLUMNS = [
@@ -90,10 +84,7 @@ AUDIT_COLUMNS = [
     'Retest Days Raw',
     'Retest Dates Raw',
     'Max Date',
-    'Max High',
     'D3 High',
-    'Setup Current %',
-    'Setup Max %',
     'Setup',
     'Entry Tactic',
     'Rating',
@@ -153,7 +144,6 @@ def _numeric(rows: pd.DataFrame, names: list[str]) -> pd.Series:
     return numeric.where(~text.str.contains('%', regex=False), numeric / 100)
 
 
-<<<<<<< HEAD
 def _plain_numeric(rows: pd.DataFrame, names: list[str]) -> pd.Series:
     return pd.to_numeric(_first_existing(rows, names), errors='coerce')
 
@@ -164,7 +154,6 @@ def _coalesced_numeric(rows: pd.DataFrame, names: list[str]) -> pd.Series:
         if name in rows:
             values = values.combine_first(pd.to_numeric(rows[name], errors='coerce'))
     return values
-=======
 def _change_from_reference(values: pd.Series, reference: pd.Series) -> pd.Series:
     return ((values - reference) / reference).where(reference.notna() & reference.ne(0) & values.notna())
 
@@ -184,7 +173,6 @@ def _entry_reference(rows: pd.DataFrame) -> pd.Series:
     entry_ref = entry_ref.where(~trigger.eq('VWAP Reclaim') | vwap_trigger.isna(), vwap_trigger)
     no_entry_trigger = trigger.isin({'', '-', '—', 'No Trigger'})
     return entry_ref.mask(no_entry_trigger | entry_ref.isna() | entry_ref.le(0))
->>>>>>> 1c39cb9bf82910106d939b283705eb1ffba7f71a
 
 
 def _fmt_pct(value: Any) -> str:
@@ -303,24 +291,18 @@ def _missing_notes(rows: pd.DataFrame) -> pd.Series:
         missing = []
         if pd.isna(row.get('_entry_ref')):
             missing.append('Entry Ref')
-<<<<<<< HEAD
         if pd.isna(row.get('_latest_close_num')):
             missing.append('Latest Close')
         if pd.isna(row.get('_post_trigger_max_high')):
             missing.append('post-trigger Max High')
-=======
->>>>>>> 1c39cb9bf82910106d939b283705eb1ffba7f71a
         if pd.isna(row.get('_current_sort')):
             missing.append('Current % from entry')
         if pd.isna(row.get('_max_sort')):
             missing.append('Max % from entry')
-<<<<<<< HEAD
-=======
         if _display(row.get('Latest Close')) == '-':
             missing.append('Latest Close')
         if _display(row.get('Max High')) == '-':
             missing.append('Max High')
->>>>>>> 1c39cb9bf82910106d939b283705eb1ffba7f71a
         notes.append('Missing: ' + ', '.join(missing) if missing else '-')
     return pd.Series(notes, index=rows.index)
 
@@ -545,7 +527,6 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
     rows = resolve_display_triggers(rows.copy())
     rows['Setup Date'] = pd.to_datetime(rows['Setup Date'])
     rows['_setup_date_display'] = _format_setup_date(rows['Setup Date'])
-<<<<<<< HEAD
     rows['_setup_current_sort'] = _numeric(rows, ['current_pct_raw', 'Current %'])
     rows['_setup_max_sort'] = _numeric(rows, ['max_pct_raw', 'Max %'])
     rows['_whole_window_max_high'] = _coalesced_numeric(rows, ['Max High', 'max_high'])
@@ -583,21 +564,6 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
     rows['_ticker_current_to_global'] = _date_equal(ticker_latest_dates, global_latest_dates)
     rows['_status_current'] = rows['_status_matches_ticker_latest'] & rows['_ticker_current_to_global']
     rows['_rating_sort'] = _rating_numeric(rows)
-=======
-    rows['_setup_current_sort'] = _numeric(rows, ['current_pct_raw', 'Current %', 'Current vs Setup Close'])
-    rows['_setup_max_sort'] = _numeric(rows, ['max_pct_raw', 'Max %', 'Max Gain from Setup Close'])
-    rows['_entry_ref'] = _entry_reference(rows)
-    latest_close = _numeric(rows, ['Latest Close', 'latest_close'])
-    max_high = _numeric(rows, ['Max High', 'max_high'])
-    rows['_current_sort'] = _numeric(rows, ['current_from_entry_pct_raw', 'Current From Entry %']).combine_first(
-        _change_from_reference(latest_close, rows['_entry_ref'])
-    )
-    rows['_max_sort'] = _numeric(rows, ['max_from_entry_pct_raw', 'Max From Entry %']).combine_first(
-        _change_from_reference(max_high, rows['_entry_ref'])
-    )
-    rows['_days_sort'] = _days_since(rows['Setup Date'], pd.to_datetime(latest_date) if latest_date is not None else None)
-    rows['_rating_sort'] = _numeric(rows, ['Rating', 'rating'])
->>>>>>> 1c39cb9bf82910106d939b283705eb1ffba7f71a
 
     rows['Ticker'] = _first_existing(rows, ['Ticker', 'ticker']).apply(_display)
     rows['Trigger'] = _first_existing(rows, ['Trigger', 'trigger_type']).apply(_display)
@@ -605,27 +571,19 @@ def _mapped_top_mover_rows(rows: pd.DataFrame, latest_date: pd.Timestamp | str |
     rows['Entry Ref'] = rows['_entry_ref'].apply(_fmt_price)
     rows['Current %'] = rows['_current_sort'].apply(_fmt_pct)
     rows['Max %'] = rows['_max_sort'].apply(_fmt_pct)
-<<<<<<< HEAD
-    rows['Max High'] = rows['_display_max_high'].apply(_fmt_price)
-    rows['Close < BE'] = _first_existing(rows, ['Close < BE', 'close_below_be'], '-').apply(_display)
-=======
     rows['Setup Current %'] = rows['_setup_current_sort'].apply(_fmt_pct)
     rows['Setup Max %'] = rows['_setup_max_sort'].apply(_fmt_pct)
-    rows['Max High'] = max_high.apply(_fmt_price)
->>>>>>> 1c39cb9bf82910106d939b283705eb1ffba7f71a
+    rows['Max High'] = rows['_display_max_high'].apply(_fmt_price)
+    rows['Close < BE'] = _first_existing(rows, ['Close < BE', 'close_below_be'], '-').apply(_display)
     rows['Days Since Setup'] = rows['_days_sort'].apply(lambda v: '-' if pd.isna(v) else int(v))
     rows['Retests'] = _first_existing(rows, ['Retests', 'Retested', 'Retest', 'Retest Day', 'retest_day']).apply(_display)
     rows['Retested'] = rows['Retests']
     rows['Breakeven / D1 Eligible'] = _breakeven_or_d1(rows).apply(_display)
     rows['Notes'] = _first_existing(rows, ['Notes', 'notes']).apply(_display)
     rows['Setup'] = _first_existing(rows, ['Setup', 'setup']).apply(_display)
-<<<<<<< HEAD
     rows['Entry Tactic'] = _first_existing(rows, ['Entry Tactic', 'entry_tactic']).apply(_display)
     rows['Rating'] = _first_existing(rows, ['Rating', 'rating']).apply(_display)
     rows['Rating Normalized'] = rows['_rating_sort'].apply(_rating_display)
-=======
-    rows['Rating'] = _first_existing(rows, ['Rating', 'rating']).apply(_display)
->>>>>>> 1c39cb9bf82910106d939b283705eb1ffba7f71a
     rows['Setup Date'] = rows['_setup_date_display']
     rows['Active Table Exclusion Reason'] = _active_exclusion_reasons(rows)
     rows['Portfolio Exclusion Reason'] = _portfolio_exclusion_reasons(rows)

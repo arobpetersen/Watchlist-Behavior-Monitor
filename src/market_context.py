@@ -49,6 +49,28 @@ def _fmt_num(value: float | None) -> str:
     return '-' if value is None or pd.isna(value) else f'{value:.2f}'
 
 
+def _fmt_whole_pct(value: float | None) -> str:
+    return '-' if value is None or pd.isna(value) else f'{value * 100:.0f}%'
+
+
+def _fmt_atr_multiple(value: float | None) -> str:
+    return '-' if value is None or pd.isna(value) else f'{value:.2f}x ATR(14)'
+
+
+def market_move_label(pct_change: float | None) -> str:
+    if pct_change is None or pd.isna(pct_change):
+        return 'Flat / Mixed'
+    if pct_change >= 0.0150:
+        return 'Strong Up Day'
+    if pct_change >= 0.0050:
+        return 'Up Day'
+    if pct_change <= -0.0150:
+        return 'Strong Down Day'
+    if pct_change <= -0.0050:
+        return 'Down Day'
+    return 'Flat / Mixed'
+
+
 def _close_area(close_location: float | None) -> str:
     if close_location is None or pd.isna(close_location):
         return 'range unknown'
@@ -83,25 +105,33 @@ def classify_market_day(
     if pct_change is None or gap_pct is None or close_location is None or range_pct is None:
         return 'Mixed'
 
+    volatile = range_vs_atr14 is not None and not pd.isna(range_vs_atr14) and range_vs_atr14 >= 1.20
+    recovery = close_location >= 0.70 and (pct_change <= 0 or gap_pct <= -0.0050)
+    fade = close_location <= 0.30 and (pct_change >= 0 or gap_pct >= 0.0050)
+    if volatile and recovery:
+        return 'Volatile Recovery'
+    if recovery:
+        return 'Recovery'
+    if volatile and fade:
+        return 'Volatile Fade'
+    if fade:
+        return 'Fade'
     if pct_change >= 0.0075 and close_location >= 0.70:
         return 'Trend Up'
     if pct_change <= -0.0075 and close_location <= 0.30:
         return 'Trend Down'
-    if gap_pct >= 0.0050 and pct_change <= 0.0025 and close_location <= 0.45:
-        return 'Gap Up Faded'
-    if gap_pct <= -0.0050 and pct_change >= -0.0025 and close_location >= 0.55:
-        return 'Gap Down Recovered'
+    if volatile and 0.35 <= close_location <= 0.65:
+        return 'Volatile Chop'
     if range_vs_atr14 is not None and not pd.isna(range_vs_atr14):
-        if range_vs_atr14 >= 1.20 and 0.35 <= close_location <= 0.65:
-            return 'Choppy'
+        pass
     elif range_pct >= 0.0150 and 0.35 <= close_location <= 0.65:
-        return 'Choppy'
+        return 'Volatile Chop'
     if abs(pct_change) < 0.0040:
         if range_vs_atr14 is not None and not pd.isna(range_vs_atr14):
             if range_vs_atr14 < 0.80:
-                return 'Quiet / Inside'
+                return 'Quiet'
         elif range_pct < 0.0090:
-            return 'Quiet / Inside'
+            return 'Quiet'
     return 'Mixed'
 
 
@@ -110,13 +140,21 @@ def market_context_read(day_type: str, pct_change: float | None, close_location:
         return f'QQQ {_fmt_pct(pct_change)}, closed near highs'
     if day_type == 'Trend Down':
         return f'QQQ {_fmt_pct(pct_change)}, closed near lows'
-    if day_type == 'Gap Up Faded':
+    if day_type == 'Volatile Recovery':
+        return 'Wide range, strong recovery close'
+    if day_type == 'Recovery':
+        return 'Recovery close after pressure'
+    if day_type == 'Volatile Fade':
+        return 'Wide range, weak fade close'
+    if day_type == 'Fade':
+        return 'Fade into weak close'
+    if day_type in {'Gap Up Fade', 'Gap Up Faded'}:
         return 'Gap up faded; QQQ closed mid/lower range'
-    if day_type == 'Gap Down Recovered':
+    if day_type in {'Gap Down Reversal', 'Gap Down Recovered'}:
         return 'Gap down recovered; QQQ closed mid/upper range'
-    if day_type == 'Choppy':
+    if day_type in {'Volatile Chop', 'Choppy'}:
         return 'Wide range, mid-range close'
-    if day_type == 'Quiet / Inside':
+    if day_type in {'Quiet', 'Quiet / Inside'}:
         return 'Quiet index session'
     if day_type == 'Unavailable':
         return UNAVAILABLE_TEXT
@@ -145,7 +183,7 @@ def calculate_market_context_from_daily_bars(daily_bars: pd.DataFrame, setup_dat
     if idx <= 0:
         return MarketContext(available=False, setup_date=setup_date_text, proxy=proxy)
 
-    prior = rows.iloc[:idx].tail(14).copy()
+    prior = rows.iloc[:idx].copy()
     bar = rows.loc[idx]
     previous_close = _safe_float(rows.loc[idx - 1, 'close'])
     open_price = _safe_float(bar.get('open'))
@@ -157,7 +195,7 @@ def calculate_market_context_from_daily_bars(daily_bars: pd.DataFrame, setup_dat
 
     day_range = high - low
     close_location = _safe_div(close - low, day_range)
-    atr14 = None if prior.empty else _safe_float(_true_range(prior).mean())
+    atr14 = None if prior.empty else _safe_float(_true_range(prior).tail(14).mean())
     range_vs_atr14 = _safe_div(day_range, atr14)
     pct_change = _safe_div(close - previous_close, previous_close)
     gap_pct = _safe_div(open_price - previous_close, previous_close)
@@ -215,11 +253,11 @@ def market_context_for_setup_dates(con, setup_dates: list[str], proxy: str = MAR
 def format_market_context_strip(context: MarketContext) -> str:
     if not context.available:
         return UNAVAILABLE_TEXT
-    range_atr = _fmt_num(context.range_vs_atr14)
     return (
         f'{context.proxy} {_fmt_pct(context.pct_change)} | '
+        f'{market_move_label(context.pct_change)} | '
+        f'{context.day_type} | '
         f'Gap {_fmt_pct(context.gap_pct)} | '
-        f'Close Loc {_fmt_num(context.close_location)} | '
-        f'Range/ATR {range_atr} | '
-        f'{context.day_type}'
+        f'Close Position {_fmt_whole_pct(context.close_location)} | '
+        f'Range {_fmt_atr_multiple(context.range_vs_atr14)}'
     )
