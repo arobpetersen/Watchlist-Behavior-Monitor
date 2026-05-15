@@ -1,4 +1,5 @@
 import streamlit as st
+from html import escape
 
 from src.config import get_settings
 from src.data_health_indicator import data_health_cache_token, load_data_health_summary, render_data_health_indicator
@@ -16,41 +17,122 @@ from src.view_refresh import DERIVED_REFRESH_MESSAGE, refresh_derived_watchlist_
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
+def _setup_performance_styles() -> str:
+    return '''
+<style>
+.setup-perf-controls {
+  border: 1px solid rgba(250, 250, 250, 0.10);
+  border-radius: 8px;
+  background: rgba(250, 250, 250, 0.035);
+  padding: 0.65rem 0.75rem 0.35rem 0.75rem;
+  margin: 0.45rem 0 0.75rem 0;
+}
+.setup-perf-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.62rem;
+  margin: 0.45rem 0 0.85rem 0;
+}
+.setup-perf-card {
+  border: 1px solid rgba(250, 250, 250, 0.12);
+  border-radius: 8px;
+  background: rgba(250, 250, 250, 0.055);
+  padding: 0.74rem 0.82rem;
+  min-height: 5.7rem;
+}
+.setup-perf-card-label {
+  color: rgba(250, 250, 250, 0.62);
+  font-size: 0.82rem;
+  font-weight: 780;
+  text-transform: uppercase;
+  margin-bottom: 0.34rem;
+}
+.setup-perf-card-value {
+  color: rgba(250, 250, 250, 0.98);
+  font-size: 1.18rem;
+  font-weight: 870;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+}
+.setup-perf-card-detail {
+  color: rgba(250, 250, 250, 0.68);
+  font-size: 0.9rem;
+  line-height: 1.25;
+  margin-top: 0.44rem;
+}
+.setup-perf-section-caption {
+  color: rgba(250, 250, 250, 0.66);
+  margin: -0.3rem 0 0.55rem 0;
+}
+</style>
+'''
+
+
+def _card_lookup(cards, metric: str) -> dict:
+    if cards is None or cards.empty:
+        return {'Value': '-', 'Detail': '-'}
+    match = cards[cards['Metric'].eq(metric)]
+    if match.empty:
+        return {'Value': '-', 'Detail': '-'}
+    return match.iloc[0].to_dict()
+
+
+def _setup_type_count(summary) -> str:
+    if summary is None or summary.empty or 'Setup' not in summary:
+        return '0'
+    return str(int(summary['Setup'].ne('Unclassified').sum()))
+
+
+def _setup_perf_card(label: str, value: str, detail: str) -> str:
+    return (
+        '<section class="setup-perf-card">'
+        f'<div class="setup-perf-card-label">{escape(str(label))}</div>'
+        f'<div class="setup-perf-card-value">{escape(str(value))}</div>'
+        f'<div class="setup-perf-card-detail">{escape(str(detail))}</div>'
+        '</section>'
+    )
+
+
+def _setup_perf_cards_html(cards, summary) -> str:
+    total = _card_lookup(cards, 'Total Classified Setups')
+    most_common = _card_lookup(cards, 'Most Common Setup')
+    highest_failure = _card_lookup(cards, 'Highest Failure Setup')
+    best_median = _card_lookup(cards, 'Best Median Max % Setup')
+    unclassified = _card_lookup(cards, 'Unclassified Count')
+    items = [
+        _setup_perf_card('Classified Setups', total.get('Value', '-'), total.get('Detail', '-')),
+        _setup_perf_card('Setup Types', _setup_type_count(summary), 'classified setup groups'),
+        _setup_perf_card('Most Common', most_common.get('Value', '-'), most_common.get('Detail', '-')),
+        _setup_perf_card('Highest Failure', highest_failure.get('Value', '-'), highest_failure.get('Detail', '-')),
+        _setup_perf_card('Best Median Max', best_median.get('Value', '-'), best_median.get('Detail', '-')),
+        _setup_perf_card('Unclassified', unclassified.get('Value', '-'), unclassified.get('Detail', '-')),
+    ]
+    return f'<div class="setup-perf-card-grid">{"".join(items)}</div>'
+
+
 perf = PerfTimer('Setup Performance')
 db_path = str(get_settings().db_path)
 
 st.title('Setup Performance')
-st.caption('Concise setup-level read of manually logged Setup values using canonical Rolling Setup Monitor rows.')
-st.caption('No status, lifecycle, Current %, Max %, or metadata-save logic is recalculated here.')
+st.caption('Setup-level read of manually logged setup values using canonical monitor rows.')
+st.markdown(_setup_performance_styles(), unsafe_allow_html=True)
 
-if st.button('Refresh derived views from database', key='setup_performance_refresh_derived'):
+cache_token = data_health_cache_token(db_path)
+
+control_refresh_col, control_note_col = st.columns([0.32, 0.68])
+if control_refresh_col.button('Refresh derived views from database', key='setup_performance_refresh_derived'):
     refresh_derived_watchlist_views()
     st.session_state['derived_views_refreshed'] = True
     st.rerun()
+control_note_col.caption('Refreshes cached monitor/setup-performance views after database or metadata changes.')
 if st.session_state.pop('derived_views_refreshed', False):
     st.success(DERIVED_REFRESH_MESSAGE)
 
 with perf.measure('Data Health load'):
-    health_summary = load_data_health_summary(db_path, data_health_cache_token(db_path))
+    health_summary = load_data_health_summary(db_path, cache_token)
 render_data_health_indicator(health_summary)
 
-with st.expander('Definitions / Logic', expanded=False):
-    st.markdown(
-        """
-- **Count**: candidate rows in the filtered Rolling Setup Monitor history.
-- **Active**: Current Status equals Active.
-- **Failed D0**: Current Status equals Failed D0.
-- **Failed After D0**: Current Status is Failed D1 or later.
-- **Failure %**: Failed D0 plus Failed After D0 divided by Count.
-- **Close < BE %**: rows where Close < BE is Yes/true.
-- **Retested D0 / Retested After D0**: parsed from Retests / Retest Days Raw.
-- **Current %, Max %, D3 High %**: existing monitor values, using raw monitor percent fields when present.
-- **Rating Avg**: numeric ratings only; blank ratings are ignored.
-- **Sample**: Small sample under 5, Developing from 5 to 14, Useful sample at 15 or more.
-        """
-    )
-
-history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{data_health_cache_token(db_path)}'
+history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{cache_token}'
 with perf.measure('shared monitor_history load'):
     history, history_timings = load_cached_monitor_history(db_path, history_cache_token)
 perf.extend(history_timings, prefix='monitor_history detail: ')
@@ -58,32 +140,30 @@ perf.extend(history_timings, prefix='monitor_history detail: ')
 if history.empty:
     st.info('No setup candidates yet. Process Back-Watch files to populate setup performance history.')
 else:
+    st.markdown('<div class="setup-perf-controls">', unsafe_allow_html=True)
     filter_cols = st.columns(4)
-    with filter_cols[0]:
-        setup_window = st.selectbox(
-            'Setup date window',
-            ['Last 5 setup dates', 'Last 10 setup dates', 'Last 20 setup dates', 'All'],
-            index=1,
-            key='setup_performance_window',
-        )
-    with filter_cols[1]:
-        rating_filter = st.selectbox(
-            'Rating filter',
-            ['All', '4-5 only', '3+ only'],
-            key='setup_performance_rating',
-        )
-    with filter_cols[2]:
-        status_filter = st.selectbox(
-            'Current Status filter',
-            ['All', 'Active only', 'Failed only'],
-            key='setup_performance_status',
-        )
-    with filter_cols[3]:
-        sort_by = st.selectbox(
-            'Sort setup table',
-            ['Count', 'Failure %', 'Median Max %'],
-            key='setup_performance_sort',
-        )
+    setup_window = filter_cols[0].selectbox(
+        'Setup date window',
+        ['Last 5 setup dates', 'Last 10 setup dates', 'Last 20 setup dates', 'All'],
+        index=1,
+        key='setup_performance_window',
+    )
+    rating_filter = filter_cols[1].selectbox(
+        'Rating filter',
+        ['All', '4-5 only', '3+ only'],
+        key='setup_performance_rating',
+    )
+    status_filter = filter_cols[2].selectbox(
+        'Current Status filter',
+        ['All', 'Active only', 'Failed only'],
+        key='setup_performance_status',
+    )
+    sort_by = filter_cols[3].selectbox(
+        'Sort setup table',
+        ['Count', 'Failure %', 'Median Max %'],
+        key='setup_performance_sort',
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
 
     with perf.measure('setup performance aggregation'):
         filtered = filter_setup_performance_rows(
@@ -99,18 +179,43 @@ else:
     if summary.empty:
         st.info('No rows match the selected setup performance filters.')
     else:
-        card_cols = st.columns(len(cards))
-        for column, (_, card) in zip(card_cols, cards.iterrows()):
-            with column:
-                st.metric(card['Metric'], card['Value'], help=card['Detail'])
-                st.caption(card['Detail'])
+        st.markdown(_setup_perf_cards_html(cards, summary), unsafe_allow_html=True)
 
         st.subheader('Setup Summary')
-        st.dataframe(summary, width='stretch', hide_index=True)
-        st.caption('Blank or null Setup values are grouped as Unclassified. Highest/best cards ignore samples under 5 unless no setup has enough sample.')
+        st.markdown(
+            '<div class="setup-perf-section-caption">Blank/null Setup values are grouped as Unclassified. '
+            'Highest/best cards ignore samples under 5 unless no setup has enough sample.</div>',
+            unsafe_allow_html=True,
+        )
+        st.dataframe(
+            summary,
+            width='stretch',
+            hide_index=True,
+            column_config={
+                'Setup': st.column_config.TextColumn('Setup', width='large'),
+                'Sample': st.column_config.TextColumn('Sample', width='medium'),
+                'Latest Setup Date': st.column_config.TextColumn('Latest Setup Date', width='medium'),
+            },
+        )
 
         with st.expander('Setup x Entry Tactic', expanded=False):
             st.dataframe(tactic_summary, width='stretch', hide_index=True)
             st.caption('Entry Tactic blanks are grouped as Unclassified.')
+
+    with st.expander('Definitions / Logic', expanded=False):
+        st.markdown(
+            """
+- **Count**: candidate rows in the filtered Rolling Setup Monitor history.
+- **Active**: Current Status equals Active.
+- **Failed D0**: Current Status equals Failed D0. This setup-level table uses lifecycle status only; day-level D0 Fail also includes Trigger Day Fail.
+- **Failed After D0**: Current Status is Failed D1 or later.
+- **Failure %**: Failed D0 plus Failed After D0 divided by Count.
+- **Close < BE %**: rows where Close < BE is Yes/true.
+- **Retested D0 / Retested After D0**: parsed from Retests / Retest Days Raw.
+- **Current %, Max %, D3 High %**: existing monitor values, using raw monitor percent fields when present.
+- **Rating Avg**: numeric ratings only; blank ratings are ignored.
+- **Sample**: Small sample under 5, Developing from 5 to 14, Useful sample at 15 or more.
+            """
+        )
 
 render_perf_debug(st, perf)

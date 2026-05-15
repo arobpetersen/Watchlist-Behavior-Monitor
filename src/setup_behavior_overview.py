@@ -1171,6 +1171,13 @@ TRIGGER_EVENT_MAIN_COLUMNS = [
     'Later Failed',
     'Median Max',
 ]
+TRIGGER_FAILURE_TREND_COLUMNS = ['Trigger', 'Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
+TRIGGER_FAILURE_TREND_WINDOW_LABELS = {
+    'Last 5 Setup Dates': 'Last 5',
+    'Previous 5 Setup Dates': 'Previous 5',
+    'Last 10 Setup Dates': 'Last 10',
+    'Last 20 Setup Dates': 'Last 20',
+}
 TRIGGER_EVENT_WINDOW_ORDER = [
     'Last 5 Setup Dates',
     'Previous 5 Setup Dates',
@@ -1350,6 +1357,67 @@ def trigger_event_main_tables(trigger_outcomes: pd.DataFrame) -> dict[str, pd.Da
     return tables
 
 
+def _failure_trend_cell(failed: int, triggered: int) -> str:
+    if int(triggered) <= 0:
+        return '0 / 0 / —'
+    pct = round((int(failed) / int(triggered)) * 100)
+    return f'{int(failed)} / {int(triggered)} / {pct}%'
+
+
+def _failure_trend_read(last_failed: int, last_triggered: int, previous_failed: int, previous_triggered: int) -> str:
+    if int(last_triggered) == 0:
+        return 'No recent sample'
+    if int(last_triggered) < 3:
+        return 'Small sample'
+    last_rate = int(last_failed) / int(last_triggered)
+    if last_failed == 0:
+        return 'Clean recent'
+    if int(previous_triggered) < 3:
+        return 'Stable'
+    previous_rate = int(previous_failed) / int(previous_triggered)
+    delta = (last_rate - previous_rate) * 100
+    if delta <= -20:
+        return 'Improved recent'
+    if delta >= 20:
+        return 'Worse recent'
+    return 'Stable'
+
+
+def trigger_failure_trend_matrix(trigger_outcomes: pd.DataFrame | None) -> pd.DataFrame:
+    if trigger_outcomes is None or trigger_outcomes.empty:
+        return pd.DataFrame(columns=TRIGGER_FAILURE_TREND_COLUMNS)
+
+    indexed = trigger_outcomes.set_index(['Window', 'Trigger'])
+    rows = []
+    display_order = ['PDH', '1m ORH', 'VWAP Reclaim', '5m ORH', 'Alt Required']
+    for trigger_name in display_order:
+        cells = {}
+        any_triggered = False
+        counts_by_window = {}
+        for window_label in TRIGGER_EVENT_WINDOW_ORDER:
+            key = (window_label, trigger_name)
+            if key in indexed.index:
+                row = indexed.loc[key]
+                failed = int(row.get('Failed', 0) or 0)
+                triggered = int(row.get('Triggered', 0) or 0)
+            else:
+                failed = 0
+                triggered = 0
+            any_triggered = any_triggered or triggered > 0
+            counts_by_window[window_label] = (failed, triggered)
+            cells[TRIGGER_FAILURE_TREND_WINDOW_LABELS[window_label]] = _failure_trend_cell(failed, triggered)
+        if not any_triggered and trigger_name == 'Alt Required':
+            continue
+        last_failed, last_triggered = counts_by_window['Last 5 Setup Dates']
+        previous_failed, previous_triggered = counts_by_window['Previous 5 Setup Dates']
+        rows.append({
+            'Trigger': trigger_name,
+            **cells,
+            'Read': _failure_trend_read(last_failed, last_triggered, previous_failed, previous_triggered),
+        })
+    return pd.DataFrame(rows, columns=TRIGGER_FAILURE_TREND_COLUMNS)
+
+
 def _percent_point_value(value: Any) -> float | None:
     if value is None:
         return None
@@ -1519,6 +1587,7 @@ def setup_behavior_overview(con, history: pd.DataFrame | None = None, perf=None)
             'trigger_outcome_comparison': pd.DataFrame(columns=TRIGGER_COMPARISON_COLUMNS),
             'trigger_outcome_by_window': {},
             'trigger_event_main_by_window': {},
+            'trigger_failure_trend': pd.DataFrame(columns=TRIGGER_FAILURE_TREND_COLUMNS),
             'trigger_event_shift_highlights': {},
             'trigger_quality': {},
             'details': {},
@@ -1572,6 +1641,7 @@ def setup_behavior_overview(con, history: pd.DataFrame | None = None, perf=None)
         'trigger_outcome_comparison': trigger_outcomes,
         'trigger_outcome_by_window': trigger_outcome_by_window_tables(trigger_outcomes),
         'trigger_event_main_by_window': trigger_event_main_tables(trigger_outcomes),
+        'trigger_failure_trend': trigger_failure_trend_matrix(trigger_outcomes),
         'trigger_event_shift_highlights': trigger_event_shift_highlights(trigger_outcomes),
         'trigger_quality': {label: trigger_quality_table(history_by_window[label]) for label in summary_by_window},
         'details': details,

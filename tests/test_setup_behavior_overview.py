@@ -32,6 +32,7 @@ from src.setup_behavior_overview import (
     snapshot_cards_html,
     setup_behavior_overview,
     trigger_event_highlight_styles,
+    trigger_failure_trend_matrix,
     summarize_window,
     trigger_event_shift_highlights,
     trigger_outcome_by_window_tables,
@@ -1064,6 +1065,58 @@ def test_trigger_event_main_tables_use_compact_count_percent_columns():
     assert 'Later Failed %' not in last_10.columns
 
 
+def test_trigger_failure_trend_matrix_uses_triggered_denominator_and_windows():
+    comparison = pd.DataFrame([
+        {'Trigger': 'PDH', 'Window': 'Last 5 Setup Dates', 'Triggered': 3, 'Failed': 1},
+        {'Trigger': 'PDH', 'Window': 'Previous 5 Setup Dates', 'Triggered': 6, 'Failed': 3},
+        {'Trigger': 'PDH', 'Window': 'Last 10 Setup Dates', 'Triggered': 9, 'Failed': 4},
+        {'Trigger': 'PDH', 'Window': 'Last 20 Setup Dates', 'Triggered': 15, 'Failed': 6},
+        {'Trigger': '1m ORH', 'Window': 'Last 5 Setup Dates', 'Triggered': 4, 'Failed': 2},
+        {'Trigger': '1m ORH', 'Window': 'Previous 5 Setup Dates', 'Triggered': 5, 'Failed': 1},
+        {'Trigger': '1m ORH', 'Window': 'Last 10 Setup Dates', 'Triggered': 9, 'Failed': 3},
+        {'Trigger': '1m ORH', 'Window': 'Last 20 Setup Dates', 'Triggered': 18, 'Failed': 5},
+        {'Trigger': 'VWAP Reclaim', 'Window': 'Last 5 Setup Dates', 'Triggered': 3, 'Failed': 0},
+        {'Trigger': 'VWAP Reclaim', 'Window': 'Previous 5 Setup Dates', 'Triggered': 3, 'Failed': 1},
+        {'Trigger': 'VWAP Reclaim', 'Window': 'Last 10 Setup Dates', 'Triggered': 5, 'Failed': 1},
+        {'Trigger': 'VWAP Reclaim', 'Window': 'Last 20 Setup Dates', 'Triggered': 8, 'Failed': 2},
+        {'Trigger': '5m ORH', 'Window': 'Last 5 Setup Dates', 'Triggered': 0, 'Failed': 0},
+        {'Trigger': '5m ORH', 'Window': 'Previous 5 Setup Dates', 'Triggered': 2, 'Failed': 0},
+        {'Trigger': '5m ORH', 'Window': 'Last 10 Setup Dates', 'Triggered': 2, 'Failed': 0},
+        {'Trigger': '5m ORH', 'Window': 'Last 20 Setup Dates', 'Triggered': 6, 'Failed': 2},
+    ])
+
+    trend = trigger_failure_trend_matrix(comparison).set_index('Trigger')
+
+    assert trend.columns.tolist() == ['Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
+    assert trend.loc['PDH', 'Last 5'] == '1 / 3 / 33%'
+    assert trend.loc['PDH', 'Previous 5'] == '3 / 6 / 50%'
+    assert trend.loc['PDH', 'Read'] == 'Stable'
+    assert trend.loc['1m ORH', 'Read'] == 'Worse recent'
+    assert trend.loc['VWAP Reclaim', 'Read'] == 'Clean recent'
+    assert trend.loc['5m ORH', 'Last 5'] == '0 / 0 / —'
+    assert trend.loc['5m ORH', 'Read'] == 'No recent sample'
+    assert 'Alt Required' not in trend.index
+
+
+def test_trigger_failure_trend_matrix_reads_improved_stable_and_small_sample():
+    comparison = pd.DataFrame([
+        {'Trigger': 'PDH', 'Window': 'Last 5 Setup Dates', 'Triggered': 3, 'Failed': 1},
+        {'Trigger': 'PDH', 'Window': 'Previous 5 Setup Dates', 'Triggered': 3, 'Failed': 2},
+        {'Trigger': '1m ORH', 'Window': 'Last 5 Setup Dates', 'Triggered': 2, 'Failed': 0},
+        {'Trigger': '1m ORH', 'Window': 'Previous 5 Setup Dates', 'Triggered': 4, 'Failed': 2},
+        {'Trigger': 'VWAP Reclaim', 'Window': 'Last 5 Setup Dates', 'Triggered': 3, 'Failed': 1},
+        {'Trigger': 'VWAP Reclaim', 'Window': 'Previous 5 Setup Dates', 'Triggered': 2, 'Failed': 1},
+        {'Trigger': 'Alt Required', 'Window': 'Last 5 Setup Dates', 'Triggered': 1, 'Failed': 1},
+    ])
+
+    trend = trigger_failure_trend_matrix(comparison).set_index('Trigger')
+
+    assert trend.loc['PDH', 'Read'] == 'Improved recent'
+    assert trend.loc['1m ORH', 'Read'] == 'Small sample'
+    assert trend.loc['VWAP Reclaim', 'Read'] == 'Stable'
+    assert trend.loc['Alt Required', 'Read'] == 'Small sample'
+
+
 def _shift_row(
     window: str,
     trigger: str,
@@ -1905,6 +1958,7 @@ def test_setup_behavior_overview_handles_zero_setup_dates():
     assert out['trigger_outcome_comparison'].empty
     assert out['trigger_outcome_by_window'] == {}
     assert out['trigger_event_main_by_window'] == {}
+    assert out['trigger_failure_trend'].empty
     assert out['trigger_event_shift_highlights'] == {}
     assert out['details'] == {}
     assert out['windows'] == []

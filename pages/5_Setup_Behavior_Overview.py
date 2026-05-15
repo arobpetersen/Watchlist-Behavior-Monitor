@@ -15,6 +15,7 @@ from src.setup_behavior_overview import (
     metric_cards_html,
     setup_behavior_overview,
     style_trigger_event_table,
+    trigger_failure_trend_matrix,
     trigger_event_shift_highlights,
     trigger_event_main_tables,
 )
@@ -49,6 +50,10 @@ def ensure_overview_display_tables(overview: dict) -> dict:
             }
     if 'trigger_event_main_by_window' not in overview:
         overview['trigger_event_main_by_window'] = trigger_event_main_tables(
+            overview.get('trigger_outcome_comparison')
+        )
+    if 'trigger_failure_trend' not in overview:
+        overview['trigger_failure_trend'] = trigger_failure_trend_matrix(
             overview.get('trigger_outcome_comparison')
         )
     if 'trigger_event_shift_highlights' not in overview:
@@ -135,6 +140,10 @@ else:
         'Currently Active and Later Failed are measured among setups where that trigger succeeded. Richer path detail '
         'remains in Supporting Selected-Window Stats.'
     )
+
+    st.subheader('Trigger Failure Trend')
+    st.caption('Cells show failed / triggered / fail%. Failure rate uses triggered events only, not all eligible or setup rows.')
+    st.dataframe(overview['trigger_failure_trend'], width='stretch', hide_index=True)
 
     st.subheader('Trigger Event Outcomes Across Windows')
     shift_highlights = overview.get('trigger_event_shift_highlights', {})
