@@ -7,6 +7,7 @@ from src.monitor_history_loader import MONITOR_HISTORY_CACHE_VERSION, load_cache
 from src.performance import PerfTimer, render_perf_debug
 from src.setup_performance import (
     build_setup_entry_tactic_summary,
+    build_setup_failure_trend,
     build_setup_summary,
     filter_setup_performance_rows,
     setup_performance_cards,
@@ -77,12 +78,6 @@ def _card_lookup(cards, metric: str) -> dict:
     return match.iloc[0].to_dict()
 
 
-def _setup_type_count(summary) -> str:
-    if summary is None or summary.empty or 'Setup' not in summary:
-        return '0'
-    return str(int(summary['Setup'].ne('Unclassified').sum()))
-
-
 def _setup_perf_card(label: str, value: str, detail: str) -> str:
     return (
         '<section class="setup-perf-card">'
@@ -95,16 +90,17 @@ def _setup_perf_card(label: str, value: str, detail: str) -> str:
 
 def _setup_perf_cards_html(cards, summary) -> str:
     total = _card_lookup(cards, 'Total Classified Setups')
-    most_common = _card_lookup(cards, 'Most Common Setup')
+    setup_types = _card_lookup(cards, 'Setup Types')
+    highest_active = _card_lookup(cards, 'Highest Active Rate')
+    lowest_failure = _card_lookup(cards, 'Lowest Failure Setup')
     highest_failure = _card_lookup(cards, 'Highest Failure Setup')
-    best_median = _card_lookup(cards, 'Best Median Max % Setup')
     unclassified = _card_lookup(cards, 'Unclassified Count')
     items = [
         _setup_perf_card('Classified Setups', total.get('Value', '-'), total.get('Detail', '-')),
-        _setup_perf_card('Setup Types', _setup_type_count(summary), 'classified setup groups'),
-        _setup_perf_card('Most Common', most_common.get('Value', '-'), most_common.get('Detail', '-')),
+        _setup_perf_card('Setup Types', setup_types.get('Value', '-'), setup_types.get('Detail', '-')),
+        _setup_perf_card('Highest Active Rate', highest_active.get('Value', '-'), highest_active.get('Detail', '-')),
+        _setup_perf_card('Lowest Failure', lowest_failure.get('Value', '-'), lowest_failure.get('Detail', '-')),
         _setup_perf_card('Highest Failure', highest_failure.get('Value', '-'), highest_failure.get('Detail', '-')),
-        _setup_perf_card('Best Median Max', best_median.get('Value', '-'), best_median.get('Detail', '-')),
         _setup_perf_card('Unclassified', unclassified.get('Value', '-'), unclassified.get('Detail', '-')),
     ]
     return f'<div class="setup-perf-card-grid">{"".join(items)}</div>'
@@ -174,12 +170,26 @@ else:
         )
         summary = build_setup_summary(filtered, sort_by=sort_by)
         tactic_summary = build_setup_entry_tactic_summary(filtered)
+        trend = build_setup_failure_trend(filtered)
         cards = setup_performance_cards(summary)
 
     if summary.empty:
         st.info('No rows match the selected setup performance filters.')
     else:
         st.markdown(_setup_perf_cards_html(cards, summary), unsafe_allow_html=True)
+
+        st.subheader('Setup Failure Trend')
+        st.markdown(
+            '<div class="setup-perf-section-caption">Cells show Failure % (failed/setup rows). '
+            'Failure = D0 Fail + Failed After D0.</div>',
+            unsafe_allow_html=True,
+        )
+        st.dataframe(
+            trend,
+            width='stretch',
+            hide_index=True,
+            column_config={'Setup': st.column_config.TextColumn('Setup', width='large')},
+        )
 
         st.subheader('Setup Summary')
         st.markdown(
@@ -207,9 +217,9 @@ else:
             """
 - **Count**: candidate rows in the filtered Rolling Setup Monitor history.
 - **Active**: Current Status equals Active.
-- **Failed D0**: Current Status equals Failed D0. This setup-level table uses lifecycle status only; day-level D0 Fail also includes Trigger Day Fail.
+- **D0 Fail**: Trigger Day equals Fail or Current Status equals Failed D0, counted once per row.
 - **Failed After D0**: Current Status is Failed D1 or later.
-- **Failure %**: Failed D0 plus Failed After D0 divided by Count.
+- **Failure %**: D0 Fail plus Failed After D0 divided by Count.
 - **Close < BE %**: rows where Close < BE is Yes/true.
 - **Retested D0 / Retested After D0**: parsed from Retests / Retest Days Raw.
 - **Current %, Max %, D3 High %**: existing monitor values, using raw monitor percent fields when present.

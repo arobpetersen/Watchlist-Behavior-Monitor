@@ -1088,12 +1088,12 @@ def test_trigger_failure_trend_matrix_uses_triggered_denominator_and_windows():
     trend = trigger_failure_trend_matrix(comparison).set_index('Trigger')
 
     assert trend.columns.tolist() == ['Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
-    assert trend.loc['PDH', 'Last 5'] == '1 / 3 / 33%'
-    assert trend.loc['PDH', 'Previous 5'] == '3 / 6 / 50%'
+    assert trend.loc['PDH', 'Last 5'] == '33% (1/3)'
+    assert trend.loc['PDH', 'Previous 5'] == '50% (3/6)'
     assert trend.loc['PDH', 'Read'] == 'Stable'
     assert trend.loc['1m ORH', 'Read'] == 'Worse recent'
     assert trend.loc['VWAP Reclaim', 'Read'] == 'Clean recent'
-    assert trend.loc['5m ORH', 'Last 5'] == '0 / 0 / —'
+    assert trend.loc['5m ORH', 'Last 5'] == '—'
     assert trend.loc['5m ORH', 'Read'] == 'No recent sample'
     assert 'Alt Required' not in trend.index
 

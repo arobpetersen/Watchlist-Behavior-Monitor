@@ -1359,9 +1359,9 @@ def trigger_event_main_tables(trigger_outcomes: pd.DataFrame) -> dict[str, pd.Da
 
 def _failure_trend_cell(failed: int, triggered: int) -> str:
     if int(triggered) <= 0:
-        return '0 / 0 / —'
+        return '—'
     pct = round((int(failed) / int(triggered)) * 100)
-    return f'{int(failed)} / {int(triggered)} / {pct}%'
+    return f'{pct}% ({int(failed)}/{int(triggered)})'
 
 
 def _failure_trend_read(last_failed: int, last_triggered: int, previous_failed: int, previous_triggered: int) -> str:

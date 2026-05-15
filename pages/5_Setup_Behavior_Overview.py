@@ -142,7 +142,7 @@ else:
     )
 
     st.subheader('Trigger Failure Trend')
-    st.caption('Cells show failed / triggered / fail%. Failure rate uses triggered events only, not all eligible or setup rows.')
+    st.caption('Cells show Failure % (failed/triggered attempts).')
     st.dataframe(overview['trigger_failure_trend'], width='stretch', hide_index=True)
 
     st.subheader('Trigger Event Outcomes Across Windows')
