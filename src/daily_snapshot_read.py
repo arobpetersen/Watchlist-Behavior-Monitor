@@ -11,6 +11,28 @@ def _series(rows: pd.DataFrame, column: str) -> pd.Series:
     return rows[column].fillna('').astype(str).str.strip()
 
 
+def _row_series(rows: pd.DataFrame, column: str) -> pd.Series:
+    if rows is None or rows.empty:
+        return pd.Series(dtype=str)
+    if column not in rows:
+        return pd.Series('', index=rows.index, dtype=str)
+    return rows[column].fillna('').astype(str).str.strip()
+
+
+def trigger_other_bucket_counts(rows: pd.DataFrame) -> dict[str, int]:
+    """Classify each row into one Trigger Read Other bucket at most."""
+    trigger = _row_series(rows, 'Trigger')
+    trigger_day = _row_series(rows, 'Trigger Day')
+    alt_required = trigger.eq('Alt Required')
+    unresolved = ~alt_required & trigger_day.eq('Unresolved')
+    no_trigger = ~alt_required & ~unresolved & trigger.eq('No Trigger')
+    return {
+        'Alt Required': int(alt_required.sum()),
+        'Unresolved': int(unresolved.sum()),
+        'No Trigger': int(no_trigger.sum()),
+    }
+
+
 def _count_rate(count: int, total: int) -> str:
     pct = 0 if total <= 0 else round((int(count) / int(total)) * 100)
     return f'{int(count)} / {pct}%'
@@ -67,45 +89,70 @@ def daily_snapshot_day_read_metrics(rows: pd.DataFrame) -> list[tuple[str, str]]
     return metrics
 
 
-def _trigger_group(label: str, metrics: list[tuple[str, int]]) -> tuple[str, str] | None:
-    filtered = [(metric, int(count)) for metric, count in metrics if int(count) != 0]
+def _attempt_rate(success: int, failed: int) -> str | None:
+    attempts = int(success) + int(failed)
+    if attempts <= 0:
+        return None
+    pct = round((int(success) / attempts) * 100)
+    return f'{pct}% ({int(success)}/{attempts} attempts)'
+
+
+def _trigger_path_group(label: str, success: int, failed: int, secondary: list[str] | None = None) -> tuple[str, str] | None:
+    details = []
+    rate = _attempt_rate(success, failed)
+    if rate:
+        details.append(rate)
+    details.extend(secondary or [])
+    if not details:
+        return None
+    return label, ' / '.join(details)
+
+
+def _untriggered_group(other: dict[str, int]) -> tuple[str, str] | None:
+    metrics = [
+        ('alt required', int(other.get('Alt Required', 0) or 0)),
+        ('unresolved', int(other.get('Unresolved', 0) or 0)),
+        ('no trigger', int(other.get('No Trigger', 0) or 0)),
+    ]
+    filtered = [(metric, count) for metric, count in metrics if count != 0]
     if not filtered:
         return None
-    return label, ' / '.join(f'{count} {metric}' for metric, count in filtered)
+    return 'Untriggered', ' / '.join(f'{count} {metric}' for metric, count in filtered)
 
 
 def daily_snapshot_trigger_read_groups(rows: pd.DataFrame) -> list[tuple[str, str]]:
     if rows is None:
         rows = pd.DataFrame()
     trigger = _series(rows, 'Trigger')
-    trigger_day = _series(rows, 'Trigger Day')
     pdh = _series(rows, 'PDH')
     one = _series(rows, '1m ORH')
     vwap = _series(rows, 'VWAP Reclaim')
     five = _series(rows, '5m ORH')
+    other = trigger_other_bucket_counts(rows)
+    pdh_gap = int(pdh.eq('Gap').sum())
 
     groups = [
-        _trigger_group('PDH', [
-            ('success', int(pdh.str.casefold().eq('success').sum())),
-            ('failed', int((pdh.str.casefold().eq('failed') | trigger.eq('Failed PDH Trigger')).sum())),
-            ('gap', int(pdh.eq('Gap').sum())),
-        ]),
-        _trigger_group('VWAP', [
-            ('success', int(vwap.str.casefold().eq('success').sum())),
-            ('failed', int(vwap.str.casefold().eq('failed').sum())),
-        ]),
-        _trigger_group('1m ORH', [
-            ('success', int(one.str.casefold().eq('success').sum())),
-            ('failed', int(one.str.casefold().eq('failed').sum())),
-        ]),
-        _trigger_group('5m ORH', [
-            ('success', int(five.str.casefold().eq('success').sum())),
-            ('failed', int(five.str.casefold().eq('failed').sum())),
-        ]),
-        _trigger_group('Other', [
-            ('alt required', int(trigger.eq('Alt Required').sum())),
-            ('no trigger', int(trigger.eq('No Trigger').sum())),
-            ('unresolved', int(trigger_day.eq('Unresolved').sum())),
-        ]),
+        _trigger_path_group(
+            'PDH',
+            int(pdh.str.casefold().eq('success').sum()),
+            int((pdh.str.casefold().eq('failed') | trigger.eq('Failed PDH Trigger')).sum()),
+            [f'{pdh_gap} gap'] if pdh_gap else None,
+        ),
+        _trigger_path_group(
+            'VWAP Reclaim',
+            int(vwap.str.casefold().eq('success').sum()),
+            int(vwap.str.casefold().eq('failed').sum()),
+        ),
+        _trigger_path_group(
+            '1m ORH',
+            int(one.str.casefold().eq('success').sum()),
+            int(one.str.casefold().eq('failed').sum()),
+        ),
+        _trigger_path_group(
+            '5m ORH',
+            int(five.str.casefold().eq('success').sum()),
+            int(five.str.casefold().eq('failed').sum()),
+        ),
+        _untriggered_group(other),
     ]
     return [group for group in groups if group is not None]

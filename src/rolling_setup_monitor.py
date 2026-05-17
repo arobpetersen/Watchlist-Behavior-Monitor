@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from src.daily_snapshot_read import trigger_other_bucket_counts
 from src.dashboard_queries import _clean_display_df, _close_bucket
 from src.feature_engine import session_filter
 from src.trigger_resolution import resolve_display_triggers, vwap_orh_suppression_reason, vwap_superseded_orh_display_values
@@ -1550,6 +1551,7 @@ def detail_table(table: pd.DataFrame) -> pd.DataFrame:
 def day_summary(df: pd.DataFrame) -> dict:
     pdh = df['PDH'] if 'PDH' in df else pd.Series(dtype=object)
     vwap = df['VWAP Reclaim'] if 'VWAP Reclaim' in df else pd.Series(dtype=object)
+    other = trigger_other_bucket_counts(df)
     return {
         'Setups': len(df),
         'PDH Gap': int((pdh == 'Gap').sum()) if not df.empty else 0,
@@ -1561,11 +1563,11 @@ def day_summary(df: pd.DataFrame) -> dict:
         'Clean 5m': int((df['5m ORH'] == 'success').sum()) if not df.empty else 0,
         '1m Failed': int((df['1m ORH'] == 'failed').sum()) if not df.empty else 0,
         '5m Failed': int((df['5m ORH'] == 'failed').sum()) if not df.empty else 0,
-        'Alt Required': int((df['Trigger'] == 'Alt Required').sum()) if not df.empty else 0,
-        'No Trigger': int((df['Trigger'] == 'No Trigger').sum()) if not df.empty else 0,
+        'Alt Required': other['Alt Required'],
+        'No Trigger': other['No Trigger'],
         'Day Success': int((df['Trigger Day'] == 'Success').sum()) if not df.empty else 0,
         'Day Fail': int((df['Trigger Day'] == 'Fail').sum()) if not df.empty else 0,
-        'Unresolved': int((df['Trigger Day'] == 'Unresolved').sum()) if not df.empty else 0,
+        'Unresolved': other['Unresolved'],
         'Active': int((df['Current Status'] == 'Active').sum()) if not df.empty else 0,
         'Later Failed': int(df['Current Status'].fillna('').astype(str).str.startswith('Failed').sum()) if not df.empty else 0,
         'Retested': int((df['Retests'] != '').sum()) if not df.empty and 'Retests' in df else 0,

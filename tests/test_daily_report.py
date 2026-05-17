@@ -204,7 +204,7 @@ def test_daily_report_markdown_renders_concise_top_read_sections():
     assert 'Median Current' not in _section(markdown, 'Day Read')
     assert 'Median Max' not in _section(markdown, 'Day Read')
     assert '| Trigger | Read |' in markdown
-    assert '| 1m ORH | 1 success |' in markdown
+    assert '| 1m ORH | 100% (1/1 attempts) |' in markdown
     assert '| Ticker | Review Reason | Evidence | Status |' in markdown
     assert 'Current Progress portfolio: 0 qualifying names. Leaders: -. Median current progress: -.' in markdown
     assert '## Watchlist Pulse' not in markdown
@@ -244,7 +244,7 @@ def test_daily_report_trigger_read_uses_latest_setup_date_groups():
     markdown = render_daily_report_markdown(payload)
 
     section = _section(markdown, 'Trigger Read')
-    assert '| PDH | 1 success |' in section
+    assert '| PDH | 100% (1/1 attempts) |' in section
     assert '0 / - / -' not in section
 
 
@@ -259,7 +259,7 @@ def test_daily_report_summary_read_is_capped_and_evidence_based():
     assert len(bullets) == 4
     assert any('Latest setup date: 2026-05-10' in bullet and 'D0 fail' in bullet for bullet in bullets)
     assert any('Market context: QQQ +1.1% | Up Day | Trend Up.' in bullet for bullet in bullets)
-    assert any('Trigger read:' in bullet and '1m ORH 1 success' in bullet for bullet in bullets)
+    assert any('Trigger read:' in bullet and '1m ORH 100% (1/1 attempts)' in bullet for bullet in bullets)
     assert any('Early follow-through:' in bullet and 'Close < BE 1 / 100%' in bullet for bullet in bullets)
     assert 'moved from' not in summary
     assert 'Clean Active is' not in summary

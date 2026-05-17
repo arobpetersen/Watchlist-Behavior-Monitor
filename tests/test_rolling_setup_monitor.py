@@ -42,6 +42,7 @@ from src.rolling_setup_monitor import (
     current_status_display,
     trigger_day_status,
 )
+from src.daily_snapshot_read import daily_snapshot_trigger_read_groups
 from src.trigger_resolution import resolve_display_triggers
 
 
@@ -56,7 +57,7 @@ def _rolling_page_helpers():
             break
     module = ast.Module(body=helper_nodes, type_ignores=[])
     ast.fix_missing_locations(module)
-    namespace = {'escape': __import__('html').escape}
+    namespace = {'escape': __import__('html').escape, 'daily_snapshot_trigger_read_groups': daily_snapshot_trigger_read_groups}
     exec(compile(module, 'rolling_page_helpers', 'exec'), namespace)
     return namespace
 
@@ -2183,7 +2184,7 @@ def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
 def test_rolling_setup_monitor_page_uses_db_backed_cache_token_and_perf_debug():
     page = open('pages/3_Rolling_Backwatch_Monitor.py', encoding='utf-8').read()
 
-    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-triggered-fail-v1'" in page
+    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-other-dedup-v2'" in page
     assert "rolling_cache_token = f'{ROLLING_MONITOR_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_rolling_setup_sections(db_path, rolling_cache_token)' in page
     assert "PerfTimer('Rolling Backwatch Monitor')" in page
@@ -2276,7 +2277,8 @@ def test_rolling_monitor_page_uses_readable_market_and_day_read_layout():
 
     assert 'def _market_context_banner(context)' in page
     assert 'def _day_read_banner(summary: dict, table)' in page
-    assert 'def _trigger_read_strip(summary: dict)' in page
+    assert 'def _trigger_read_strip(table)' in page
+    assert 'daily_snapshot_trigger_read_groups(table)' in page
     assert 'market-read-banner' in page
     assert 'day-read-banner' in page
     assert 'trigger-read-banner' in page
@@ -2361,24 +2363,37 @@ def test_day_read_includes_d3_high_when_available_without_current_or_max():
 
 def test_trigger_read_suppresses_empty_other_block():
     helpers = _rolling_page_helpers()
-    html = helpers['_trigger_read_strip']({
-        'PDH': 1,
-        'Failed PDH Trigger': 1,
-        'PDH Gap': 4,
-        'VWAP Trigger': 2,
-        'VWAP Failed': 0,
-        'Clean 1m': 2,
-        '1m Failed': 2,
-        'Clean 5m': 0,
-        '5m Failed': 1,
-        'Alt Required': 0,
-        'No Trigger': 0,
-        'Unresolved': 0,
-    })
+    table = pd.DataFrame([
+        {'PDH': 'success', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': '', 'Trigger': 'PDH', 'Trigger Day': 'Success'},
+        {'PDH': 'failed', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': '', 'Trigger': 'Failed PDH Trigger', 'Trigger Day': 'Fail'},
+        {'PDH': 'Gap', 'VWAP Reclaim': 'success', '1m ORH': 'success', '5m ORH': '', 'Trigger': 'VWAP Reclaim', 'Trigger Day': 'Success'},
+        {'PDH': 'Gap', 'VWAP Reclaim': 'success', '1m ORH': 'success', '5m ORH': '', 'Trigger': 'VWAP Reclaim', 'Trigger Day': 'Success'},
+        {'PDH': 'Gap', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': 'failed', 'Trigger': 'Failed OR Trigger', 'Trigger Day': 'Fail'},
+        {'PDH': 'Gap', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': '', 'Trigger': '', 'Trigger Day': ''},
+    ])
+    html = helpers['_trigger_read_strip'](table)
 
     assert 'PDH' in html
-    assert '1 success / 1 failed / 4 gap' in html
-    assert 'VWAP' in html
+    assert '50% (1/2 attempts) / 4 gap' in html
+    assert 'VWAP Reclaim' in html
+    assert '100% (2/2 attempts)' in html
+    assert '5m ORH' in html
+    assert '0% (0/1 attempts)' in html
+    assert 'Untriggered' not in html
+    assert 'Other' not in html
+
+
+def test_trigger_read_other_suppresses_zero_categories():
+    helpers = _rolling_page_helpers()
+    table = pd.DataFrame([
+        {'PDH': '', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': '', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved'},
+    ])
+    html = helpers['_trigger_read_strip'](table)
+
+    assert 'Untriggered' in html
+    assert '1 unresolved' in html
+    assert 'no trigger' not in html
+    assert 'alt required' not in html
     assert 'Other' not in html
 
 
@@ -3016,7 +3031,7 @@ def test_day_summary_metrics():
     assert summary['Setups'] == 3
     assert summary['Clean 1m'] == 1
     assert summary['Alt Required'] == 1
-    assert summary['No Trigger'] == 1
+    assert summary['No Trigger'] == 0
     assert summary['1m Failed'] == 1
     assert summary['5m Failed'] == 1
     assert summary['Day Success'] == 2
@@ -3028,6 +3043,20 @@ def test_day_summary_metrics():
     assert summary['Median Current %'] == '5.0%'
     assert summary['Median Max %'] == '15.0%'
     assert summary['Median D3 High %'] == '20.0%'
+
+
+def test_day_summary_counts_true_no_trigger_separately_from_unresolved():
+    df = pd.DataFrame([
+        {'Trigger': 'No Trigger', '1m ORH': '', '5m ORH': '', 'Trigger Day': '', 'Current Status': 'Active', 'Retests': '', 'current_pct_raw': None, 'max_pct_raw': None, 'd3_high_pct_raw': None},
+        {'Trigger': 'No Trigger', '1m ORH': '', '5m ORH': '', 'Trigger Day': 'Unresolved', 'Current Status': 'â€”', 'Retests': '', 'current_pct_raw': None, 'max_pct_raw': None, 'd3_high_pct_raw': None},
+        {'Trigger': 'Alt Required', '1m ORH': 'failed', '5m ORH': 'failed', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retests': '', 'current_pct_raw': None, 'max_pct_raw': None, 'd3_high_pct_raw': None},
+    ])
+
+    summary = day_summary(df)
+
+    assert summary['Alt Required'] == 1
+    assert summary['Unresolved'] == 1
+    assert summary['No Trigger'] == 1
 
 
 def test_day_summary_counts_pdh_and_excludes_pdh_rows_from_orh_counts():

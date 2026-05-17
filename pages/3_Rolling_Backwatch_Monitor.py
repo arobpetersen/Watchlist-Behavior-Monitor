@@ -4,6 +4,7 @@ from html import escape
 from src.config import get_settings
 from src.data_health_indicator import data_health_cache_token
 from src.database import get_connection
+from src.daily_snapshot_read import daily_snapshot_trigger_read_groups
 from src.market_context import market_context_for_setup_dates, market_move_label
 from src.or_trigger_audit import audit_for_candidate, setup_dates, tickers_for_setup_date
 from src.performance import PerfTimer, render_perf_debug
@@ -21,7 +22,7 @@ from src.view_refresh import DERIVED_REFRESH_MESSAGE, refresh_derived_watchlist_
 
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
-ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-triggered-fail-v1'
+ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-other-dedup-v2'
 
 
 @st.cache_data(show_spinner=False)
@@ -161,43 +162,19 @@ def _day_read_banner(summary: dict, table) -> str:
 '''
 
 
-def _trigger_group(label: str, metrics: list[tuple[str, int]]) -> str:
-    if not any(int(count) != 0 for _, count in metrics):
+def _trigger_group(label: str, details: str) -> str:
+    if not details:
         return ''
-    details = ' / '.join(f'{int(count)} {metric}' for metric, count in metrics)
     return (
         '<section class="trigger-mini-card">'
         f'<h4>{escape(label)}</h4>'
-        f'<div>{escape(details)}</div>'
+        f'<div>{escape(str(details))}</div>'
         '</section>'
     )
 
 
-def _trigger_read_strip(summary: dict) -> str:
-    groups = [
-        _trigger_group('PDH', [
-            ('success', int(summary.get('PDH', 0) or 0)),
-            ('failed', int(summary.get('Failed PDH Trigger', 0) or 0)),
-            ('gap', int(summary.get('PDH Gap', 0) or 0)),
-        ]),
-        _trigger_group('VWAP', [
-            ('success', int(summary.get('VWAP Trigger', 0) or 0)),
-            ('failed', int(summary.get('VWAP Failed', 0) or 0)),
-        ]),
-        _trigger_group('1m ORH', [
-            ('success', int(summary.get('Clean 1m', 0) or 0)),
-            ('failed', int(summary.get('1m Failed', 0) or 0)),
-        ]),
-        _trigger_group('5m ORH', [
-            ('success', int(summary.get('Clean 5m', 0) or 0)),
-            ('failed', int(summary.get('5m Failed', 0) or 0)),
-        ]),
-        _trigger_group('Other', [
-            ('alt required', int(summary.get('Alt Required', 0) or 0)),
-            ('no trigger', int(summary.get('No Trigger', 0) or 0)),
-            ('unresolved', int(summary.get('Unresolved', 0) or 0)),
-        ]),
-    ]
+def _trigger_read_strip(table) -> str:
+    groups = [_trigger_group(label, details) for label, details in daily_snapshot_trigger_read_groups(table)]
     body = ''.join(group for group in groups if group)
     if not body:
         body = '<span class="muted-trigger-metric">No notable trigger events</span>'
@@ -440,7 +417,7 @@ else:
             + _day_read_banner(section['summary'], table)
             + '</div>'
             + '</div>'
-            + _trigger_read_strip(section['summary'])
+            + _trigger_read_strip(table)
             + '</div>',
             unsafe_allow_html=True,
         )

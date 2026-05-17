@@ -6,6 +6,7 @@ from src.daily_snapshot_read import (
     daily_snapshot_day_read_metrics,
     daily_snapshot_status_counts,
     daily_snapshot_trigger_read_groups,
+    trigger_other_bucket_counts,
 )
 
 
@@ -69,15 +70,60 @@ def test_trigger_read_suppresses_empty_other():
 
     groups = daily_snapshot_trigger_read_groups(rows)
 
-    assert ('PDH', '1 success') in groups
-    assert not any(label == 'Other' for label, _ in groups)
+    assert ('PDH', '100% (1/1 attempts)') in groups
+    assert not any(label == 'Untriggered' for label, _ in groups)
 
 
-def test_trigger_read_includes_notable_other():
+def test_trigger_read_other_counts_unresolved_no_trigger_once():
     rows = pd.DataFrame([
-        {'PDH': '', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': '', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved'},
+        {'Ticker': 'ICHR', 'PDH': '', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': '', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved'},
     ])
 
     groups = daily_snapshot_trigger_read_groups(rows)
+    other = trigger_other_bucket_counts(rows)
 
-    assert ('Other', '1 no trigger / 1 unresolved') in groups
+    assert other == {'Alt Required': 0, 'Unresolved': 1, 'No Trigger': 0}
+    assert ('Untriggered', '1 unresolved') in groups
+    assert not any(text == '1 no trigger / 1 unresolved' for _, text in groups)
+
+
+def test_trigger_read_other_precedence_and_trigger_counts():
+    rows = pd.DataFrame([
+        {'PDH': 'success', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': '', 'Trigger': 'PDH', 'Trigger Day': 'Success'},
+        {'PDH': '', 'VWAP Reclaim': 'success', '1m ORH': '', '5m ORH': '', 'Trigger': 'VWAP Reclaim', 'Trigger Day': 'Success'},
+        {'PDH': '', 'VWAP Reclaim': '', '1m ORH': 'success', '5m ORH': '', 'Trigger': '1m ORH', 'Trigger Day': 'Success'},
+        {'PDH': '', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': 'success', 'Trigger': '5m ORH', 'Trigger Day': 'Success'},
+        {'PDH': '', 'VWAP Reclaim': '', '1m ORH': 'failed', '5m ORH': 'failed', 'Trigger': 'Alt Required', 'Trigger Day': 'Success'},
+        {'PDH': '', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': '', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved'},
+        {'PDH': '', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': '', 'Trigger': 'No Trigger', 'Trigger Day': ''},
+    ])
+
+    groups = dict(daily_snapshot_trigger_read_groups(rows))
+    other = trigger_other_bucket_counts(rows)
+
+    assert groups['PDH'] == '100% (1/1 attempts)'
+    assert groups['VWAP Reclaim'] == '100% (1/1 attempts)'
+    assert groups['1m ORH'] == '50% (1/2 attempts)'
+    assert groups['5m ORH'] == '50% (1/2 attempts)'
+    assert groups['Untriggered'] == '1 alt required / 1 unresolved / 1 no trigger'
+    assert other == {'Alt Required': 1, 'Unresolved': 1, 'No Trigger': 1}
+
+
+def test_trigger_read_rates_and_suppression():
+    rows = pd.DataFrame([
+        {'PDH': '', 'VWAP Reclaim': 'success', '1m ORH': '', '5m ORH': '', 'Trigger': 'VWAP Reclaim', 'Trigger Day': 'Success'},
+        {'PDH': '', 'VWAP Reclaim': 'success', '1m ORH': '', '5m ORH': '', 'Trigger': 'VWAP Reclaim', 'Trigger Day': 'Success'},
+        {'PDH': '', 'VWAP Reclaim': 'success', '1m ORH': '', '5m ORH': '', 'Trigger': 'VWAP Reclaim', 'Trigger Day': 'Success'},
+        {'PDH': '', 'VWAP Reclaim': '', '1m ORH': 'failed', '5m ORH': '', 'Trigger': 'Failed OR Trigger', 'Trigger Day': 'Fail'},
+        {'PDH': 'success', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': '', 'Trigger': 'PDH', 'Trigger Day': 'Success'},
+        {'PDH': 'failed', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': '', 'Trigger': 'Failed PDH Trigger', 'Trigger Day': 'Fail'},
+        {'PDH': 'Gap', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': '', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved'},
+    ])
+
+    groups = dict(daily_snapshot_trigger_read_groups(rows))
+
+    assert groups['VWAP Reclaim'] == '100% (3/3 attempts)'
+    assert groups['1m ORH'] == '0% (0/1 attempts)'
+    assert groups['PDH'] == '50% (1/2 attempts) / 1 gap'
+    assert '5m ORH' not in groups
+    assert groups['Untriggered'] == '1 unresolved'
