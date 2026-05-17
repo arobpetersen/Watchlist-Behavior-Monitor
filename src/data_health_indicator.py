@@ -83,8 +83,8 @@ def render_data_health_indicator(summary: DataHealthSummary) -> None:
         )
         st.dataframe(
             [{
-                'Active/Coverage Rows': summary.active_row_count,
-                'Coverage Source': summary.active_daily_bar_coverage_source or '-',
+                'Rows Checked': summary.active_row_count,
+                'Coverage Check Source': summary.active_daily_bar_coverage_source or '-',
                 'Missing Latest Daily Bar': summary.active_missing_latest_daily_bar_count,
                 'Max Stale Trading-Day Gap': summary.active_max_stale_trading_day_gap,
             }],

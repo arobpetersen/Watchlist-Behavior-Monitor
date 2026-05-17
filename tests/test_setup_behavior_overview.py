@@ -253,7 +253,7 @@ def test_summarize_window_counts_percentages_and_medians():
     assert out['Day Fail'] == '1 (25%)'
     assert out['Unresolved'] == '0 (0%)'
     assert out['Active'] == '1 (25%)'
-    assert out['Later Failed'] == '2 (50%)'
+    assert out['Failed After D0'] == '2 (50%)'
     assert out['Clean 1m'] == '1 (25%)'
     assert out['Failed 1m'] == '3 (75%)'
     assert out['Clean 5m'] == '2 (50%)'
@@ -278,7 +278,7 @@ def test_summarize_window_counts_close_below_be_later_failed_status():
     out = summarize_window(history, window)
 
     assert out['Active'] == '0 (0%)'
-    assert out['Later Failed'] == '3 (75%)'
+    assert out['Failed After D0'] == '3 (75%)'
 
 
 def test_comparison_rows_exclude_secondary_diagnostics():
@@ -299,7 +299,7 @@ def test_comparison_rows_exclude_secondary_diagnostics():
         'Setups',
         'Day Success %',
         'Active %',
-        'Later Failed %',
+        'Failed After D0 %',
         'Median Current',
         'Median Max',
     ]
@@ -378,7 +378,7 @@ def test_behavior_insights_later_failed_wording_is_factual():
     insights = generate_behavior_insights(None, rows)
 
     assert any(
-        insight['text'] == 'Later Failed increased from 0% to 60%, meaning more setups are working on trigger day but failing later.'
+        insight['text'] == 'Failed After D0 increased from 0% to 60%, meaning more setups are working on trigger day but failing later.'
         for insight in insights
     )
 
@@ -531,7 +531,7 @@ def test_factual_read_is_objective_and_contains_key_metrics():
 
     assert text == (
         'Last 10 Setup Dates: 4 setups across 3 setup dates, 75% Day Success, '
-        '25% Active, 50% Later Failed, 1.5% Median Current, 7.0% Median Max.'
+        '25% Active, 50% Failed After D0, 1.5% Median Current, 7.0% Median Max.'
     )
     lowered = text.lower()
     assert 'trade more aggressively' not in lowered
@@ -548,7 +548,7 @@ def test_selected_window_snapshot_contains_key_metrics():
     assert '4 setups across 3 setup dates' in text
     assert '75% Day Success' in text
     assert '25% Active' in text
-    assert '50% Later Failed' in text
+    assert '50% Failed After D0' in text
     assert 'Median Current 1.5%' in text
     assert 'Median Max 7.0%' in text
 
@@ -566,7 +566,7 @@ def test_snapshot_cards_html_prioritizes_key_metrics():
     assert 'Failure Rate by Trigger' in html
     assert '25% (1 / 4)' in html
     assert '50% (2 / 4)' in html
-    assert 'Failed D0' in html
+    assert 'D0 Fail' in html
     assert 'Failed After D0' in html
     assert 'Unresolved' in html
 
@@ -579,12 +579,12 @@ def test_snapshot_current_status_splits_failed_d0_and_after_d0():
         {'Ticker': 'D2', 'Current Status': 'Failed D2', 'Trigger': 'PDH', 'Trigger Day': 'Success'},
         {'Ticker': 'U', 'Current Status': '—', 'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved'},
     ])
-    summary = {'Setups': 5, 'Active': '1 (20%)', 'Later Failed': '3 (60%)', 'Unresolved': '1 (20%)'}
+    summary = {'Setups': 5, 'Active': '1 (20%)', 'Failed After D0': '3 (60%)', 'Unresolved': '1 (20%)'}
 
     html = snapshot_cards_html(summary, rows, pd.DataFrame())
 
     assert 'Active</span><strong>20% (1 / 5)</strong>' in html
-    assert 'Failed D0</span><strong>20% (1 / 5)</strong>' in html
+    assert 'D0 Fail</span><strong>20% (1 / 5)</strong>' in html
     assert 'Failed After D0</span><strong>40% (2 / 5)</strong>' in html
     assert 'Unresolved</span><strong>20% (1 / 5)</strong>' in html
 
@@ -668,7 +668,7 @@ def test_trigger_outcomes_vwap_uses_qualified_result_not_raw_result():
     assert vwap['Triggered'] == 2
     assert vwap['Success'] == 1
     assert vwap['Failed'] == 1
-    assert vwap['Later Failed Count'] == 1
+    assert vwap['Failed After D0 Count'] == 1
     assert vwap['Active Count'] == 0
 
 
@@ -690,7 +690,7 @@ def test_vwap_success_later_failed_is_success_not_trigger_failure():
     assert vwap['Triggered'] == 1
     assert vwap['Success'] == 1
     assert vwap['Failed'] == 0
-    assert vwap['Later Failed Count'] == 1
+    assert vwap['Failed After D0 Count'] == 1
 
 
 def test_mix_tables_include_objective_selected_window_mixes():
@@ -712,12 +712,12 @@ def test_trigger_quality_table_groups_by_selected_trigger():
     assert by_trigger.loc['1m ORH', 'Failed %'] == '0%'
     assert by_trigger.loc['1m ORH', 'Day Success %'] == '100%'
     assert by_trigger.loc['1m ORH', 'Active %'] == '100%'
-    assert by_trigger.loc['1m ORH', 'Later Failed %'] == '0%'
+    assert by_trigger.loc['1m ORH', 'Failed After D0 %'] == '0%'
     assert by_trigger.loc['5m ORH', 'Count'] == 1
     assert by_trigger.loc['5m ORH', 'Failed Count'] == 1
     assert by_trigger.loc['5m ORH', 'Failed %'] == '100%'
     assert by_trigger.loc['5m ORH', 'Active %'] == '0%'
-    assert by_trigger.loc['5m ORH', 'Later Failed %'] == '100%'
+    assert by_trigger.loc['5m ORH', 'Failed After D0 %'] == '100%'
     assert by_trigger.loc['No Trigger', 'Day Success %'] == '0%'
     assert by_trigger.loc['PDH', 'Count'] == 0
 
@@ -1057,12 +1057,12 @@ def test_trigger_event_main_tables_use_compact_count_percent_columns():
     assert last_10.loc[0, 'Failed'] == '1 (50%)'
     assert last_10.loc[0, 'Success'] == '1 (50%)'
     assert last_10.loc[0, 'Currently Active'] == '1 (100%)'
-    assert last_10.loc[0, 'Later Failed'] == '0 (0%)'
+    assert last_10.loc[0, 'Failed After D0'] == '0 (0%)'
     assert last_10.loc[0, 'Median Max'] == '10.0%'
     assert 'Median Current' not in last_10.columns
     assert 'Ineligible' not in last_10.columns
     assert 'Active %' not in last_10.columns
-    assert 'Later Failed %' not in last_10.columns
+    assert 'Failed After D0 %' not in last_10.columns
 
 
 def test_trigger_failure_trend_matrix_uses_triggered_denominator_and_windows():
@@ -1088,12 +1088,13 @@ def test_trigger_failure_trend_matrix_uses_triggered_denominator_and_windows():
     trend = trigger_failure_trend_matrix(comparison).set_index('Trigger')
 
     assert trend.columns.tolist() == ['Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
-    assert trend.loc['PDH', 'Last 5'] == '33% (1/3)'
+    assert trend.loc['PDH', 'Last 5'] == '67% (2/3)'
     assert trend.loc['PDH', 'Previous 5'] == '50% (3/6)'
     assert trend.loc['PDH', 'Read'] == 'Stable'
     assert trend.loc['1m ORH', 'Read'] == 'Worse recent'
     assert trend.loc['VWAP Reclaim', 'Read'] == 'Clean recent'
     assert trend.loc['5m ORH', 'Last 5'] == '—'
+    assert trend.loc['5m ORH', 'Previous 5'] == '100% (2/2)'
     assert trend.loc['5m ORH', 'Read'] == 'No recent sample'
     assert 'Alt Required' not in trend.index
 
@@ -1115,6 +1116,7 @@ def test_trigger_failure_trend_matrix_reads_improved_stable_and_small_sample():
     assert trend.loc['1m ORH', 'Read'] == 'Small sample'
     assert trend.loc['VWAP Reclaim', 'Read'] == 'Stable'
     assert trend.loc['Alt Required', 'Read'] == 'Small sample'
+    assert trend.loc['Alt Required', 'Last 5'] == '0% (0/1)'
 
 
 def _shift_row(
@@ -1138,8 +1140,8 @@ def _shift_row(
         'Fail %': fail_pct,
         'Success': 1,
         'Success %': success_pct,
-        'Later Failed Count': 0,
-        'Later Failed %': '0%',
+        'Failed After D0 Count': 0,
+        'Failed After D0 %': '0%',
         'Active Count': 1,
         'Active %': active_pct,
         'Median Current': '0.0%',
@@ -1270,8 +1272,8 @@ def test_trigger_outcome_comparison_later_failed_active_and_medians():
     five_last_10 = comparison[(comparison['Trigger'] == '5m ORH') & (comparison['Window'] == 'Last 10 Setup Dates')].iloc[0]
     assert five_last_10['Triggered'] == 2
     assert five_last_10['Success'] == 1
-    assert five_last_10['Later Failed Count'] == 1
-    assert five_last_10['Later Failed %'] == '100%'
+    assert five_last_10['Failed After D0 Count'] == 1
+    assert five_last_10['Failed After D0 %'] == '100%'
     assert five_last_10['Active Count'] == 0
     assert five_last_10['Active %'] == '0%'
     assert five_last_10['Median Current'] == '1.5%'
@@ -1290,8 +1292,8 @@ def test_trigger_outcome_follow_through_uses_successful_trigger_rows_only():
     assert one_last_10['Success %'] == '50%'
     assert one_last_10['Active Count'] == 1
     assert one_last_10['Active %'] == '100%'
-    assert one_last_10['Later Failed Count'] == 0
-    assert one_last_10['Later Failed %'] == '0%'
+    assert one_last_10['Failed After D0 Count'] == 0
+    assert one_last_10['Failed After D0 %'] == '0%'
     assert one_last_10['Median Max'] == '10.0%'
 
 
@@ -1307,8 +1309,8 @@ def test_trigger_outcome_includes_qualified_vwap_trigger_rows():
     assert vwap_last_10['Success %'] == '100%'
     assert vwap_last_10['Failed'] == 0
     assert vwap_last_10['Fail %'] == '0%'
-    assert vwap_last_10['Later Failed Count'] == 1
-    assert vwap_last_10['Later Failed %'] == '100%'
+    assert vwap_last_10['Failed After D0 Count'] == 1
+    assert vwap_last_10['Failed After D0 %'] == '100%'
     assert vwap_last_10['Median Max'] == '8.0%'
 
 
@@ -1335,7 +1337,7 @@ def test_trigger_outcome_counts_qualified_vwap_when_legacy_vwap_trigger_is_blank
     assert vwap['Eligible'] == 1
     assert vwap['Triggered'] == 1
     assert vwap['Success'] == 1
-    assert vwap['Later Failed Count'] == 1
+    assert vwap['Failed After D0 Count'] == 1
 
 
 def test_trigger_outcome_does_not_count_raw_vwap_when_not_qualified():
@@ -1518,7 +1520,7 @@ def test_trigger_outcome_comparison_zero_trigger_display():
     assert pdh_last_5['Trigger Rate'] == '0%'
     assert pdh_last_5['Success %'] == '-'
     assert pdh_last_5['Fail %'] == '-'
-    assert pdh_last_5['Later Failed %'] == '-'
+    assert pdh_last_5['Failed After D0 %'] == '-'
     assert pdh_last_5['Active %'] == '-'
     assert pdh_last_5['Median Current'] == '-'
     assert pdh_last_5['Median Max'] == '-'
@@ -1548,8 +1550,8 @@ def test_trigger_outcome_zero_success_display_uses_dashes_for_follow_through():
     assert one['Success %'] == '0%'
     assert one['Active Count'] == 0
     assert one['Active %'] == '-'
-    assert one['Later Failed Count'] == 0
-    assert one['Later Failed %'] == '-'
+    assert one['Failed After D0 Count'] == 0
+    assert one['Failed After D0 %'] == '-'
     assert one['Median Max'] == '-'
 
 
@@ -1625,7 +1627,7 @@ def test_filter_detail_rows_by_alt_required_event():
 def test_filter_detail_rows_combines_trigger_and_current_status_filters():
     detail = detail_rows(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[0])
 
-    failed_later = filter_detail_rows(detail, trigger_level='5m ORH', trigger_result='success', current_status='Later Failed')
+    failed_later = filter_detail_rows(detail, trigger_level='5m ORH', trigger_result='success', current_status='Failed After D0')
 
     assert failed_later['Ticker'].tolist() == ['BBB']
 
@@ -1634,7 +1636,7 @@ def test_filter_detail_rows_by_current_status_bucket():
     detail = detail_rows(_history(), overview_windows(['2026-04-10', '2026-04-28', '2026-05-02', '2026-05-08'])[0])
 
     active = filter_detail_rows(detail, current_status='Active')
-    later_failed = filter_detail_rows(detail, current_status='Later Failed')
+    later_failed = filter_detail_rows(detail, current_status='Failed After D0')
     unresolved = filter_detail_rows(detail, current_status='Unresolved')
 
     assert active['Ticker'].tolist() == ['AAA']
@@ -1731,7 +1733,7 @@ def test_opening_behavior_classifies_failed_1m_later_reclaimed():
     assert table.loc['1m ORH Failed, Later Reclaimed', 'Count'] == 2
     assert table.loc['1m ORH Failed, Later Reclaimed', '% of Setups'] == '40%'
     assert table.loc['1m ORH Failed, Later Reclaimed', 'Active %'] == '50%'
-    assert table.loc['1m ORH Failed, Later Reclaimed', 'Later Failed %'] == '50%'
+    assert table.loc['1m ORH Failed, Later Reclaimed', 'Failed After D0 %'] == '50%'
 
 
 def test_opening_behavior_classifies_failed_1m_never_recovered():
@@ -1752,7 +1754,7 @@ def test_opening_behavior_classifies_pdh_success_after_early_noise():
     table = opening_behavior_table(_opening_behavior_history()).set_index('Path')
 
     assert table.loc['PDH Success After Early Noise', 'Count'] == 1
-    assert table.loc['PDH Success After Early Noise', 'Later Failed %'] == '100%'
+    assert table.loc['PDH Success After Early Noise', 'Failed After D0 %'] == '100%'
 
 
 def test_opening_behavior_classifies_failed_all_opening_triggers():
@@ -1791,7 +1793,7 @@ def test_opening_behavior_main_table_shows_successful_trigger_rows_only():
     assert by_trigger.loc['1m ORH', 'Count'] == 1
     assert by_trigger.loc['1m ORH', '% of Setups'] == '17%'
     assert by_trigger.loc['1m ORH', 'Currently Active'] == '1 (100%)'
-    assert by_trigger.loc['1m ORH', 'Later Failed'] == '0 (0%)'
+    assert by_trigger.loc['1m ORH', 'Failed After D0'] == '0 (0%)'
     assert by_trigger.loc['1m ORH', 'Median Max'] == '10.0%'
     assert by_trigger.loc['5m ORH', 'Count'] == 1
     assert by_trigger.loc['PDH', 'Count'] == 1
@@ -1817,7 +1819,7 @@ def test_opening_behavior_main_table_zero_count_display():
     assert main.loc['1m ORH', 'Count'] == 0
     assert main.loc['1m ORH', '% of Setups'] == '0%'
     assert main.loc['1m ORH', 'Currently Active'] == '-'
-    assert main.loc['1m ORH', 'Later Failed'] == '-'
+    assert main.loc['1m ORH', 'Failed After D0'] == '-'
     assert main.loc['1m ORH', 'Median Max'] == '-'
 
 
@@ -1839,7 +1841,7 @@ def test_opening_behavior_main_table_includes_vwap_reclaim_success_row():
     assert main.loc['VWAP Reclaim', 'Count'] == 1
     assert main.loc['VWAP Reclaim', '% of Setups'] == '100%'
     assert main.loc['VWAP Reclaim', 'Currently Active'] == '0 (0%)'
-    assert main.loc['VWAP Reclaim', 'Later Failed'] == '1 (100%)'
+    assert main.loc['VWAP Reclaim', 'Failed After D0'] == '1 (100%)'
     assert main.loc['VWAP Reclaim', 'Median Max'] == '12.0%'
 
 
@@ -1861,11 +1863,11 @@ def test_opening_behavior_main_counts_qualified_vwap_when_legacy_vwap_trigger_is
     main = main_opening_behavior_table(history).set_index('Trigger')
 
     assert main.loc['VWAP Reclaim', 'Count'] == 1
-    assert main.loc['VWAP Reclaim', 'Later Failed'] == '1 (100%)'
+    assert main.loc['VWAP Reclaim', 'Failed After D0'] == '1 (100%)'
 
 
 def test_setup_behavior_page_uses_successful_triggers_section_title():
-    page = open('pages/5_Setup_Behavior_Overview.py', encoding='utf-8').read()
+    page = open('pages/5_Window_Behavior_Overview.py', encoding='utf-8').read()
 
     assert "st.subheader('Selected Window Successful Triggers')" in page
     assert "st.subheader('Behavior Insights')" not in page
@@ -1877,7 +1879,7 @@ def test_setup_behavior_page_uses_successful_triggers_section_title():
     assert "overview_cache_token = f'{OVERVIEW_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert "st.button('Refresh derived views from database'" in page
     assert 'refresh_derived_watchlist_views(load_setup_behavior_overview)' in page
-    assert "PerfTimer('Setup Behavior Overview')" in page
+    assert "PerfTimer('Window Behavior Overview')" in page
     assert 'render_perf_debug(st, perf)' in page
 
 

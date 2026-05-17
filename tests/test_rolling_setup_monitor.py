@@ -46,7 +46,7 @@ from src.trigger_resolution import resolve_display_triggers
 
 
 def _rolling_page_helpers():
-    source = open('pages/3_Rolling_Setup_Monitor.py', encoding='utf-8').read()
+    source = open('pages/3_Rolling_Backwatch_Monitor.py', encoding='utf-8').read()
     tree = ast.parse(source)
     helper_nodes = []
     for node in tree.body:
@@ -2103,7 +2103,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'Current vs Setup Close': '6.0%',
         'Max Gain from Setup Close': '8.0%',
         'RVOL': '',
-        'Range / ATR14': '',
+        'Range x ATR(14)': '',
         '1m OR Width / ATR14': '0.75',
         '5m OR Width / ATR14': '',
         'Close Bucket': '',
@@ -2133,7 +2133,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
         'Raw VWAP Reclaim Post-Trigger Stop Breached',
         'Raw VWAP Reclaim Stop Valid', 'Raw VWAP Reclaim Result Reason',
         'Qualified VWAP Trigger Result', 'Qualified VWAP Trigger Reason',
-        'VWAP Success Later Failed',
+        'VWAP Success Failed After D0',
         'ORH Display Suppression', '1m ORH Trigger Price', '5m ORH Trigger Price',
         'Trigger Level', 'Reference Low', 'Reference Basis', 'Trigger Break Time',
         '1m Low Swept Before Trigger', '1m ORH Reference Low', '1m ORH Reference Basis',
@@ -2141,7 +2141,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
         '5m ORH Reference Low', '5m ORH Reference Basis', '5m Post-Trigger Stop Breach',
         'Fail Day', 'Retests', 'Retest Count', 'Retest Days Raw', 'Retest Dates Raw',
         'Latest Close', 'Setup Close', 'Setup High', 'Setup Low',
-        'Current vs Setup Close', 'Max Gain from Setup Close', 'RVOL', 'Range / ATR14', '1m OR Width / ATR14',
+        'Current vs Setup Close', 'Max Gain from Setup Close', 'RVOL', 'Range x ATR(14)', '1m OR Width / ATR14',
         '5m OR Width / ATR14', 'Close Bucket',
         '1m OR Result', '5m OR Result', '5m ORH Break Time',
         '5m ORH Broke After Range', '1m Follow-Through / ATR14',
@@ -2181,12 +2181,12 @@ def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
 
 
 def test_rolling_setup_monitor_page_uses_db_backed_cache_token_and_perf_debug():
-    page = open('pages/3_Rolling_Setup_Monitor.py', encoding='utf-8').read()
+    page = open('pages/3_Rolling_Backwatch_Monitor.py', encoding='utf-8').read()
 
     assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-triggered-fail-v1'" in page
     assert "rolling_cache_token = f'{ROLLING_MONITOR_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_rolling_setup_sections(db_path, rolling_cache_token)' in page
-    assert "PerfTimer('Rolling Setup Monitor')" in page
+    assert "PerfTimer('Rolling Backwatch Monitor')" in page
     assert 'render_perf_debug(st, perf)' in page
     assert "Edit Setup / Entry Tactic / Rating" in page
     assert "display[['Ticker', 'Setup', 'Entry Tactic', 'Rating']]" in page
@@ -2231,7 +2231,7 @@ def test_format_summary_blocks_html_includes_group_titles():
     assert 'Day Success</span><strong>2 (67%)</strong>' in html
     assert 'Day Fail</span><strong>0 (0%)</strong>' in html
     assert 'Active</span><strong>1 (33%)</strong>' in html
-    assert 'Later Failed</span><strong>1 (33%)</strong>' in html
+    assert 'Failed After D0</span><strong>1 (33%)</strong>' in html
     assert 'Gap</span><strong>1 (33%)</strong>' in html
     assert 'Success</span><strong>1 (33%)</strong>' in html
     assert 'Failed</span><strong>1 (33%)</strong>' in html
@@ -2272,7 +2272,7 @@ def test_format_summary_blocks_html_uses_zero_percent_when_no_setups():
 
 
 def test_rolling_monitor_page_uses_readable_market_and_day_read_layout():
-    page = open('pages/3_Rolling_Setup_Monitor.py', encoding='utf-8').read()
+    page = open('pages/3_Rolling_Backwatch_Monitor.py', encoding='utf-8').read()
 
     assert 'def _market_context_banner(context)' in page
     assert 'def _day_read_banner(summary: dict, table)' in page
@@ -2665,8 +2665,8 @@ def test_format_section_table_flags_vwap_success_later_failed_in_detail_only():
 
     assert table.loc[0, 'VWAP Reclaim'] == 'success'
     assert table.loc[0, 'Current Status'] == 'Failed D1'
-    assert table.loc[0, 'VWAP Success Later Failed'] == 'Yes'
-    assert 'VWAP Success Later Failed' not in main_table(table).columns
+    assert table.loc[0, 'VWAP Success Failed After D0'] == 'Yes'
+    assert 'VWAP Success Failed After D0' not in main_table(table).columns
 
 
 def test_format_section_table_marks_5m_orh_superseded_when_vwap_is_tighter():

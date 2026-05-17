@@ -446,7 +446,7 @@ def test_daily_report_allows_valid_failed_historical_review_names():
     markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
     names = _section(markdown, 'Names to Review')
 
-    assert '| FAIL | Max move later failed | Current -3.0%; Max 32.0% | Failed D2 |' in names
+    assert '| FAIL | Max move failed after D0 | Current -3.0%; Max 32.0% | Failed D2 |' in names
     assert '| FAIL | Clean active leader |' not in names
 
 

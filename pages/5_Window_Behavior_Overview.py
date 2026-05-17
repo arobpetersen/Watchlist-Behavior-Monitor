@@ -30,7 +30,7 @@ OVERVIEW_CACHE_VERSION = 'setup-overview-daily-report-v1'
 
 @st.cache_data(show_spinner=False)
 def load_setup_behavior_overview(db_path: str, cache_version: str, _history) -> tuple[dict, list[dict]]:
-    timer = PerfTimer('Setup Behavior Overview Build', enabled=True)
+    timer = PerfTimer('Window Behavior Overview Build', enabled=True)
     con = get_connection(db_path)
     overview = setup_behavior_overview(con, history=_history, perf=timer)
     return overview, timer.rows()
@@ -66,12 +66,12 @@ def ensure_overview_display_tables(overview: dict) -> dict:
 
 
 db_path = str(get_settings().db_path)
-perf = PerfTimer('Setup Behavior Overview')
+perf = PerfTimer('Window Behavior Overview')
 
-st.title('Setup Behavior Overview')
-st.caption('Rolling summary of Back-Watch setup behavior across recent setup-date windows.')
+st.title('Window Behavior Overview')
+st.caption('Compare setup behavior across recent back-watch windows.')
 st.caption('D3 High only includes setups with completed D3 data.')
-if st.button('Refresh derived views from database', key='setup_overview_refresh_derived'):
+if st.button('Refresh derived views from database', key='setup_overview_refresh_derived', help='Refreshes cached monitor/report views after data or manual metadata changes.'):
     refresh_derived_watchlist_views(load_setup_behavior_overview)
     st.session_state['derived_views_refreshed'] = True
     st.rerun()
@@ -103,7 +103,7 @@ with perf.measure('shared monitor_history load'):
     history, history_timings = load_cached_monitor_history(db_path, monitor_history_cache_token)
 perf.extend(history_timings, prefix='monitor_history detail: ')
 
-with perf.measure('Setup Behavior Overview data build'):
+with perf.measure('Window Behavior Overview data build'):
     overview, overview_timings = load_setup_behavior_overview(db_path, overview_cache_token, history)
     overview = ensure_overview_display_tables(overview)
 perf.extend(overview_timings, prefix='overview detail: ')
@@ -137,12 +137,12 @@ else:
     st.subheader('Selected Window Successful Triggers')
     st.dataframe(overview['opening_behavior_main'][selected_window], width='stretch', hide_index=True)
     st.caption(
-        'Currently Active and Later Failed are measured among setups where that trigger succeeded. Richer path detail '
+        'Currently Active and Failed After D0 are measured among setups where that trigger succeeded. Richer path detail '
         'remains in Supporting Selected-Window Stats.'
     )
 
-    st.subheader('Trigger Failure Trend')
-    st.caption('Cells show Failure % (failed/triggered attempts).')
+    st.subheader('Trigger Success Trend')
+    st.caption('Cells show Success % (successful trigger attempts / triggered attempts).')
     st.dataframe(overview['trigger_failure_trend'], width='stretch', hide_index=True)
 
     st.subheader('Trigger Event Outcomes Across Windows')
@@ -151,7 +151,7 @@ else:
         st.markdown(f'**{window_label}**')
         st.dataframe(style_trigger_event_table(table, window_label, shift_highlights), width='stretch', hide_index=True)
     st.caption(
-        'Triggered % uses eligible setups. Failed % and Success % use triggered setups. Currently Active, Later Failed, '
+        'Triggered % uses eligible setups. Failed % and Success % use triggered setups. Currently Active, Failed After D0, '
         'and Median Max use successful trigger setups only.'
     )
     st.caption('Highlighted cells mark notable Last 5 vs Previous 5 shifts.')
@@ -193,7 +193,7 @@ else:
             key='setup_behavior_trigger_event_result',
         )
     with filter_cols[2]:
-        current_status = st.selectbox('Current status', ['All', 'Active', 'Later Failed', 'Unresolved'], key='setup_behavior_current_status_filter')
+        current_status = st.selectbox('Current status', ['All', 'Active', 'Failed After D0', 'Unresolved'], key='setup_behavior_current_status_filter')
     with filter_cols[3]:
         opening_path_group = st.selectbox('Opening path group', OPENING_PATH_FILTER_OPTIONS, key='setup_behavior_opening_path_group')
     filtered_detail = filter_detail_rows(

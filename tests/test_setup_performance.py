@@ -254,8 +254,8 @@ def test_setup_failure_trend_matrix_cells_and_reads():
     trend = build_setup_failure_trend(pd.DataFrame(rows)).set_index('Setup')
 
     assert list(build_setup_failure_trend(pd.DataFrame(rows)).columns) == SETUP_FAILURE_TREND_COLUMNS
-    assert trend.loc['Improving', 'Last 5'] == '20% (1/5)'
-    assert trend.loc['Improving', 'Previous 5'] == '80% (4/5)'
+    assert trend.loc['Improving', 'Last 5'] == '80% (4/5)'
+    assert trend.loc['Improving', 'Previous 5'] == '20% (1/5)'
     assert trend.loc['Improving', 'Read'] == 'Improved recent'
     assert trend.loc['Worsening', 'Read'] == 'Worse recent'
     assert trend.loc['Stable', 'Read'] == 'Stable'
@@ -263,10 +263,10 @@ def test_setup_failure_trend_matrix_cells_and_reads():
     assert trend.loc['Small', 'Read'] == 'Small sample'
     assert trend.loc['NoRecent', 'Last 5'] == '—'
     assert trend.loc['NoRecent', 'Read'] == 'No recent sample'
-    assert trend.loc['Unclassified', 'Last 5'] == '100% (1/1)'
+    assert trend.loc['Unclassified', 'Last 5'] == '0% (0/1)'
 
 
-def test_setup_failure_trend_cell_format_is_rate_first():
+def test_setup_failure_trend_cell_format_is_success_rate_first():
     rows = []
     for idx, date in enumerate(pd.date_range('2026-05-01', periods=12).astype(str)):
         rows.append({
@@ -276,11 +276,14 @@ def test_setup_failure_trend_cell_format_is_rate_first():
             'Trigger Day': 'Success',
         })
     rows.append({'Setup Date': '2026-05-12', 'Setup': 'OneRow', 'Current Status': 'Active', 'Trigger Day': 'Success'})
+    for date in pd.date_range('2026-05-10', periods=3).astype(str):
+        rows.append({'Setup Date': date, 'Setup': 'AllFailed', 'Current Status': 'Failed D1', 'Trigger Day': 'Success'})
 
     trend = build_setup_failure_trend(pd.DataFrame(rows)).set_index('Setup')
 
-    assert trend.loc['Format', 'Last 20'] == '33% (4/12)'
-    assert trend.loc['OneRow', 'Last 5'] == '0% (0/1)'
+    assert trend.loc['Format', 'Last 20'] == '67% (8/12)'
+    assert trend.loc['OneRow', 'Last 5'] == '100% (1/1)'
+    assert trend.loc['AllFailed', 'Last 5'] == '0% (0/3)'
 
 
 def test_empty_input_returns_stable_tables():
@@ -296,7 +299,7 @@ def test_empty_input_returns_stable_tables():
 
 
 def test_setup_performance_page_uses_shared_monitor_history_cache_token():
-    page = Path(__file__).resolve().parents[1] / 'pages' / '7_Setup_Performance.py'
+    page = Path(__file__).resolve().parents[1] / 'pages' / '7_Setup_Type_Performance.py'
     source = page.read_text()
 
     assert 'cache_token = data_health_cache_token(db_path)' in source

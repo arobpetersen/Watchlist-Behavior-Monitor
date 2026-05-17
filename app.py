@@ -63,7 +63,8 @@ settings = get_settings()
 source_dir = resolve_source_dir(settings.backwatch_source_dir, settings.project_root)
 con = get_connection(str(settings.db_path))
 
-st.title('Back-Watch Setup Behavior Monitor')
+st.title('Data Ingest & Health')
+st.caption('Upload setup lists, run the local pipeline, and check database health.')
 
 st.subheader('Back-Watch Source Folder')
 st.write(f'Configured Back-Watch source folder: `{source_dir}`')

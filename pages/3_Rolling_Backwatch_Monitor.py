@@ -26,7 +26,7 @@ ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-vwap-triggered-fail-v1'
 
 @st.cache_data(show_spinner=False)
 def load_rolling_setup_sections(db_path: str, cache_version: str):
-    timer = PerfTimer('Rolling Setup Monitor Build', enabled=True)
+    timer = PerfTimer('Rolling Backwatch Monitor Build', enabled=True)
     con = get_connection(db_path)
     return rolling_setup_monitor(con, setup_dates=5, perf=timer), timer.rows()
 
@@ -364,12 +364,13 @@ def _readability_styles() -> str:
 '''
 
 
-perf = PerfTimer('Rolling Setup Monitor')
+perf = PerfTimer('Rolling Backwatch Monitor')
 db_path = str(get_settings().db_path)
 with perf.measure('DB connection/open'):
     con = get_connection(db_path)
-st.title('Rolling Setup Monitor')
-if st.button('Refresh derived views from database', key='rolling_monitor_refresh_derived'):
+st.title('Rolling Backwatch Monitor')
+st.caption('Recent back-watch setup dates using canonical trigger/status rows.')
+if st.button('Refresh derived views from database', key='rolling_monitor_refresh_derived', help='Refreshes cached monitor/report views after data or manual metadata changes.'):
     refresh_derived_watchlist_views(load_rolling_setup_sections)
     st.session_state['derived_views_refreshed'] = True
     st.rerun()
@@ -417,7 +418,7 @@ with st.expander('Audit OR Trigger', expanded=False):
             st.dataframe(audit['break_bars'], width='stretch', height='auto', hide_index=True)
 
 rolling_cache_token = f'{ROLLING_MONITOR_CACHE_VERSION}:{data_health_cache_token(db_path)}'
-with perf.measure('Rolling Setup Monitor data build'):
+with perf.measure('Rolling Backwatch Monitor data build'):
     sections, build_timings = load_rolling_setup_sections(db_path, rolling_cache_token)
 perf.extend(build_timings, prefix='cache miss detail: ')
 if not sections:

@@ -914,12 +914,12 @@ def _notable_name_rows(notable_tickers: dict, portfolio: dict, history: pd.DataF
                     'max': _return_text(row.get('max_pct_raw', row.get('_max_sort'))),
                     'status': _display(row.get('Current Status')),
                 },
-                'Max move later failed',
+                'Max move failed after D0',
                 _row_return_evidence(row, include_hold=False),
             )
     else:
         for item in notable_tickers.get('failed_after_initially_working', [])[:3]:
-            add(item, 'Max move later failed')
+            add(item, 'Max move failed after D0')
     for item in notable_tickers.get('close_below_be', [])[:3]:
         add(item, 'Close < BE')
     for ticker in portfolio.get('top_current_progress', [])[:3]:
@@ -991,7 +991,7 @@ def _material_observations(history: pd.DataFrame, overview: dict, comparisons: d
             'comparison': 'Faded leaders',
             'metric': 'failed_after_initially_working',
             'direction': 'risk',
-            'text': f"Names with max progress that later failed include {faded}. This highlights movement that did not stay active.",
+            'text': f"Names with max progress that failed after D0 include {faded}. This highlights movement that did not stay active.",
         })
     if portfolio.get('top_current_progress'):
         observations.append({
@@ -1126,7 +1126,7 @@ def _watchlist_pulse_table(pulse: dict) -> str:
             _compact_count_rate_text(rolling.get('clean_active_count', 0), rolling.get('setup_count', 0)),
         ],
         [
-            'Failed D0',
+            'D0 Fail',
             *[_compact_count_rate_text(window(label).get('failed_d0_count', 0), window(label).get('setup_count', 0)) for label in windows],
             _compact_count_rate_text(rolling.get('failed_d0_count', 0), rolling.get('setup_count', 0)),
         ],
@@ -1194,7 +1194,7 @@ def _executive_snapshot_table(latest: dict) -> str:
         ['Latest Setup Date', latest.get('latest_setup_date') or '-', '-'],
         ['Setups', str(total), str(total)],
         ['Active', _pct_text(latest.get('active', {}).get('pct')), _count_text(latest.get('active', {}), total)],
-        ['Failed D0', _pct_text(latest.get('failed_d0', {}).get('pct')), _count_text(latest.get('failed_d0', {}), total)],
+        ['D0 Fail', _pct_text(latest.get('failed_d0', {}).get('pct')), _count_text(latest.get('failed_d0', {}), total)],
         ['Failed After D0', _pct_text(latest.get('failed_after_d0', {}).get('pct')), _count_text(latest.get('failed_after_d0', {}), total)],
         ['Close < BE', _pct_text(latest.get('close_below_be', {}).get('pct')), _count_text(latest.get('close_below_be', {}), total)],
         ['Retested After D0', _pct_text(latest.get('retested_after_d0', {}).get('pct')), _count_text(latest.get('retested_after_d0', {}), total)],
@@ -1268,7 +1268,7 @@ def _comparison_phrase(label: str) -> str:
 def _shift_area(metric: str) -> str:
     mapping = {
         'active': 'Current Status',
-        'failed_d0': 'Setup Failures',
+        'failed_d0': 'D0 Fail',
         'failed_after_d0': 'Later Failures',
         'close_below_be': 'Weak Closes',
         'retested_after_d0': 'Retests',

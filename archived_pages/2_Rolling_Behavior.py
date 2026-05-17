@@ -1,3 +1,4 @@
+﻿# Archived from sidebar; legacy feature summary retained for reference.
 import streamlit as st
 
 from src.config import get_settings

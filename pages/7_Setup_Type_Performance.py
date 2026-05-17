@@ -106,21 +106,25 @@ def _setup_perf_cards_html(cards, summary) -> str:
     return f'<div class="setup-perf-card-grid">{"".join(items)}</div>'
 
 
-perf = PerfTimer('Setup Performance')
+perf = PerfTimer('Setup Type Performance')
 db_path = str(get_settings().db_path)
 
-st.title('Setup Performance')
-st.caption('Setup-level read of manually logged setup values using canonical monitor rows.')
+st.title('Setup Type Performance')
+st.caption('Setup-level read of manually logged setup types using canonical monitor rows.')
 st.markdown(_setup_performance_styles(), unsafe_allow_html=True)
 
 cache_token = data_health_cache_token(db_path)
 
 control_refresh_col, control_note_col = st.columns([0.32, 0.68])
-if control_refresh_col.button('Refresh derived views from database', key='setup_performance_refresh_derived'):
+if control_refresh_col.button(
+    'Refresh derived views from database',
+    key='setup_performance_refresh_derived',
+    help='Refreshes cached monitor/report views after data or manual metadata changes.',
+):
     refresh_derived_watchlist_views()
     st.session_state['derived_views_refreshed'] = True
     st.rerun()
-control_note_col.caption('Refreshes cached monitor/setup-performance views after database or metadata changes.')
+control_note_col.caption('Refreshes cached monitor/report views after data or manual metadata changes.')
 if st.session_state.pop('derived_views_refreshed', False):
     st.success(DERIVED_REFRESH_MESSAGE)
 
@@ -178,10 +182,11 @@ else:
     else:
         st.markdown(_setup_perf_cards_html(cards, summary), unsafe_allow_html=True)
 
-        st.subheader('Setup Failure Trend')
+        st.subheader('Setup Success Trend')
         st.markdown(
-            '<div class="setup-perf-section-caption">Cells show Failure % (failed/setup rows). '
-            'Failure = D0 Fail + Failed After D0.</div>',
+            '<div class="setup-perf-section-caption">Cells show Success % (successful setup rows / setup rows). '
+            'Success = rows not counted as D0 Fail or Failed After D0. '
+            'D0 Fail includes Trigger Day Fail or Current Status Failed D0.</div>',
             unsafe_allow_html=True,
         )
         st.dataframe(
@@ -215,7 +220,7 @@ else:
     with st.expander('Definitions / Logic', expanded=False):
         st.markdown(
             """
-- **Count**: candidate rows in the filtered Rolling Setup Monitor history.
+- **Count**: candidate rows in the filtered Rolling Backwatch Monitor history.
 - **Active**: Current Status equals Active.
 - **D0 Fail**: Trigger Day equals Fail or Current Status equals Failed D0, counted once per row.
 - **Failed After D0**: Current Status is Failed D1 or later.

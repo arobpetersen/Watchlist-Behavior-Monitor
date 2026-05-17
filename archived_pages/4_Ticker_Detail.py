@@ -1,3 +1,4 @@
+﻿# Archived from sidebar; per-ticker audit page retained for reference.
 import streamlit as st
 
 from src.config import get_settings

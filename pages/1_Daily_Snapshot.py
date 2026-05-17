@@ -137,8 +137,8 @@ def _trigger_read_panel(workflow_table):
 
 
 con = get_connection(str(get_settings().db_path))
-st.title('Setup Day Snapshot')
-if st.button('Refresh derived views from database', key='daily_snapshot_refresh_derived'):
+st.title('Daily Snapshot')
+if st.button('Refresh derived views from database', key='daily_snapshot_refresh_derived', help='Refreshes cached monitor/report views after data or manual metadata changes.'):
     refresh_derived_watchlist_views()
     st.session_state['derived_views_refreshed'] = True
     st.rerun()

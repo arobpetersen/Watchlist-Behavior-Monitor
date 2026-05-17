@@ -101,7 +101,7 @@ def test_display_labels_use_atr14_not_atr20():
     ]
 
     assert 'ATR14' in labels
-    assert 'Range / ATR14' in labels
+    assert 'Range x ATR(14)' in labels
     assert not any('ATR20' in label for label in labels)
 
 
@@ -128,7 +128,7 @@ def test_daily_snapshot_workflow_columns_prioritize_monitor_fields():
     assert 'Label' not in DAILY_WORKFLOW_COLUMNS
     assert 'Secondary' not in DAILY_WORKFLOW_COLUMNS
     assert 'Close Loc.' not in DAILY_WORKFLOW_COLUMNS
-    assert 'Range / ATR14' not in DAILY_WORKFLOW_COLUMNS
+    assert 'Range x ATR(14)' not in DAILY_WORKFLOW_COLUMNS
 
 
 def test_daily_snapshot_monitor_table_reuses_single_date_rolling_monitor_and_sorts(monkeypatch):

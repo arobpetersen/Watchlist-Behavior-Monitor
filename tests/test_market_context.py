@@ -193,7 +193,7 @@ def test_daily_snapshot_page_renders_market_context_strip_from_local_helper():
 
 
 def test_rolling_monitor_page_renders_market_context_strip_for_rendered_dates():
-    page = (Path(__file__).resolve().parents[1] / 'pages' / '3_Rolling_Setup_Monitor.py').read_text()
+    page = (Path(__file__).resolve().parents[1] / 'pages' / '3_Rolling_Backwatch_Monitor.py').read_text()
 
     assert "market_context_for_setup_dates(con, [section['setup_date'] for section in sections])" in page
     assert '_market_context_banner(market_context)' in page

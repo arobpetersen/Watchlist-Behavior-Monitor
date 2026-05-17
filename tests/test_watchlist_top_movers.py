@@ -101,16 +101,16 @@ def test_setup_window_all_includes_all_setup_dates():
 
 
 def test_default_setup_window_is_all():
-    page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
+    page = open('pages/6_Top_Movers.py', encoding='utf-8').read()
 
     assert DEFAULT_SETUP_WINDOW == 'All'
     assert 'index=SETUP_WINDOW_OPTIONS.index(DEFAULT_SETUP_WINDOW)' in page
 
 
 def test_page_groups_active_table_outside_setup_window_filters():
-    page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
+    page = open('pages/6_Top_Movers.py', encoding='utf-8').read()
 
-    portfolio_heading = page.index("st.subheader('Hypothetical Optimal Portfolio')")
+    portfolio_heading = page.index("st.subheader('Hypothetical Portfolio View')")
     portfolio_selector = page.index("'Portfolio View'")
     portfolio_caption = page.index("st.caption('Current Progress:")
     portfolio_table = page.index("st.dataframe(all_active_result.portfolio_table")
@@ -137,7 +137,7 @@ def test_page_groups_active_table_outside_setup_window_filters():
 
 
 def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
-    page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
+    page = open('pages/6_Top_Movers.py', encoding='utf-8').read()
 
     assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-longest-open-v1'" in page
     assert "top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
@@ -145,14 +145,14 @@ def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
     assert 'load_cached_monitor_history(db_path, monitor_history_cache_token)' in page
     assert "st.button('Refresh derived views from database'" in page
     assert 'refresh_derived_watchlist_views(load_watchlist_top_movers)' in page
-    assert "PerfTimer('Watchlist Top Movers')" in page
+    assert "PerfTimer('Top Movers')" in page
     assert 'render_perf_debug(st, perf)' in page
     assert "st.caption(f'Active rows: {len(all_active_result.active_table)}')" in page
     assert 'Why empty:' in page
 
 
 def test_default_portfolio_view_is_current_progress():
-    page = open('pages/6_Watchlist_Top_Movers.py', encoding='utf-8').read()
+    page = open('pages/6_Top_Movers.py', encoding='utf-8').read()
 
     assert DEFAULT_PORTFOLIO_VIEW == 'Current Progress'
     assert PORTFOLIO_VIEW_OPTIONS == ['Current Progress', 'Longest Open']

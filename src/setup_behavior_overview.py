@@ -22,7 +22,7 @@ FULL_SUMMARY_COLUMNS = [
     'Day Fail',
     'Unresolved',
     'Active',
-    'Later Failed',
+    'Failed After D0',
     'Clean 1m',
     'Failed 1m',
     'Clean 5m',
@@ -49,7 +49,7 @@ COMPARISON_COLUMNS = [
     'Setups',
     'Day Success %',
     'Active %',
-    'Later Failed %',
+    'Failed After D0 %',
     'Median Current',
     'Median Max',
 ]
@@ -382,7 +382,7 @@ def summarize_window(history: pd.DataFrame, window: OverviewWindow) -> dict:
         'Day Fail': count_fmt(_count(trigger_day, 'Fail')),
         'Unresolved': count_fmt(_count(trigger_day, 'Unresolved')),
         'Active': count_fmt(_count(current_status, 'Active')),
-        'Later Failed': count_fmt(int(_is_later_failed(current_status).sum())),
+        'Failed After D0': count_fmt(int(_is_later_failed(current_status).sum())),
         'Clean 1m': count_fmt(_count(one, 'success')),
         'Failed 1m': count_fmt(_count(one, 'failed')),
         'Clean 5m': count_fmt(_count(five, 'success')),
@@ -451,7 +451,7 @@ def comparison_rows(window_summaries: pd.DataFrame) -> pd.DataFrame:
         'Setups': window_summaries['Setups'],
         'Day Success %': window_summaries['Day Success'].apply(_pct_from_count_text),
         'Active %': window_summaries['Active'].apply(_pct_from_count_text),
-        'Later Failed %': window_summaries['Later Failed'].apply(_pct_from_count_text),
+        'Failed After D0 %': window_summaries['Failed After D0'].apply(_pct_from_count_text),
         'Median Current': window_summaries['Median Current'],
         'Median Max': window_summaries['Median Max'],
     })
@@ -490,7 +490,7 @@ def _insight_rate(rows: pd.DataFrame, kind: str) -> float | None:
         return float(rows.get('Trigger Day', pd.Series('', index=rows.index)).eq('Unresolved').sum() / total)
     if kind == 'Active':
         return float(rows.get('Current Status', pd.Series('', index=rows.index)).eq('Active').sum() / total)
-    if kind == 'Later Failed':
+    if kind in {'Failed After D0', 'Later Failed'}:
         return float(_is_later_failed(rows.get('Current Status', pd.Series('', index=rows.index))).sum() / total)
     if kind in {'PDH', '1m ORH', '5m ORH', 'Alt Required', 'Failed OR Trigger', 'No Trigger'}:
         return float(rows.get('Trigger', pd.Series('', index=rows.index)).eq(kind).sum() / total)
@@ -538,7 +538,7 @@ def generate_behavior_insights(summary_data, derived_rows: pd.DataFrame) -> list
         (1, 'Day Fail'),
         (1, 'Unresolved'),
         (2, 'Active'),
-        (2, 'Later Failed'),
+        (2, 'Failed After D0'),
         (4, 'PDH'),
         (4, '1m ORH'),
         (4, '5m ORH'),
@@ -574,9 +574,9 @@ def generate_behavior_insights(summary_data, derived_rows: pd.DataFrame) -> list
             delta = recent_value - baseline_value
             if abs(delta) < 0.15:
                 continue
-            if metric == 'Later Failed' and delta > 0:
+            if metric == 'Failed After D0' and delta > 0:
                 text = (
-                    f'Later Failed increased from {_insight_pct(baseline_value)} to {_insight_pct(recent_value)}, '
+                    f'Failed After D0 increased from {_insight_pct(baseline_value)} to {_insight_pct(recent_value)}, '
                     'meaning more setups are working on trigger day but failing later.'
                 )
             elif metric.startswith('Wide') and delta > 0:
@@ -636,7 +636,7 @@ def selected_window_metrics(window_summary: dict) -> list[dict]:
             'title': 'Current Outcome',
             'metrics': [
                 ('Active', window_summary.get('Active', '-')),
-                ('Later Failed', window_summary.get('Later Failed', '-')),
+                ('Failed After D0', window_summary.get('Failed After D0', '-')),
                 ('Median Current', window_summary.get('Median Current', '-')),
                 ('Median Max', window_summary.get('Median Max', '-')),
                 ('Median D3 High', window_summary.get('Median D3 High', '-')),
@@ -674,7 +674,7 @@ OPENING_BEHAVIOR_COLUMNS = [
     'Count',
     '% of Setups',
     'Active %',
-    'Later Failed %',
+    'Failed After D0 %',
     'Median Current',
     'Median Max',
 ]
@@ -683,7 +683,7 @@ OPENING_BEHAVIOR_MAIN_COLUMNS = [
     'Count',
     '% of Setups',
     'Currently Active',
-    'Later Failed',
+    'Failed After D0',
     'Median Max',
 ]
 MAIN_OPENING_TRIGGERS = ['1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH', 'Alt Required']
@@ -775,7 +775,7 @@ def _opening_path_row(path: str, rows: pd.DataFrame, total_setups: int) -> dict:
         'Count': count,
         '% of Setups': _pct_of_rows(count, total_setups),
         'Active %': _pct_of_rows(int(rows['Current Status'].eq('Active').sum()) if 'Current Status' in rows else 0, count),
-        'Later Failed %': _pct_of_rows(int(_is_later_failed(rows['Current Status']).sum()) if 'Current Status' in rows else 0, count),
+        'Failed After D0 %': _pct_of_rows(int(_is_later_failed(rows['Current Status']).sum()) if 'Current Status' in rows else 0, count),
         'Median Current': _fmt_pct(rows['current_pct_raw'].median() if 'current_pct_raw' in rows and count else None),
         'Median Max': _fmt_pct(rows['max_pct_raw'].median() if 'max_pct_raw' in rows and count else None),
     }
@@ -829,7 +829,7 @@ def _main_opening_row(trigger_name: str, rows: pd.DataFrame, total_setups: int) 
         'Count': count,
         '% of Setups': _pct_of_rows(count, total_setups),
         'Currently Active': _count_with_pct(active_count, _pct_of_rows(active_count, count)) if count else '-',
-        'Later Failed': _count_with_pct(later_failed_count, _pct_of_rows(later_failed_count, count)) if count else '-',
+        'Failed After D0': _count_with_pct(later_failed_count, _pct_of_rows(later_failed_count, count)) if count else '-',
         'Median Max': _fmt_pct(rows['max_pct_raw'].median() if 'max_pct_raw' in rows and count else None),
     }
 
@@ -896,12 +896,12 @@ def factual_read(window_summary: dict, opening_behavior: pd.DataFrame | None = N
     setup_dates_count = window_summary.get('Setup Dates', 0)
     day_success_pct = _pct_from_count_text(window_summary.get('Day Success', '-'))
     active_pct = _pct_from_count_text(window_summary.get('Active', '-'))
-    later_failed_pct = _pct_from_count_text(window_summary.get('Later Failed', '-'))
+    later_failed_pct = _pct_from_count_text(window_summary.get('Failed After D0', '-'))
     median_current = window_summary.get('Median Current', '-')
     median_max = window_summary.get('Median Max', '-')
     return (
         f'{window}: {setups} setups across {setup_dates_count} setup dates, '
-        f'{day_success_pct} Day Success, {active_pct} Active, {later_failed_pct} Later Failed, '
+        f'{day_success_pct} Day Success, {active_pct} Active, {later_failed_pct} Failed After D0, '
         f'{median_current} Median Current, {median_max} Median Max.'
     )
 
@@ -911,12 +911,12 @@ def selected_window_snapshot(window_summary: dict) -> str:
     setup_dates_count = window_summary.get('Setup Dates', 0)
     day_success_pct = _pct_from_count_text(window_summary.get('Day Success', '-'))
     active_pct = _pct_from_count_text(window_summary.get('Active', '-'))
-    later_failed_pct = _pct_from_count_text(window_summary.get('Later Failed', '-'))
+    later_failed_pct = _pct_from_count_text(window_summary.get('Failed After D0', '-'))
     median_current = window_summary.get('Median Current', '-')
     median_max = window_summary.get('Median Max', '-')
     return (
         f'{setups} setups across {setup_dates_count} setup dates | '
-        f'{day_success_pct} Day Success | {active_pct} Active | {later_failed_pct} Later Failed | '
+        f'{day_success_pct} Day Success | {active_pct} Active | {later_failed_pct} Failed After D0 | '
         f'Median Current {median_current} | Median Max {median_max}'
     )
 
@@ -978,11 +978,11 @@ def _current_status_snapshot(rows: pd.DataFrame | None, window_summary: dict, to
     else:
         active_count = _count_int(window_summary.get('Active', 0))
         failed_d0_count = 0
-        failed_after_count = _count_int(window_summary.get('Later Failed', 0))
+        failed_after_count = _count_int(window_summary.get('Failed After D0', 0))
         unresolved_count = _count_int(window_summary.get('Unresolved', 0))
     return [
         ('Active', f'{_fmt_rate(active_count, total)} ({active_count} / {total})'),
-        ('Failed D0', f'{_fmt_rate(failed_d0_count, total)} ({failed_d0_count} / {total})'),
+        ('D0 Fail', f'{_fmt_rate(failed_d0_count, total)} ({failed_d0_count} / {total})'),
         ('Failed After D0', f'{_fmt_rate(failed_after_count, total)} ({failed_after_count} / {total})'),
         ('Unresolved', f'{_fmt_rate(unresolved_count, total)} ({unresolved_count} / {total})'),
     ]
@@ -1123,7 +1123,7 @@ def mix_tables(window_summary: dict) -> dict[str, pd.DataFrame]:
         ]),
         'Current Mix': pd.DataFrame([
             {'Metric': 'Active', 'Value': window_summary.get('Active', '-')},
-            {'Metric': 'Later Failed', 'Value': window_summary.get('Later Failed', '-')},
+            {'Metric': 'Failed After D0', 'Value': window_summary.get('Failed After D0', '-')},
             {'Metric': 'Unresolved / Not Active', 'Value': _fmt_count(unresolved + day_fail, int(window_summary.get('Setups', 0) or 0))},
         ]),
         'Trigger Mix': pd.DataFrame([
@@ -1153,8 +1153,8 @@ TRIGGER_COMPARISON_COLUMNS = [
     'Fail %',
     'Success',
     'Success %',
-    'Later Failed Count',
-    'Later Failed %',
+    'Failed After D0 Count',
+    'Failed After D0 %',
     'Active Count',
     'Active %',
     'Median Current',
@@ -1168,7 +1168,7 @@ TRIGGER_EVENT_MAIN_COLUMNS = [
     'Failed',
     'Success',
     'Currently Active',
-    'Later Failed',
+    'Failed After D0',
     'Median Max',
 ]
 TRIGGER_FAILURE_TREND_COLUMNS = ['Trigger', 'Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
@@ -1262,8 +1262,8 @@ def trigger_outcome_comparison(history_by_window: dict[str, pd.DataFrame]) -> pd
                 'Success %': _fmt_rate(success_count, triggered_count),
                 'Failed': int(failed_mask.sum()),
                 'Fail %': _fmt_rate(int(failed_mask.sum()), triggered_count),
-                'Later Failed Count': later_failed_count,
-                'Later Failed %': _fmt_rate(later_failed_count, success_count),
+                'Failed After D0 Count': later_failed_count,
+                'Failed After D0 %': _fmt_rate(later_failed_count, success_count),
                 'Active Count': active_count,
                 'Active %': _fmt_rate(active_count, success_count),
                 'Median Current': _fmt_pct(triggered['current_pct_raw'].median() if 'current_pct_raw' in triggered and triggered_count else None),
@@ -1306,7 +1306,7 @@ def filter_detail_rows(
 
     if current_status == 'Active' and 'Current Status' in out:
         out = out[out['Current Status'] == 'Active']
-    elif current_status == 'Later Failed' and 'Current Status' in out:
+    elif current_status in {'Failed After D0', 'Later Failed'} and 'Current Status' in out:
         out = out[_is_later_failed(out['Current Status'])]
     elif current_status == 'Unresolved':
         mask = pd.Series(False, index=out.index)
@@ -1350,7 +1350,7 @@ def trigger_event_main_tables(trigger_outcomes: pd.DataFrame) -> dict[str, pd.Da
             'Failed': [_count_with_pct(count, pct) for count, pct in zip(table['Failed'], table['Fail %'])],
             'Success': [_count_with_pct(count, pct) for count, pct in zip(table['Success'], table['Success %'])],
             'Currently Active': [_count_with_pct(count, pct) if pct != '-' else '-' for count, pct in zip(table['Active Count'], table['Active %'])],
-            'Later Failed': [_count_with_pct(count, pct) if pct != '-' else '-' for count, pct in zip(table['Later Failed Count'], table['Later Failed %'])],
+            'Failed After D0': [_count_with_pct(count, pct) if pct != '-' else '-' for count, pct in zip(table['Failed After D0 Count'], table['Failed After D0 %'])],
             'Median Max': table['Median Max'],
         })
         tables[window_label] = out[TRIGGER_EVENT_MAIN_COLUMNS]
@@ -1360,8 +1360,9 @@ def trigger_event_main_tables(trigger_outcomes: pd.DataFrame) -> dict[str, pd.Da
 def _failure_trend_cell(failed: int, triggered: int) -> str:
     if int(triggered) <= 0:
         return '—'
-    pct = round((int(failed) / int(triggered)) * 100)
-    return f'{pct}% ({int(failed)}/{int(triggered)})'
+    success = max(int(triggered) - int(failed), 0)
+    pct = round((success / int(triggered)) * 100)
+    return f'{pct}% ({success}/{int(triggered)})'
 
 
 def _failure_trend_read(last_failed: int, last_triggered: int, previous_failed: int, previous_triggered: int) -> str:
@@ -1369,16 +1370,16 @@ def _failure_trend_read(last_failed: int, last_triggered: int, previous_failed: 
         return 'No recent sample'
     if int(last_triggered) < 3:
         return 'Small sample'
-    last_rate = int(last_failed) / int(last_triggered)
+    last_rate = (int(last_triggered) - int(last_failed)) / int(last_triggered)
     if last_failed == 0:
         return 'Clean recent'
     if int(previous_triggered) < 3:
         return 'Stable'
-    previous_rate = int(previous_failed) / int(previous_triggered)
+    previous_rate = (int(previous_triggered) - int(previous_failed)) / int(previous_triggered)
     delta = (last_rate - previous_rate) * 100
-    if delta <= -20:
-        return 'Improved recent'
     if delta >= 20:
+        return 'Improved recent'
+    if delta <= -20:
         return 'Worse recent'
     return 'Stable'
 
@@ -1495,7 +1496,7 @@ def style_trigger_event_table(
 
 
 def trigger_quality_table(rows: pd.DataFrame) -> pd.DataFrame:
-    columns = ['Trigger', 'Count', 'Failed Count', 'Failed %', 'Day Success %', 'Active %', 'Later Failed %', 'Median Current', 'Median Max']
+    columns = ['Trigger', 'Count', 'Failed Count', 'Failed %', 'Day Success %', 'Active %', 'Failed After D0 %', 'Median Current', 'Median Max']
     if rows.empty or 'Trigger' not in rows:
         return pd.DataFrame(columns=columns)
     out = []
@@ -1503,7 +1504,7 @@ def trigger_quality_table(rows: pd.DataFrame) -> pd.DataFrame:
         group = rows[rows['Trigger'] == trigger]
         count = len(group)
         if count == 0:
-            out.append({'Trigger': trigger, 'Count': 0, 'Failed Count': 0, 'Failed %': '-', 'Day Success %': '-', 'Active %': '-', 'Later Failed %': '-', 'Median Current': '-', 'Median Max': '-'})
+            out.append({'Trigger': trigger, 'Count': 0, 'Failed Count': 0, 'Failed %': '-', 'Day Success %': '-', 'Active %': '-', 'Failed After D0 %': '-', 'Median Current': '-', 'Median Max': '-'})
             continue
         later_failed = int(_is_later_failed(group["Current Status"]).sum())
         day_failed = int(group["Trigger Day"].eq("Fail").sum())
@@ -1515,7 +1516,7 @@ def trigger_quality_table(rows: pd.DataFrame) -> pd.DataFrame:
             'Failed %': f'{round((failed_count / count) * 100)}%',
             'Day Success %': f'{round((group["Trigger Day"].eq("Success").sum() / count) * 100)}%',
             'Active %': f'{round((group["Current Status"].eq("Active").sum() / count) * 100)}%',
-            'Later Failed %': f'{round((later_failed / count) * 100)}%',
+            'Failed After D0 %': f'{round((later_failed / count) * 100)}%',
             'Median Current': _fmt_pct(group['current_pct_raw'].median() if 'current_pct_raw' in group else None),
             'Median Max': _fmt_pct(group['max_pct_raw'].median() if 'max_pct_raw' in group else None),
         })

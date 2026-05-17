@@ -368,8 +368,9 @@ def setup_performance_cards(summary: pd.DataFrame) -> pd.DataFrame:
 def _setup_trend_cell(failed: int, count: int) -> str:
     if int(count) <= 0:
         return '—'
-    pct = round((int(failed) / int(count)) * 100)
-    return f'{pct}% ({int(failed)}/{int(count)})'
+    success = max(int(count) - int(failed), 0)
+    pct = round((success / int(count)) * 100)
+    return f'{pct}% ({success}/{int(count)})'
 
 
 def _setup_trend_read(last_failed: int, last_count: int, previous_failed: int, previous_count: int) -> str:
@@ -377,16 +378,16 @@ def _setup_trend_read(last_failed: int, last_count: int, previous_failed: int, p
         return 'No recent sample'
     if int(last_count) < 5:
         return 'Small sample'
-    last_rate = int(last_failed) / int(last_count)
+    last_rate = (int(last_count) - int(last_failed)) / int(last_count)
     if last_failed == 0:
         return 'Clean recent'
     if int(previous_count) < 5:
         return 'Small sample'
-    previous_rate = int(previous_failed) / int(previous_count)
+    previous_rate = (int(previous_count) - int(previous_failed)) / int(previous_count)
     delta = (last_rate - previous_rate) * 100
-    if delta <= -20:
-        return 'Improved recent'
     if delta >= 20:
+        return 'Improved recent'
+    if delta <= -20:
         return 'Worse recent'
     return 'Stable'
 

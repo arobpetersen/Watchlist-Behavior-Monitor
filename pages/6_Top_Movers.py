@@ -30,18 +30,18 @@ TOP_MOVERS_CACHE_VERSION = 'top-movers-longest-open-v1'
 
 @st.cache_data(show_spinner=False)
 def load_watchlist_top_movers(db_path: str, cache_version: str, _history):
-    timer = PerfTimer('Watchlist Top Movers Build', enabled=True)
+    timer = PerfTimer('Top Movers Build', enabled=True)
     con = get_connection(db_path)
     history, latest_date = load_top_movers(con, history=_history, perf=timer)
     return history, latest_date, timer.rows()
 
 
 db_path = str(get_settings().db_path)
-perf = PerfTimer('Watchlist Top Movers')
+perf = PerfTimer('Top Movers')
 
-st.title('Watchlist Top Movers')
+st.title('Top Movers')
 st.caption('Top-performing ticker/setup instances from uploaded Back-Watch setup data.')
-if st.button('Refresh derived views from database', key='top_movers_refresh_derived'):
+if st.button('Refresh derived views from database', key='top_movers_refresh_derived', help='Refreshes cached monitor/report views after data or manual metadata changes.'):
     refresh_derived_watchlist_views(load_watchlist_top_movers)
     st.session_state['derived_views_refreshed'] = True
     st.rerun()
@@ -57,7 +57,7 @@ with perf.measure('shared monitor_history load'):
     base_history, history_timings = load_cached_monitor_history(db_path, monitor_history_cache_token)
 perf.extend(history_timings, prefix='monitor_history detail: ')
 
-with perf.measure('Watchlist Top Movers data build'):
+with perf.measure('Top Movers data build'):
     history, latest_date, top_movers_timings = load_watchlist_top_movers(db_path, top_movers_cache_token, base_history)
 perf.extend(top_movers_timings, prefix='top movers detail: ')
 
@@ -67,7 +67,7 @@ else:
     with perf.measure('top movers base row mapping'):
         mapped_history = prepare_top_mover_rows(history, latest_date)
 
-    st.subheader('Hypothetical Optimal Portfolio')
+    st.subheader('Hypothetical Portfolio View')
     portfolio_view = st.selectbox(
         'Portfolio View',
         PORTFOLIO_VIEW_OPTIONS,
