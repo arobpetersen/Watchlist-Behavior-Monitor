@@ -2,6 +2,310 @@
 
 Date: 2026-05-14
 
+## 2026-05-17 Workflow Performance Pass
+
+### Executive Summary
+
+The app's current slowdown is still dominated by one cold path: the full canonical
+`monitor_history()` build. On the current local database it takes about 16.9-18.0 seconds
+directly and makes any page that depends on shared full history take about 20 seconds when
+opened cold.
+
+Once shared monitor history is cached, the newer pages are not the bottleneck:
+Trigger Event Explorer filters in milliseconds, Top Movers maps/builds in under 0.2
+seconds, Setup Type Performance aggregations are about 0.2 seconds total, and Data Health
+stays cheap at about 0.22 seconds uncached / effectively free cached.
+
+The highest-impact next performance task is not UI tuning. It is to stop rebuilding all
+canonical monitor rows on first render for every shared-history page. The lowest-risk next
+step is a diagnostic/implementation slice that creates a reusable, DB-backed canonical
+monitor-history artifact during the local pipeline or refresh action, then lets Streamlit
+pages read it cheaply.
+
+### Timing Method
+
+Measured locally against `data/db/watchlist.duckdb` on 2026-05-17 using direct helper
+timing and `streamlit.testing.v1.AppTest` page smoke runs. Page timings are not browser
+render timings, but they are useful for Python compute/cache behavior.
+
+### Data Size Overview
+
+| Item | Count |
+| --- | ---: |
+| `watchlist_candidates` | 123 |
+| Distinct setup dates | 25 |
+| `daily_bars` | 4,212 |
+| `intraday_bars_1m` | 83,340 |
+| `behavior_labels` | 123 |
+| `entry_day_features` | 123 |
+| Canonical monitor rows | 123 |
+| Canonical monitor setup dates | 25 |
+| Average rows per setup date | 4.92 |
+| Max rows per setup date | 11 |
+
+### Current Page Timings
+
+Same-process AppTest run, so shared Streamlit cache is warmed after Window Behavior
+Overview:
+
+| Page | First run | Second run | Notes |
+| --- | ---: | ---: | --- |
+| Data Ingest & Health | 1.47s | 0.41s | No full `monitor_history()` |
+| Daily Snapshot | 0.45s | 0.42s | Selected-date path only |
+| Rolling Backwatch Monitor | 2.84s | 0.32s | Own latest-5 cache |
+| Window Behavior Overview | 20.44s | 1.17s | Cold full `monitor_history()` |
+| Trigger Event Explorer | 0.06s | 0.06s | Hit warmed shared history |
+| Top Movers | 0.29s | 0.29s | Hit warmed shared history |
+| Setup Type Performance | 0.21s | 0.19s | Hit warmed shared history |
+
+Isolated cold-ish page timings for shared-history pages:
+
+| Page | Isolated first render | Full `monitor_history()` invoked? |
+| --- | ---: | --- |
+| Trigger Event Explorer | 19.76s | Yes |
+| Top Movers | 19.97s | Yes |
+| Setup Type Performance | 20.02s | Yes |
+
+Interpretation: these pages are fast after the shared history cache exists, but each can be
+slow if it is the first shared-history page opened after a process/cache reset.
+
+### Helper-Level Timings
+
+| Helper / workflow | Time | Rows / scope |
+| --- | ---: | --- |
+| `data_health_cache_token(db_path)` | 0.005s | DB file + candidate metadata fingerprint |
+| `load_data_health_summary()` first | 0.225s | Status: `Check Data` |
+| `load_data_health_summary()` second | 0.000s | Cache hit |
+| `daily_snapshot_monitor_table()` latest selected date | 0.725s | 8 rows |
+| `market_context_for_setup_date()` | 0.005s | One setup date |
+| `rolling_setup_monitor_for_date()` | 0.700s | One setup date |
+| `rolling_setup_monitor(setup_dates=5)` | 2.409s | 24 rows / 5 setup dates |
+| `market_context_for_setup_dates()` latest 5 | 0.019s | Batched, cheap |
+| `load_cached_monitor_history()` first | 16.944s | 123 rows / 25 setup dates |
+| `load_cached_monitor_history()` second | 0.001s | Cache hit |
+| `setup_behavior_overview(history=...)` | 0.838-0.841s | Uses existing history |
+| `build_daily_report_payload()` | 1.098s | Uses existing history + overview |
+| `render_daily_report_markdown()` | 0.000s | String rendering only |
+| Trigger Explorer `explorer_rows()` Last 10 | 0.025s | 49 rows |
+| Trigger Explorer filtered VWAP Success | 0.006s | 15 rows |
+| Trigger Explorer summary cards | 0.001s | Filtered rows |
+| Trigger Explorer CSV bytes | 0.002s | Filtered rows |
+| `load_top_movers(history=...)` | 0.011s | Existing history |
+| `prepare_top_mover_rows()` | 0.118s | 123 rows |
+| `top_movers_from_history()` active | 0.052s | Mapped rows |
+| Setup Performance filter rows | 0.006s | 123 rows |
+| Setup Performance summary | 0.021s | Filtered rows |
+| Setup Performance tactic summary | 0.024s | Filtered rows |
+| Setup Performance failure trend | 0.105s | Filtered rows |
+| Setup Performance cards | 0.008s | Summary rows |
+
+### `monitor_history()` Detail
+
+Direct `monitor_history(con, perf=timer)` timing:
+
+| Step | Time |
+| --- | ---: |
+| `monitor_history rolling sections build` | 15.736s |
+| `Rolling Setup Monitor derivation: retests/follow-through` | 3.667s |
+| `Rolling Setup Monitor derivation: bar slicing` | 3.208s |
+| `Rolling Setup Monitor derivation: ORH/PDH triggers` | 3.124s |
+| `Rolling Setup Monitor derivation: trigger resolution` | 2.657s |
+| `monitor_history VWAP/display trigger pass` | 2.145s |
+| `Rolling Setup Monitor derivation: VWAP reclaim` | 2.114s |
+| `monitor_history derivation: raw VWAP reclaim` | 2.071s |
+| `Rolling Setup Monitor dataframe formatting` | 0.831s |
+| Rolling SQL reads combined | ~0.067s |
+| Monitor-history SQL reads combined | ~0.039s |
+
+The bottleneck remains Python-side derivation over intraday bars, not SQL fetch time.
+
+### Page-Level Findings
+
+#### Data Ingest & Health / Root
+
+The root app does not call full monitor history. AppTest first run was 1.47s and rerun was
+0.41s. Current root work includes source-folder scanning and DB/data-health checks, but it
+is not the main slowdown.
+
+#### Daily Snapshot
+
+Daily Snapshot remains healthy because it uses `daily_snapshot_monitor_table()` /
+`rolling_setup_monitor_for_date()` for the selected date instead of full history. Latest
+selected-date helper time was 0.73s for 8 rows. Market context was about 0.005s.
+
+Potential quick win: add or confirm a selected-date Streamlit cache around the page loader
+if reruns feel sticky during widget changes.
+
+#### Rolling Backwatch Monitor
+
+Rolling Backwatch Monitor uses its own latest-5 cached loader:
+
+`load_rolling_setup_sections(db_path, rolling_cache_token)`
+
+Cold latest-5 helper time was 2.41s for 24 rows across 5 setup dates. AppTest first run was
+2.84s and rerun was 0.32s. Market context is batched by setup date and cheap.
+
+This page is slower than Daily Snapshot but not the whole-app bottleneck.
+
+#### Window Behavior Overview
+
+This is still the most visibly expensive page on a cold cache. It calls shared
+`load_cached_monitor_history()` and then builds overview/report/trend structures. Cold
+page render was 20.44s; rerun was 1.17s. Once history exists, the overview transform is
+about 0.84s and daily report payload is about 1.10s.
+
+#### Trigger Event Explorer
+
+The explorer itself is cheap after shared history exists. The new filter pipeline is not a
+bottleneck:
+
+- base Last 10 row prep: 0.025s
+- filtered VWAP Success: 0.006s
+- summary cards: 0.001s
+- CSV: 0.002s
+
+However, isolated first render was 19.76s because it must build shared full monitor
+history if no other page already did.
+
+#### Top Movers
+
+Top Movers is also cheap after shared history exists. Its isolated first render was 19.97s
+only because it builds shared monitor history cold. Mapping/table work is about 0.17s.
+
+One small inefficiency remains: the page calls `data_health_cache_token(db_path)` three
+times in one render rather than computing it once and reusing it.
+
+#### Setup Type Performance
+
+Setup Type Performance is healthy after shared history exists. Isolated first render was
+20.02s because it builds monitor history cold; page-specific aggregation work is about
+0.16s total. It already computes `cache_token = data_health_cache_token(db_path)` once and
+reuses it.
+
+#### Data Health Indicator
+
+The prior fix is holding. `load_data_health_summary()` measured 0.225s uncached and ~0s
+cached. It no longer invokes full monitor history by default. Current health status is
+`Check Data`, with latest setup 2026-05-15, latest daily bar 2026-05-15, and partial
+intraday sessions = 1.
+
+#### Daily Pipeline / `run_daily`
+
+Not re-profiled in this pass because page render slowness is clearly dominated by
+`monitor_history()`. The pipeline remains relevant for a bigger architecture task because
+it is the right place to materialize canonical monitor rows after data updates.
+
+### Cache / Recompute Findings
+
+Pages using shared full monitor-history cache:
+
+- Window Behavior Overview
+- Trigger Event Explorer
+- Top Movers
+- Setup Type Performance
+
+Pages using selected-date/window-specific loaders:
+
+- Daily Snapshot: selected date via `daily_snapshot_monitor_table()`
+- Rolling Backwatch Monitor: latest 5 via page-specific `load_rolling_setup_sections()`
+
+Cache token observations:
+
+- Shared history token is `MONITOR_HISTORY_CACHE_VERSION:{data_health_cache_token(db_path)}`.
+- Data Health token includes DB mtime/size plus a candidate metadata fingerprint.
+- Window Behavior Overview and Top Movers call `data_health_cache_token(db_path)` multiple
+  times per render. The call is cheap (~0.005s), so this is not a major bottleneck, but
+  reusing it would clean up the cache-token flow.
+- `load_cached_monitor_history()` returns timing rows from the cache miss. On cache hit,
+  cached detailed timing rows can still be displayed, which can confuse debugging unless
+  the outer `shared monitor_history load` timing is consulted.
+- Recent Trigger Read semantic changes did not require a shared monitor-history cache
+  version bump because they changed display formatting and page rendering, not canonical
+  history rows. The Rolling page-specific cache was correctly bumped for its summary-count
+  change.
+
+Repeated recomputation observations:
+
+- No visible page appears to call full `monitor_history()` more than once per render.
+- Trigger Event Explorer filters locally on the already-loaded DataFrame.
+- Setup Performance reuses shared history.
+- Top Movers passes shared history into `load_top_movers()` and avoids rebuilding history.
+- Market context is per date or batched by setup date, not per row.
+- Data Health is no longer using the expensive canonical monitor-history path by default.
+
+### Top 5 Current Bottlenecks
+
+1. Cold shared full `monitor_history()` build (~16.9-18.0s direct, ~20s page render).
+2. `rolling_setup_monitor()` derivation inside full history, especially retests,
+   bar slicing, ORH/PDH trigger work, trigger resolution, and VWAP reclaim.
+3. Window Behavior Overview cold load because it combines full history, overview
+   aggregation, and daily report payload in one initial render.
+4. Shared-history pages opened cold (Trigger Event Explorer, Top Movers, Setup Type
+   Performance) all pay the same full-history cost before their cheap page-specific work.
+5. Diagnostic clarity: cached timing rows can look like recompute details even on cache hit.
+
+### Recommended Next Tasks
+
+#### A. Quick Wins
+
+- Compute `data_health_cache_token(db_path)` once per page render in Window Behavior
+  Overview and Top Movers, then reuse it for health, overview/top-movers, and shared
+  history cache keys.
+- Add a selected-date `st.cache_data` loader for Daily Snapshot if user interactions cause
+  repeated selected-date recomputation.
+- Add a small helper or debug note so cached timing rows are labeled as "cache-miss detail"
+  only when the outer cache call actually missed.
+- Keep Data Health compact/collapsed on research pages; its compute is fixed, but it still
+  consumes visual attention.
+
+#### B. Medium Fixes
+
+- Add a selected-window canonical history loader for Trigger Event Explorer and Window
+  Behavior Overview when the user only needs Last 5 / Last 10 / Last 20 rows. This avoids
+  full-history build for common workflows but still keeps existing canonical logic.
+- Cache the Trigger Event Explorer base `explorer_rows(history, window)` per history token
+  and selected window if rerenders become noticeable at larger data sizes.
+- Split Daily Intelligence Report payload generation behind an expander/button or cached
+  page helper so Overview can render summary/trend tables before report assembly.
+- Reuse precomputed trigger outcome matrices across Overview/Explorer if both are open in
+  the same session.
+
+#### C. Big Architecture
+
+- Materialize canonical monitor history rows into a durable table during `run_daily` or a
+  manual "refresh derived views" action.
+- Incrementally recompute only affected setup dates after ingest or metadata edits.
+- Persist trigger-event outcome rows separately from display rows so Overview, Explorer,
+  Top Movers, and Setup Performance can read cheap structured facts.
+- Separate compute layer from Streamlit render layer so pages never run heavy intraday
+  derivation during first render.
+
+### Recommended Next Implementation Task
+
+Implement a durable, refreshable canonical monitor-history cache table populated outside
+normal page render.
+
+Scope the first slice narrowly:
+
+1. Add a derived table for canonical monitor history rows.
+2. Populate it from the existing `monitor_history()` logic during the existing refresh
+   action or daily pipeline.
+3. Add a read path that uses the table when it is fresh for the current DB/data token.
+4. Fall back to current `monitor_history()` if the table is missing or stale.
+5. Keep all calculations identical by storing outputs from the existing canonical builder.
+
+Why this next: it targets the 20-second cold-load pain shared by four visible pages, avoids
+changing trigger/status math, and is testable by comparing materialized rows to current
+dynamic `monitor_history()` output.
+
+### Do Not Do Yet
+
+- Do not optimize individual Streamlit table rendering before fixing cold shared history.
+- Do not rewrite trigger/status/lifecycle calculations for speed in this pass.
+- Do not add more page features that depend on full monitor history.
+- Do not introduce API fetches during page render.
+- Do not add broad cache clearing. It will make the expensive cold path more visible.
+
 ## Executive Summary
 
 The app's main performance constraint is still the canonical full-history build:

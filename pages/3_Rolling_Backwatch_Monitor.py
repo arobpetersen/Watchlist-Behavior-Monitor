@@ -348,7 +348,7 @@ with perf.measure('DB connection/open'):
 st.title('Rolling Backwatch Monitor')
 st.caption('Recent back-watch setup dates using canonical trigger/status rows.')
 if st.button('Refresh derived views from database', key='rolling_monitor_refresh_derived', help='Refreshes cached monitor/report views after data or manual metadata changes.'):
-    refresh_derived_watchlist_views(load_rolling_setup_sections)
+    refresh_derived_watchlist_views(load_rolling_setup_sections, db_path=db_path, rebuild_materialized_history=True)
     st.session_state['derived_views_refreshed'] = True
     st.rerun()
 if st.session_state.pop('derived_views_refreshed', False):
@@ -460,7 +460,7 @@ else:
                 try:
                     changed = apply_setup_rating_updates(con, editable, edited_for_save)
                     if changed:
-                        refresh_derived_watchlist_views(load_rolling_setup_sections)
+                        refresh_derived_watchlist_views(load_rolling_setup_sections, db_path=db_path, rebuild_materialized_history=True)
                         st.success('Saved setup/rating changes.')
                         st.rerun()
                     else:

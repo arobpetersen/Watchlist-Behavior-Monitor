@@ -294,7 +294,7 @@ def test_daily_snapshot_page_exposes_compact_manual_metadata_editor():
     assert "st.subheader('Edit Selected Candidate')" in page
     assert 'daily_snapshot_monitor_table(con, d, include_candidate_id=True)' in page
     assert 'apply_setup_rating_updates(con, original, edited)' in page
-    assert 'refresh_derived_watchlist_views()' in page
+    assert 'refresh_derived_watchlist_views(db_path=str(get_settings().db_path), rebuild_materialized_history=True)' in page
     assert "st.button('Refresh derived views from database'" in page
     assert 'st.cache_data.clear()' not in page
     assert "edited.loc[0, 'Setup']" in page

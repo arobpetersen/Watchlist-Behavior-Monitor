@@ -3,6 +3,7 @@ import streamlit as st
 
 from src.config import get_settings
 from src.data_health_indicator import data_health_cache_token, load_data_health_summary, render_data_health_indicator
+from src.materialized_monitor_history import monitor_history_source_token
 from src.monitor_history_loader import MONITOR_HISTORY_CACHE_VERSION, load_cached_monitor_history
 from src.performance import PerfTimer, render_perf_debug
 from src.trigger_event_explorer import (
@@ -67,7 +68,7 @@ st.markdown(
 )
 
 cache_token = data_health_cache_token(db_path)
-monitor_history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{cache_token}'
+monitor_history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{monitor_history_source_token(db_path)}'
 with perf.measure('Data Health load'):
     health_summary = load_data_health_summary(db_path, cache_token)
 render_data_health_indicator(health_summary, compact=True)

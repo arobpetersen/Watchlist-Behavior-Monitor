@@ -303,6 +303,6 @@ def test_setup_performance_page_uses_shared_monitor_history_cache_token():
     source = page.read_text()
 
     assert 'cache_token = data_health_cache_token(db_path)' in source
-    assert "history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{cache_token}'" in source
+    assert "history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{monitor_history_source_token(db_path)}'" in source
     assert 'SETUP_PERFORMANCE_CACHE_VERSION' not in source
     assert 'refresh_derived_watchlist_views(load_cached_monitor_history)' not in source

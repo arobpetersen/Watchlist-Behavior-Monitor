@@ -3,6 +3,7 @@ from html import escape
 
 from src.config import get_settings
 from src.data_health_indicator import data_health_cache_token, load_data_health_summary, render_data_health_indicator
+from src.materialized_monitor_history import monitor_history_source_token
 from src.monitor_history_loader import MONITOR_HISTORY_CACHE_VERSION, load_cached_monitor_history
 from src.performance import PerfTimer, render_perf_debug
 from src.setup_performance import (
@@ -121,7 +122,7 @@ if control_refresh_col.button(
     key='setup_performance_refresh_derived',
     help='Refreshes cached monitor/report views after data or manual metadata changes.',
 ):
-    refresh_derived_watchlist_views()
+    refresh_derived_watchlist_views(db_path=db_path, rebuild_materialized_history=True)
     st.session_state['derived_views_refreshed'] = True
     st.rerun()
 control_note_col.caption('Refreshes cached monitor/report views after data or manual metadata changes.')
@@ -132,7 +133,7 @@ with perf.measure('Data Health load'):
     health_summary = load_data_health_summary(db_path, cache_token)
 render_data_health_indicator(health_summary)
 
-history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{cache_token}'
+history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{monitor_history_source_token(db_path)}'
 with perf.measure('shared monitor_history load'):
     history, history_timings = load_cached_monitor_history(db_path, history_cache_token)
 perf.extend(history_timings, prefix='monitor_history detail: ')

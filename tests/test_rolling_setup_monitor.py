@@ -2192,7 +2192,7 @@ def test_rolling_setup_monitor_page_uses_db_backed_cache_token_and_perf_debug():
     assert "Edit Setup / Entry Tactic / Rating" in page
     assert "display[['Ticker', 'Setup', 'Entry Tactic', 'Rating']]" in page
     assert 'entry_tactic_dropdown_options(table)' in page
-    assert 'refresh_derived_watchlist_views(load_rolling_setup_sections)' in page
+    assert 'refresh_derived_watchlist_views(load_rolling_setup_sections, db_path=db_path, rebuild_materialized_history=True)' in page
     assert 'st.cache_data.clear()' not in page
     assert "st.success('Saved setup/rating changes.')" in page
 

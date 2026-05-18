@@ -5,6 +5,7 @@ from src.data_health_indicator import data_health_cache_token, load_data_health_
 from src.database import get_connection
 from src.daily_report import build_daily_report_payload, render_daily_report_markdown
 from src.market_context import format_market_context_strip, market_context_for_setup_date
+from src.materialized_monitor_history import monitor_history_source_token
 from src.monitor_history_loader import MONITOR_HISTORY_CACHE_VERSION, load_cached_monitor_history
 from src.performance import PerfTimer, render_perf_debug
 from src.setup_behavior_overview import (
@@ -71,13 +72,14 @@ st.title('Window Behavior Overview')
 st.caption('Compare setup behavior across recent back-watch windows.')
 st.caption('D3 High only includes setups with completed D3 data.')
 if st.button('Refresh derived views from database', key='setup_overview_refresh_derived', help='Refreshes cached monitor/report views after data or manual metadata changes.'):
-    refresh_derived_watchlist_views(load_setup_behavior_overview)
+    refresh_derived_watchlist_views(load_setup_behavior_overview, db_path=db_path, rebuild_materialized_history=True)
     st.session_state['derived_views_refreshed'] = True
     st.rerun()
 if st.session_state.pop('derived_views_refreshed', False):
     st.success(DERIVED_REFRESH_MESSAGE)
-overview_cache_token = f'{OVERVIEW_CACHE_VERSION}:{data_health_cache_token(db_path)}'
-monitor_history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{data_health_cache_token(db_path)}'
+monitor_source_token = monitor_history_source_token(db_path)
+overview_cache_token = f'{OVERVIEW_CACHE_VERSION}:{monitor_source_token}'
+monitor_history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{monitor_source_token}'
 with perf.measure('Data Health load'):
     health_summary = load_data_health_summary(db_path, data_health_cache_token(db_path))
 render_data_health_indicator(health_summary)

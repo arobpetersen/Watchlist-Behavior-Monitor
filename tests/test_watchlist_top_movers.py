@@ -140,11 +140,12 @@ def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
     page = open('pages/7_Top_Movers.py', encoding='utf-8').read()
 
     assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-longest-open-v1'" in page
-    assert "top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
+    assert "monitor_source_token = monitor_history_source_token(db_path)" in page
+    assert "top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{monitor_source_token}'" in page
     assert 'load_watchlist_top_movers(db_path, top_movers_cache_token, base_history)' in page
     assert 'load_cached_monitor_history(db_path, monitor_history_cache_token)' in page
     assert "st.button('Refresh derived views from database'" in page
-    assert 'refresh_derived_watchlist_views(load_watchlist_top_movers)' in page
+    assert 'refresh_derived_watchlist_views(load_watchlist_top_movers, db_path=db_path, rebuild_materialized_history=True)' in page
     assert "PerfTimer('Top Movers')" in page
     assert 'render_perf_debug(st, perf)' in page
     assert "st.caption(f'Active rows: {len(all_active_result.active_table)}')" in page

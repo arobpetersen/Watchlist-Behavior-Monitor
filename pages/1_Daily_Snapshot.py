@@ -139,7 +139,7 @@ def _trigger_read_panel(workflow_table):
 con = get_connection(str(get_settings().db_path))
 st.title('Daily Snapshot')
 if st.button('Refresh derived views from database', key='daily_snapshot_refresh_derived', help='Refreshes cached monitor/report views after data or manual metadata changes.'):
-    refresh_derived_watchlist_views()
+    refresh_derived_watchlist_views(db_path=str(get_settings().db_path), rebuild_materialized_history=True)
     st.session_state['derived_views_refreshed'] = True
     st.rerun()
 if st.session_state.pop('derived_views_refreshed', False):
@@ -223,7 +223,7 @@ else:
             try:
                 changed = apply_setup_rating_updates(con, original, edited)
                 if changed:
-                    refresh_derived_watchlist_views()
+                    refresh_derived_watchlist_views(db_path=str(get_settings().db_path), rebuild_materialized_history=True)
                     st.session_state['daily_metadata_saved'] = True
                     st.success('Saved setup metadata.')
                     st.rerun()

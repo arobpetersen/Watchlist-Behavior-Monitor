@@ -8,6 +8,8 @@ from src.behavior_labels import assign_labels_for_date
 from src.config import get_settings
 from src.database import get_connection
 from src.feature_engine import compute_features
+from src.materialized_monitor_history import materialize_monitor_history
+from src.monitor_history_loader import MONITOR_HISTORY_CACHE_VERSION
 from src.massive_client import MassiveClient
 from src.watchlist_ingestion import ingest_watchlists
 
@@ -22,6 +24,7 @@ SUMMARY_KEYS = [
     'features_calculated',
     'forward_stats_calculated',
     'labels_assigned',
+    'materialized_monitor_history_rows',
     'failures',
 ]
 
@@ -102,6 +105,17 @@ def run_daily_pipeline(ingest_result: dict | None = None) -> dict:
             forward_stats_calculated += int(bool(has_forward and has_forward[0]))
     for d in cands['watchlist_date'].dropna().astype(str).unique().tolist():
         labels += assign_labels_for_date(con, d)
+    materialized_rows = 0
+    try:
+        materialized = materialize_monitor_history(
+            con,
+            db_path=str(s.db_path),
+            source='run_daily',
+            cache_version=MONITOR_HISTORY_CACHE_VERSION,
+        )
+        materialized_rows = materialized.row_count
+    except Exception as e:
+        failures.append(f'Materialized monitor history failed: {e}')
 
     return {
         'db_path': str(s.db_path.resolve()),
@@ -114,6 +128,7 @@ def run_daily_pipeline(ingest_result: dict | None = None) -> dict:
         'features_calculated': features,
         'forward_stats_calculated': forward_stats_calculated,
         'labels_assigned': labels,
+        'materialized_monitor_history_rows': materialized_rows,
         'failures': failures,
     }
 
@@ -130,6 +145,7 @@ def print_summary(summary: dict) -> None:
     print(f"- features calculated: {summary['features_calculated']}")
     print(f"- forward_stats_calculated: {summary['forward_stats_calculated']}")
     print(f"- labels assigned: {summary['labels_assigned']}")
+    print(f"- materialized_monitor_history_rows: {summary.get('materialized_monitor_history_rows', 0)}")
     print(f"- failures: {len(summary['failures'])}")
     for f in summary['failures']:
         print(f'  * {f}')

@@ -3,6 +3,7 @@ import streamlit as st
 from src.config import get_settings
 from src.data_health_indicator import data_health_cache_token, load_data_health_summary, render_data_health_indicator
 from src.database import get_connection
+from src.materialized_monitor_history import monitor_history_source_token
 from src.monitor_history_loader import MONITOR_HISTORY_CACHE_VERSION, load_cached_monitor_history
 from src.performance import PerfTimer, render_perf_debug
 from src.watchlist_top_movers import (
@@ -42,7 +43,7 @@ perf = PerfTimer('Top Movers')
 st.title('Top Movers')
 st.caption('Top-performing ticker/setup instances from uploaded Back-Watch setup data.')
 if st.button('Refresh derived views from database', key='top_movers_refresh_derived', help='Refreshes cached monitor/report views after data or manual metadata changes.'):
-    refresh_derived_watchlist_views(load_watchlist_top_movers)
+    refresh_derived_watchlist_views(load_watchlist_top_movers, db_path=db_path, rebuild_materialized_history=True)
     st.session_state['derived_views_refreshed'] = True
     st.rerun()
 if st.session_state.pop('derived_views_refreshed', False):
@@ -51,8 +52,9 @@ with perf.measure('Data Health load'):
     health_summary = load_data_health_summary(db_path, data_health_cache_token(db_path))
 render_data_health_indicator(health_summary)
 
-top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'
-monitor_history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{data_health_cache_token(db_path)}'
+monitor_source_token = monitor_history_source_token(db_path)
+top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{monitor_source_token}'
+monitor_history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{monitor_source_token}'
 with perf.measure('shared monitor_history load'):
     base_history, history_timings = load_cached_monitor_history(db_path, monitor_history_cache_token)
 perf.extend(history_timings, prefix='monitor_history detail: ')

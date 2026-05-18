@@ -1877,9 +1877,10 @@ def test_setup_behavior_page_uses_successful_triggers_section_title():
     assert "st.subheader('Selected Window Ticker Detail Preview')" in page
     assert 'Detailed trigger-event row research now lives in Trigger Event Explorer.' in page
     assert "OVERVIEW_CACHE_VERSION = 'setup-overview-daily-report-v1'" in page
-    assert "overview_cache_token = f'{OVERVIEW_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
+    assert "monitor_source_token = monitor_history_source_token(db_path)" in page
+    assert "overview_cache_token = f'{OVERVIEW_CACHE_VERSION}:{monitor_source_token}'" in page
     assert "st.button('Refresh derived views from database'" in page
-    assert 'refresh_derived_watchlist_views(load_setup_behavior_overview)' in page
+    assert 'refresh_derived_watchlist_views(load_setup_behavior_overview, db_path=db_path, rebuild_materialized_history=True)' in page
     assert "PerfTimer('Window Behavior Overview')" in page
     assert 'render_perf_debug(st, perf)' in page
 
