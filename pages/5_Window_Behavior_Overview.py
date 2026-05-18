@@ -9,7 +9,6 @@ from src.monitor_history_loader import MONITOR_HISTORY_CACHE_VERSION, load_cache
 from src.performance import PerfTimer, render_perf_debug
 from src.setup_behavior_overview import (
     OPENING_BEHAVIOR_MAIN_COLUMNS,
-    OPENING_PATH_FILTER_OPTIONS,
     filter_detail_rows,
     main_opening_behavior_table,
     metric_cards_html,
@@ -182,27 +181,10 @@ else:
             'This groups setups by their final/primary trigger label. For per-trigger success/failure, use Trigger Event Outcomes Across Windows.'
         )
 
-    st.subheader('Selected Window Ticker Detail')
-    filter_cols = st.columns(4)
-    with filter_cols[0]:
-        trigger_level = st.selectbox('Trigger event level', ['All', '1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH', 'Alt Required'], key='setup_behavior_trigger_event_level')
-    with filter_cols[1]:
-        trigger_result = st.selectbox(
-            'Trigger event result',
-            ['All', 'success', 'failed', 'blank', 'Gap', 'N/A', 'Not Applicable'],
-            key='setup_behavior_trigger_event_result',
-        )
-    with filter_cols[2]:
-        current_status = st.selectbox('Current status', ['All', 'Active', 'Failed After D0', 'Unresolved'], key='setup_behavior_current_status_filter')
-    with filter_cols[3]:
-        opening_path_group = st.selectbox('Opening path group', OPENING_PATH_FILTER_OPTIONS, key='setup_behavior_opening_path_group')
-    filtered_detail = filter_detail_rows(
-        overview['details'][selected_window],
-        trigger_level=trigger_level,
-        trigger_result=trigger_result,
-        current_status=current_status,
-        opening_path_group=opening_path_group,
-    )
-    st.dataframe(filtered_detail, width='stretch', hide_index=True)
+    st.subheader('Selected Window Ticker Detail Preview')
+    st.caption('Detailed trigger-event row research now lives in Trigger Event Explorer. Use it for full filtering and CSV export.')
+    with st.expander('Preview selected-window rows', expanded=False):
+        filtered_detail = filter_detail_rows(overview['details'][selected_window]).head(10)
+        st.dataframe(filtered_detail, width='stretch', hide_index=True)
 
 render_perf_debug(st, perf)

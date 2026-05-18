@@ -299,7 +299,7 @@ def test_empty_input_returns_stable_tables():
 
 
 def test_setup_performance_page_uses_shared_monitor_history_cache_token():
-    page = Path(__file__).resolve().parents[1] / 'pages' / '7_Setup_Type_Performance.py'
+    page = Path(__file__).resolve().parents[1] / 'pages' / '8_Setup_Type_Performance.py'
     source = page.read_text()
 
     assert 'cache_token = data_health_cache_token(db_path)' in source

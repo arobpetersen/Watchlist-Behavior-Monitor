@@ -64,10 +64,13 @@ def load_data_health_summary(db_path: str, cache_version: str = DATA_HEALTH_CACH
     return build_data_health_summary(con)
 
 
-def render_data_health_indicator(summary: DataHealthSummary) -> None:
+def render_data_health_indicator(summary: DataHealthSummary, compact: bool = False) -> None:
     expanded = summary.status == 'Check Data'
-    with st.expander(f'Data Health: {summary.status}', expanded=expanded):
+    if compact:
         st.caption(data_health_line(summary))
+    with st.expander(f'Data Health: {summary.status}', expanded=expanded):
+        if not compact:
+            st.caption(data_health_line(summary))
         st.dataframe(
             [{
                 'Latest Setup Date': summary.latest_setup_date,

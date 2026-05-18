@@ -101,14 +101,14 @@ def test_setup_window_all_includes_all_setup_dates():
 
 
 def test_default_setup_window_is_all():
-    page = open('pages/6_Top_Movers.py', encoding='utf-8').read()
+    page = open('pages/7_Top_Movers.py', encoding='utf-8').read()
 
     assert DEFAULT_SETUP_WINDOW == 'All'
     assert 'index=SETUP_WINDOW_OPTIONS.index(DEFAULT_SETUP_WINDOW)' in page
 
 
 def test_page_groups_active_table_outside_setup_window_filters():
-    page = open('pages/6_Top_Movers.py', encoding='utf-8').read()
+    page = open('pages/7_Top_Movers.py', encoding='utf-8').read()
 
     portfolio_heading = page.index("st.subheader('Hypothetical Portfolio View')")
     portfolio_selector = page.index("'Portfolio View'")
@@ -137,7 +137,7 @@ def test_page_groups_active_table_outside_setup_window_filters():
 
 
 def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
-    page = open('pages/6_Top_Movers.py', encoding='utf-8').read()
+    page = open('pages/7_Top_Movers.py', encoding='utf-8').read()
 
     assert "TOP_MOVERS_CACHE_VERSION = 'top-movers-longest-open-v1'" in page
     assert "top_movers_cache_token = f'{TOP_MOVERS_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
@@ -152,7 +152,7 @@ def test_page_active_table_uses_db_backed_cache_token_and_row_count_caption():
 
 
 def test_default_portfolio_view_is_current_progress():
-    page = open('pages/6_Top_Movers.py', encoding='utf-8').read()
+    page = open('pages/7_Top_Movers.py', encoding='utf-8').read()
 
     assert DEFAULT_PORTFOLIO_VIEW == 'Current Progress'
     assert PORTFOLIO_VIEW_OPTIONS == ['Current Progress', 'Longest Open']
