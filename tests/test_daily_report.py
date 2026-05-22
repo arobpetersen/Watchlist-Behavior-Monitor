@@ -99,7 +99,8 @@ def test_daily_report_payload_includes_last5_and_previous5_summaries():
 
     windows = payload['recent_window_summary']
 
-    assert {'Last 5 Setup Dates', 'Previous 5 Setup Dates'}.issubset(windows)
+    assert {'Last 2 Setup Dates', 'Last 5 Setup Dates', 'Previous 5 Setup Dates'}.issubset(windows)
+    assert windows['Last 2 Setup Dates']['setup_count'] == 2
     assert windows['Last 5 Setup Dates']['setup_count'] == 5
     assert windows['Previous 5 Setup Dates']['setup_count'] == 5
     assert windows['Last 5 Setup Dates']['failed_d0_pct'] == 60.0
@@ -119,6 +120,18 @@ def test_daily_report_payload_includes_watchlist_pulse_quality_metrics():
     assert pulse['Last 5']['thresholds']['5']['count'] == 5
     assert pulse['Last 5']['thresholds']['10']['count'] == 5
     assert pulse['Last 5']['thresholds']['20']['count'] == 4
+
+
+def test_daily_report_payload_includes_immediate_pulse():
+    history = _report_history()
+    payload = build_daily_report_payload(history, _overview(history))
+
+    pulse = payload['immediate_pulse']
+
+    assert pulse['setup_date_count'] == 2
+    assert pulse['triggered'] == 2
+    assert pulse['success_pct'] == 100.0
+    assert pulse['d0_fail_pct'] == 0.0
 
 
 def test_daily_report_payload_includes_trigger_failure_rates_and_shifts():
@@ -261,6 +274,8 @@ def test_daily_report_summary_read_is_capped_and_evidence_based():
     assert any('Market context: QQQ +1.1% | Up Day | Trend Up.' in bullet for bullet in bullets)
     assert any('Trigger read:' in bullet and '1m ORH 100% (1/1 attempts)' in bullet for bullet in bullets)
     assert any('Early follow-through:' in bullet and 'Close < BE 1 / 100%' in bullet for bullet in bullets)
+    day_read = _section(markdown, 'Day Read')
+    assert 'Immediate pulse: Last 2 setup dates had 2 triggered rows, 100.0% success, 0.0% D0 fail.' in day_read
     assert 'moved from' not in summary
     assert 'Clean Active is' not in summary
     assert 'setup dates are' not in summary
@@ -299,18 +314,32 @@ def test_daily_report_day_read_matches_snapshot_definitions():
     later['Close < BE'] = 'Yes'
     later['Retests'] = 'D1'
     later['D3 High %'] = '12.0%'
-    history = pd.concat([history, failed_d0_status, trigger_fail, duplicate, later], ignore_index=True)
+    active_d3 = history.iloc[[-1]].copy()
+    active_d3['Ticker'] = 'ACTD3'
+    active_d3['Current Status'] = 'Active'
+    active_d3['Trigger Day'] = 'Success'
+    active_d3['Close < BE'] = 'No'
+    active_d3['Retests'] = ''
+    active_d3['D3 High %'] = '10.0%'
+    failed_d4 = history.iloc[[-1]].copy()
+    failed_d4['Ticker'] = 'FAILD4'
+    failed_d4['Current Status'] = 'Failed D4'
+    failed_d4['Trigger Day'] = 'Success'
+    failed_d4['Close < BE'] = 'No'
+    failed_d4['Retests'] = ''
+    failed_d4['D3 High %'] = '20.0%'
+    history = pd.concat([history, failed_d0_status, trigger_fail, duplicate, later, active_d3, failed_d4], ignore_index=True)
 
     markdown = render_daily_report_markdown(build_daily_report_payload(history, _overview(history)))
     day_read = _section(markdown, 'Day Read')
 
-    assert '| Setups | 5 |' in day_read
-    assert '| Active | 1 / 20% |' in day_read
-    assert '| D0 Fail | 3 / 60% |' in day_read
-    assert '| Failed After D0 | 1 / 20% |' in day_read
-    assert '| Close < BE | 2 / 40% |' in day_read
-    assert '| Retested | 2 / 40% |' in day_read
-    assert '| Median D3 High | 13.0% |' in day_read
+    assert '| Setups | 7 |' in day_read
+    assert '| Active | 2 / 29% |' in day_read
+    assert '| D0 Fail | 3 / 43% |' in day_read
+    assert '| Failed After D0 | 2 / 29% |' in day_read
+    assert '| Close < BE | 2 / 29% |' in day_read
+    assert '| Retested | 2 / 29% |' in day_read
+    assert '| Median D3 High | 15.0% |' in day_read
     assert 'Median Current' not in day_read
     assert 'Median Max' not in day_read
 

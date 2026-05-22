@@ -63,6 +63,22 @@ def test_day_read_metrics_exclude_median_current_and_median_max():
     assert ('Retested', '1 / 50%') in metrics
 
 
+def test_day_read_median_d3_high_uses_only_eligible_rows():
+    rows = pd.DataFrame([
+        {'Current Status': 'Failed D0', 'Trigger Day': 'Success', 'Close < BE': 'No', 'Retests': '', 'D3 High %': '30.0%'},
+        {'Current Status': 'Failed D1', 'Trigger Day': 'Success', 'Close < BE': 'No', 'Retests': '', 'D3 High %': '40.0%'},
+        {'Current Status': 'Failed D2', 'Trigger Day': 'Success', 'Close < BE': 'No', 'Retests': '', 'D3 High %': '50.0%'},
+        {'Current Status': 'Failed D3', 'Trigger Day': 'Success', 'Close < BE': 'No', 'Retests': '', 'D3 High %': '60.0%'},
+        {'Current Status': 'Active', 'Trigger Day': 'Success', 'Close < BE': 'No', 'Retests': '', 'D3 High %': '10.0%'},
+        {'Current Status': 'Failed D4', 'Trigger Day': 'Success', 'Close < BE': 'No', 'Retests': '', 'D3 High %': '20.0%'},
+        {'Current Status': 'Active', 'Trigger Day': 'Unresolved', 'Close < BE': 'No', 'Retests': '', 'D3 High %': '80.0%'},
+    ])
+
+    metrics = daily_snapshot_day_read_metrics(rows)
+
+    assert ('Median D3 High', '15.0%') in metrics
+
+
 def test_trigger_read_suppresses_empty_other():
     rows = pd.DataFrame([
         {'PDH': 'success', 'VWAP Reclaim': '', '1m ORH': '', '5m ORH': '', 'Trigger': 'PDH', 'Trigger Day': 'Success'},

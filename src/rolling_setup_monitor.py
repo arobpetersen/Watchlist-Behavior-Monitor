@@ -9,6 +9,7 @@ import pandas as pd
 
 from src.daily_snapshot_read import trigger_other_bucket_counts
 from src.dashboard_queries import _clean_display_df, _close_bucket
+from src.d3_high_eligibility import d3_high_eligible_mask, eligible_d3_high_pct
 from src.feature_engine import session_filter
 from src.trigger_resolution import resolve_display_triggers, vwap_orh_suppression_reason, vwap_superseded_orh_display_values
 from src.vwap_reclaim import assess_vwap_reclaim
@@ -109,6 +110,8 @@ DETAIL_COLUMNS = [
     '5m ORH Reference Basis',
     '5m Post-Trigger Stop Breach',
     'Fail Day',
+    'D3 High Eligible',
+    'Eligible D3 High %',
     'Retests',
     'Retest Count',
     'Retest Days Raw',
@@ -1552,6 +1555,7 @@ def day_summary(df: pd.DataFrame) -> dict:
     pdh = df['PDH'] if 'PDH' in df else pd.Series(dtype=object)
     vwap = df['VWAP Reclaim'] if 'VWAP Reclaim' in df else pd.Series(dtype=object)
     other = trigger_other_bucket_counts(df)
+    eligible_d3 = eligible_d3_high_pct(df).dropna()
     return {
         'Setups': len(df),
         'PDH Gap': int((pdh == 'Gap').sum()) if not df.empty else 0,
@@ -1573,7 +1577,7 @@ def day_summary(df: pd.DataFrame) -> dict:
         'Retested': int((df['Retests'] != '').sum()) if not df.empty and 'Retests' in df else 0,
         'Median Current %': _fmt_pct(df['current_pct_raw'].median()) if not df.empty else '',
         'Median Max %': _fmt_pct(df['max_pct_raw'].median()) if not df.empty else '',
-        'Median D3 High %': _fmt_pct(df['d3_high_pct_raw'].median()) if not df.empty and 'd3_high_pct_raw' in df else '',
+        'Median D3 High %': _fmt_pct(eligible_d3.median()) if not eligible_d3.empty else '',
     }
 
 
@@ -1669,6 +1673,13 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         current_status_display(trigger_day, fail_day_value, close_flag, close_day)
         for trigger_day, fail_day_value, close_flag, close_day in zip(trigger_days, raw['fail_day'], close_below_be, close_below_be_day)
     ]
+    eligibility_source = pd.DataFrame({
+        'Trigger Day': trigger_days,
+        'Current Status': current_statuses,
+        'd3_high_pct_raw': raw['d3_high_pct'],
+    }, index=raw.index)
+    d3_eligible = d3_high_eligible_mask(eligibility_source)
+    eligible_d3 = raw['d3_high_pct'].where(d3_eligible)
     pdh_governed = raw.get('pdh_governed', blank_series).map(lambda v: bool(v) if not pd.isna(v) else False)
     raw_one_min_result = raw.get('raw_one_min_result', raw.get('one_min_result', blank_series)).apply(_blank)
     raw_five_min_result = raw.get('raw_five_min_result', raw.get('five_min_result', blank_series)).apply(_blank)
@@ -1721,6 +1732,8 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
             for days, fallback in zip(raw.get('retest_days', blank_series), raw.get('retest_day', blank_series))
         ],
         'Fail Day': raw['fail_day'].apply(_fmt_day),
+        'D3 High Eligible': d3_eligible.apply(lambda value: 'Yes' if value else 'No'),
+        'Eligible D3 High %': eligible_d3.apply(_fmt_d3_pct),
         'Retest Count': [
             _fmt_retest_count(days, fallback)
             for days, fallback in zip(raw.get('retest_days', blank_series), raw.get('retest_day', blank_series))
@@ -1805,6 +1818,8 @@ def _format_section_table(raw: pd.DataFrame) -> pd.DataFrame:
         'current_pct_raw': raw['current_pct'],
         'max_pct_raw': raw['max_pct'],
         'd3_high_pct_raw': raw['d3_high_pct'],
+        'd3_high_eligible': d3_eligible,
+        'eligible_d3_high_pct_raw': eligible_d3,
         'latest_trading_date_raw': raw.get('latest_trading_date', blank_series),
     })
     return display

@@ -22,7 +22,7 @@ from src.view_refresh import DERIVED_REFRESH_MESSAGE, refresh_derived_watchlist_
 
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
-ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-other-dedup-v2'
+ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-d3-eligible-v1'
 
 
 @st.cache_data(show_spinner=False)

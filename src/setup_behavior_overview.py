@@ -8,6 +8,8 @@ from typing import Any
 
 import pandas as pd
 
+from src.d3_high_eligibility import eligible_d3_high_pct
+from src.failure_timing import failure_timing_distribution
 from src.rolling_setup_monitor import rolling_setup_monitor
 from src.trigger_resolution import resolve_display_triggers, vwap_superseded_orh_display_values
 from src.vwap_reclaim import assess_vwap_reclaim
@@ -178,6 +180,7 @@ def overview_windows(setup_date_values) -> list[OverviewWindow]:
     else:
         dates = sorted({_date(value) for value in setup_date_values})
     return [
+        OverviewWindow('Last 2 Setup Dates', tuple(dates[-2:])),
         OverviewWindow('Last 5 Setup Dates', tuple(dates[-5:])),
         OverviewWindow('Previous 5 Setup Dates', tuple(dates[-10:-5])),
         OverviewWindow('Last 10 Setup Dates', tuple(dates[-10:])),
@@ -371,7 +374,7 @@ def summarize_window(history: pd.DataFrame, window: OverviewWindow) -> dict:
     notes = rows['Notes'] if 'Notes' in rows else pd.Series(dtype=object)
     retest = rows['Retests'] if 'Retests' in rows else rows['Retest Day'] if 'Retest Day' in rows else pd.Series(dtype=object)
 
-    d3_values = rows['d3_high_pct_raw'].dropna() if 'd3_high_pct_raw' in rows else pd.Series(dtype=float)
+    d3_values = eligible_d3_high_pct(rows).dropna()
 
     return {
         'Window': window.label,
@@ -505,9 +508,14 @@ def _insight_rate(rows: pd.DataFrame, kind: str) -> float | None:
 
 
 def _insight_median(rows: pd.DataFrame, column: str) -> float | None:
-    if rows.empty or column not in rows:
+    if rows.empty:
         return None
-    values = pd.to_numeric(rows[column], errors='coerce').dropna()
+    if column == 'eligible_d3_high_pct_raw':
+        values = eligible_d3_high_pct(rows).dropna()
+    elif column in rows:
+        values = pd.to_numeric(rows[column], errors='coerce').dropna()
+    else:
+        return None
     if len(values) < 5:
         return None
     return float(values.median())
@@ -552,7 +560,7 @@ def generate_behavior_insights(summary_data, derived_rows: pd.DataFrame) -> list
     median_metrics = [
         (3, 'Median Current %', 'current_pct_raw'),
         (3, 'Median Max %', 'max_pct_raw'),
-        (3, 'Median D3 High %', 'd3_high_pct_raw'),
+        (3, 'Median D3 High %', 'eligible_d3_high_pct_raw'),
     ]
     trigger_bucket_metrics = {'PDH', '1m ORH', '5m ORH', 'Alt Required', 'Failed OR Trigger', 'No Trigger'}
 
@@ -1171,14 +1179,16 @@ TRIGGER_EVENT_MAIN_COLUMNS = [
     'Failed After D0',
     'Median Max',
 ]
-TRIGGER_FAILURE_TREND_COLUMNS = ['Trigger', 'Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
+TRIGGER_FAILURE_TREND_COLUMNS = ['Trigger', 'Last 2', 'Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
 TRIGGER_FAILURE_TREND_WINDOW_LABELS = {
+    'Last 2 Setup Dates': 'Last 2',
     'Last 5 Setup Dates': 'Last 5',
     'Previous 5 Setup Dates': 'Previous 5',
     'Last 10 Setup Dates': 'Last 10',
     'Last 20 Setup Dates': 'Last 20',
 }
 TRIGGER_EVENT_WINDOW_ORDER = [
+    'Last 2 Setup Dates',
     'Last 5 Setup Dates',
     'Previous 5 Setup Dates',
     'Last 10 Setup Dates',
@@ -1194,6 +1204,50 @@ TRIGGER_EVENT_HIGHLIGHT_STYLES = {
     'positive': 'background-color: rgba(36, 164, 89, 0.16); color: #d8f5df; font-weight: 650;',
     'negative': 'background-color: rgba(210, 74, 74, 0.16); color: #ffe0e0; font-weight: 650;',
 }
+FAILURE_TIMING_BUCKETS = ['Active', 'D0 Fail', 'D1 Fail', 'D2 Fail', 'D3 Fail', 'Failed After D3', 'Unresolved']
+FAILURE_TIMING_WINDOW_COLUMNS = ['Window', 'Triggered', *FAILURE_TIMING_BUCKETS]
+FAILURE_TIMING_TRIGGER_COLUMNS = ['Trigger', 'Triggered', *FAILURE_TIMING_BUCKETS]
+
+
+def _short_window_label(label: str) -> str:
+    return str(label).replace(' Setup Dates', '').replace(' setup dates', '')
+
+
+def _failure_timing_bucket_cell(row: dict, bucket: str) -> str:
+    triggered = int(row.get('Triggered', 0) or 0)
+    if triggered <= 0:
+        return '—'
+    count = int(row.get(bucket, 0) or 0)
+    pct = round((count / triggered) * 100)
+    return f'{pct}% ({count}/{triggered})'
+
+
+def _format_failure_timing_row(row: dict, label_column: str, label: str) -> dict:
+    return {
+        label_column: label,
+        'Triggered': int(row.get('Triggered', 0) or 0),
+        **{bucket: _failure_timing_bucket_cell(row, bucket) for bucket in FAILURE_TIMING_BUCKETS},
+    }
+
+
+def failure_timing_by_window_table(history_by_window: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    records = []
+    for window_label, rows in history_by_window.items():
+        timing = failure_timing_distribution(rows)
+        row = timing.iloc[0].to_dict() if not timing.empty else {'Triggered': 0}
+        records.append(_format_failure_timing_row(row, 'Window', _short_window_label(window_label)))
+    return pd.DataFrame(records, columns=FAILURE_TIMING_WINDOW_COLUMNS)
+
+
+def failure_timing_by_trigger_table(rows: pd.DataFrame) -> pd.DataFrame:
+    timing = failure_timing_distribution(rows, group_by='Trigger')
+    if timing.empty:
+        return pd.DataFrame(columns=FAILURE_TIMING_TRIGGER_COLUMNS)
+    records = [
+        _format_failure_timing_row(row.to_dict(), 'Trigger', str(row.get('Trigger', '')))
+        for _, row in timing.iterrows()
+    ]
+    return pd.DataFrame(records, columns=FAILURE_TIMING_TRIGGER_COLUMNS)
 
 
 def _trigger_event_values(rows: pd.DataFrame, trigger_name: str) -> pd.Series:
@@ -1589,6 +1643,8 @@ def setup_behavior_overview(con, history: pd.DataFrame | None = None, perf=None)
             'trigger_outcome_by_window': {},
             'trigger_event_main_by_window': {},
             'trigger_failure_trend': pd.DataFrame(columns=TRIGGER_FAILURE_TREND_COLUMNS),
+            'failure_timing_by_window': pd.DataFrame(columns=FAILURE_TIMING_WINDOW_COLUMNS),
+            'failure_timing_by_trigger': {},
             'trigger_event_shift_highlights': {},
             'trigger_quality': {},
             'details': {},
@@ -1643,6 +1699,8 @@ def setup_behavior_overview(con, history: pd.DataFrame | None = None, perf=None)
         'trigger_outcome_by_window': trigger_outcome_by_window_tables(trigger_outcomes),
         'trigger_event_main_by_window': trigger_event_main_tables(trigger_outcomes),
         'trigger_failure_trend': trigger_failure_trend_matrix(trigger_outcomes),
+        'failure_timing_by_window': failure_timing_by_window_table(history_by_window),
+        'failure_timing_by_trigger': {label: failure_timing_by_trigger_table(history_by_window[label]) for label in summary_by_window},
         'trigger_event_shift_highlights': trigger_event_shift_highlights(trigger_outcomes),
         'trigger_quality': {label: trigger_quality_table(history_by_window[label]) for label in summary_by_window},
         'details': details,

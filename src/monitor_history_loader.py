@@ -13,7 +13,7 @@ from src.performance import PerfTimer
 from src.setup_behavior_overview import monitor_history
 
 
-MONITOR_HISTORY_CACHE_VERSION = 'monitor-history-vwap-triggered-fail-v1'
+MONITOR_HISTORY_CACHE_VERSION = 'monitor-history-d3-eligible-v1'
 
 
 @st.cache_data(show_spinner=False)

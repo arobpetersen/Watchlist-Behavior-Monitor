@@ -16,7 +16,7 @@ from src.setup_behavior_overview import (
 from src.watchlist_top_movers import prepare_top_mover_rows, top_movers_from_history
 
 
-WINDOW_LABELS = ['Last 5 Setup Dates', 'Previous 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
+WINDOW_LABELS = ['Last 2 Setup Dates', 'Last 5 Setup Dates', 'Previous 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
 RATE_CHANGE_THRESHOLD = 15.0
 CLOSE_BE_THRESHOLD = 10.0
 RETURN_CHANGE_THRESHOLD = 0.03
@@ -25,6 +25,7 @@ REPORT_WINDOWS = ['Latest', 'Last 5', 'Previous 5']
 ROLLING_AVG_SETUP_DATES = 20
 REPORT_WINDOW_LABELS = {
     'Latest': 'Latest Setup Date',
+    'Last 2': 'Immediate Pulse',
     'Last 5': 'Recent 5 Setup Dates',
     'Previous 5': 'Prior 5 Setup Dates',
 }
@@ -1029,6 +1030,27 @@ def _latest_day_read(history: pd.DataFrame) -> dict:
     }
 
 
+def _immediate_pulse(history: pd.DataFrame) -> dict:
+    rows = _rows_for_latest_n_setup_dates(history, 2)
+    if rows.empty:
+        return {}
+    trigger_day = _trigger_day_text(rows)
+    status = _status_text(rows)
+    triggered = trigger_day.isin(['Success', 'Fail'])
+    triggered_count = int(triggered.sum())
+    if triggered_count <= 0:
+        return {}
+    success_count = int((triggered & trigger_day.eq('Success')).sum())
+    d0_fail_count = int((triggered & (trigger_day.eq('Fail') | status.eq('Failed D0'))).sum())
+    setup_dates = pd.to_datetime(rows['Setup Date'], errors='coerce').dt.date.dropna().nunique() if 'Setup Date' in rows else 0
+    return {
+        'setup_date_count': int(setup_dates),
+        'triggered': triggered_count,
+        'success_pct': _pct(success_count, triggered_count),
+        'd0_fail_pct': _pct(d0_fail_count, triggered_count),
+    }
+
+
 def _latest_trigger_read(history: pd.DataFrame) -> list[dict]:
     latest_rows = _rows_for_latest_n_setup_dates(history, 1)
     return [
@@ -1055,6 +1077,7 @@ def build_daily_report_payload(history: pd.DataFrame, overview: dict, market_con
         'trigger_read_rows': _trigger_read_rows(history),
         'latest_trigger_read': _latest_trigger_read(history),
         'day_read': _latest_day_read(history),
+        'immediate_pulse': _immediate_pulse(history),
         'market_context': market_context or MARKET_CONTEXT_UNAVAILABLE,
         'trigger_failure_snapshot': _trigger_failure_snapshot(history, overview),
         'trigger_quality_rows': _trigger_quality_rows(history, overview),
@@ -1412,6 +1435,15 @@ def _day_read_table(day_read: dict) -> str:
     return _markdown_table(['Metric', 'Read'], rows)
 
 
+def _immediate_pulse_line(pulse: dict) -> str:
+    if not pulse or int(pulse.get('triggered', 0) or 0) <= 0:
+        return ''
+    return (
+        f"Immediate pulse: Last 2 setup dates had {int(pulse.get('triggered', 0) or 0)} triggered rows, "
+        f"{_pct_text(pulse.get('success_pct'))} success, {_pct_text(pulse.get('d0_fail_pct'))} D0 fail."
+    )
+
+
 def _latest_trigger_read_table(rows: list[dict]) -> str:
     return _markdown_table(
         ['Trigger', 'Read'],
@@ -1463,6 +1495,7 @@ def _summary_read_lines(report_payload: dict) -> list[str]:
 def render_daily_report_markdown(report_payload: dict) -> str:
     no_data = 'No reportable watchlist behavior data is available.'
     day_read_table = _day_read_table(report_payload.get('day_read', {}))
+    immediate_pulse = _immediate_pulse_line(report_payload.get('immediate_pulse', {}))
     trigger_read_table = _latest_trigger_read_table(report_payload.get('latest_trigger_read', []))
     names_table = _notable_names_table(report_payload.get('notable_name_rows', []))
     summary = _summary_read_lines(report_payload)
@@ -1478,6 +1511,7 @@ def render_daily_report_markdown(report_payload: dict) -> str:
         '',
         '## Day Read',
         day_read_table or no_data,
+        *((['', immediate_pulse] if immediate_pulse else [])),
         '',
         '## Trigger Read',
         trigger_read_table or no_data,

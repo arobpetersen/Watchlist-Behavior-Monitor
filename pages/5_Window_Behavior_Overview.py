@@ -10,6 +10,8 @@ from src.monitor_history_loader import MONITOR_HISTORY_CACHE_VERSION, load_cache
 from src.performance import PerfTimer, render_perf_debug
 from src.setup_behavior_overview import (
     OPENING_BEHAVIOR_MAIN_COLUMNS,
+    failure_timing_by_trigger_table,
+    failure_timing_by_window_table,
     filter_detail_rows,
     main_opening_behavior_table,
     metric_cards_html,
@@ -25,7 +27,7 @@ from src.view_refresh import DERIVED_REFRESH_MESSAGE, refresh_derived_watchlist_
 st.set_page_config(page_title='Watchlist Behavior Monitor', layout='wide')
 
 
-OVERVIEW_CACHE_VERSION = 'setup-overview-daily-report-v1'
+OVERVIEW_CACHE_VERSION = 'setup-overview-last2-pulse-v1'
 
 
 @st.cache_data(show_spinner=False)
@@ -56,6 +58,13 @@ def ensure_overview_display_tables(overview: dict) -> dict:
         overview['trigger_failure_trend'] = trigger_failure_trend_matrix(
             overview.get('trigger_outcome_comparison')
         )
+    if 'failure_timing_by_window' not in overview:
+        overview['failure_timing_by_window'] = failure_timing_by_window_table(overview.get('details', {}))
+    if 'failure_timing_by_trigger' not in overview:
+        overview['failure_timing_by_trigger'] = {
+            label: failure_timing_by_trigger_table(table)
+            for label, table in overview.get('details', {}).items()
+        }
     if 'trigger_event_shift_highlights' not in overview:
         overview['trigger_event_shift_highlights'] = trigger_event_shift_highlights(
             overview.get('trigger_outcome_comparison')
@@ -70,7 +79,7 @@ perf = PerfTimer('Window Behavior Overview')
 
 st.title('Window Behavior Overview')
 st.caption('Compare setup behavior across recent back-watch windows.')
-st.caption('D3 High only includes setups with completed D3 data.')
+st.caption('Median D3 High only includes triggered rows that survived through D3.')
 if st.button('Refresh derived views from database', key='setup_overview_refresh_derived', help='Refreshes cached monitor/report views after data or manual metadata changes.'):
     refresh_derived_watchlist_views(load_setup_behavior_overview, db_path=db_path, rebuild_materialized_history=True)
     st.session_state['derived_views_refreshed'] = True
@@ -95,7 +104,7 @@ with st.expander('Definitions / Logic', expanded=False):
 - **Alt Required**: alternate framework used only when failed/missing OR triggers repair under the existing 15m/close-location rule.
 - **Failed OR Trigger**: OR trigger framework failed and no alternate qualification repaired it.
 - **Retests**: D0/D1/etc. touches of the selected trigger level while the setup is still active, capped in the table after the first three labels.
-- **D3 High**: day-3 high follow-through; overview medians only include rows with completed D3 data.
+- **D3 High**: raw day-3 high follow-through in detail rows; overview medians only include triggered rows that survived through D3.
 - **Wide OR notes**: flags opening ranges that are wide versus ATR14.
         """
     )
@@ -143,8 +152,15 @@ else:
     )
 
     st.subheader('Trigger Success Trend')
-    st.caption('Cells show Success % (successful trigger attempts / triggered attempts).')
+    st.caption('Cells show Success % (successful trigger attempts / triggered attempts). Last 2 is an immediate pulse; Read compares Last 5 vs Previous 5.')
     st.dataframe(overview['trigger_failure_trend'], width='stretch', hide_index=True)
+
+    st.subheader('Failure Timing Distribution')
+    st.caption('Immediate Pulse = Last 2 setup dates. Cells show % of triggered rows (bucket count / triggered rows). D0 Fail includes Trigger Day Fail or Current Status Failed D0.')
+    st.dataframe(overview['failure_timing_by_window'], width='stretch', hide_index=True)
+    with st.expander('Failure Timing by Trigger', expanded=False):
+        st.caption('Selected-window breakdown. Trigger Success Trend answers whether attempts are working; this table shows when triggered rows fail.')
+        st.dataframe(overview['failure_timing_by_trigger'].get(selected_window), width='stretch', hide_index=True)
 
     st.subheader('Trigger Event Outcomes Across Windows')
     shift_highlights = overview.get('trigger_event_shift_highlights', {})

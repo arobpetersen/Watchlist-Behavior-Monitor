@@ -191,7 +191,7 @@ def materialize_monitor_history(
     con,
     db_path: str | None = None,
     source: str = 'manual',
-    cache_version: str = 'monitor-history-vwap-triggered-fail-v1',
+    cache_version: str = 'monitor-history-d3-eligible-v1',
     data_token: str | None = None,
     history_builder: Callable | None = None,
 ) -> MaterializedMonitorHistoryResult:

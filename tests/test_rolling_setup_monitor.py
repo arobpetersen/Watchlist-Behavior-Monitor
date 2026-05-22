@@ -2140,7 +2140,7 @@ def test_main_and_detail_table_columns_and_blank_handling():
         '1m Low Swept Before Trigger', '1m ORH Reference Low', '1m ORH Reference Basis',
         '1m Post-Trigger Stop Breach', '5m Low Swept Before Trigger',
         '5m ORH Reference Low', '5m ORH Reference Basis', '5m Post-Trigger Stop Breach',
-        'Fail Day', 'Retests', 'Retest Count', 'Retest Days Raw', 'Retest Dates Raw',
+        'Fail Day', 'D3 High Eligible', 'Eligible D3 High %', 'Retests', 'Retest Count', 'Retest Days Raw', 'Retest Dates Raw',
         'Latest Close', 'Setup Close', 'Setup High', 'Setup Low',
         'Current vs Setup Close', 'Max Gain from Setup Close', 'RVOL', 'Range x ATR(14)', '1m OR Width / ATR14',
         '5m OR Width / ATR14', 'Close Bucket',
@@ -2184,7 +2184,7 @@ def test_format_monitor_table_html_escapes_blanks_and_relabels_headers():
 def test_rolling_setup_monitor_page_uses_db_backed_cache_token_and_perf_debug():
     page = open('pages/3_Rolling_Backwatch_Monitor.py', encoding='utf-8').read()
 
-    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-other-dedup-v2'" in page
+    assert "ROLLING_MONITOR_CACHE_VERSION = 'rolling-monitor-d3-eligible-v1'" in page
     assert "rolling_cache_token = f'{ROLLING_MONITOR_CACHE_VERSION}:{data_health_cache_token(db_path)}'" in page
     assert 'load_rolling_setup_sections(db_path, rolling_cache_token)' in page
     assert "PerfTimer('Rolling Backwatch Monitor')" in page
@@ -3016,6 +3016,8 @@ def test_format_section_table_derives_status_display_fields():
     table = _format_section_table(raw)
 
     assert table['Trigger Day'].tolist() == ['Success', 'Success', 'Fail', 'Unresolved']
+    assert table['D3 High Eligible'].tolist() == ['Yes', 'No', 'No', 'No']
+    assert table['Eligible D3 High %'].tolist()[0] == '5.0%'
     assert table['Current Status'].tolist() == ['Active', 'Failed D1', '—', '—']
 
 
@@ -3042,7 +3044,7 @@ def test_day_summary_metrics():
     assert summary['Retested'] == 1
     assert summary['Median Current %'] == '5.0%'
     assert summary['Median Max %'] == '15.0%'
-    assert summary['Median D3 High %'] == '20.0%'
+    assert summary['Median D3 High %'] == '25.0%'
 
 
 def test_day_summary_counts_true_no_trigger_separately_from_unresolved():
@@ -3076,6 +3078,19 @@ def test_day_summary_counts_pdh_and_excludes_pdh_rows_from_orh_counts():
     assert summary['Clean 5m'] == 1
     assert summary['1m Failed'] == 0
     assert summary['5m Failed'] == 0
+
+
+def test_day_summary_d3_high_excludes_failed_before_d3_and_keeps_failed_d4():
+    df = pd.DataFrame([
+        {'Trigger': '1m ORH', '1m ORH': 'success', '5m ORH': '', 'Trigger Day': 'Fail', 'Current Status': '—', 'Retests': '', 'current_pct_raw': 0.00, 'max_pct_raw': 0.05, 'd3_high_pct_raw': 0.30},
+        {'Trigger': '1m ORH', '1m ORH': 'success', '5m ORH': '', 'Trigger Day': 'Success', 'Current Status': 'Failed D2', 'Retests': '', 'current_pct_raw': 0.02, 'max_pct_raw': 0.08, 'd3_high_pct_raw': 0.40},
+        {'Trigger': '1m ORH', '1m ORH': 'success', '5m ORH': '', 'Trigger Day': 'Success', 'Current Status': 'Active', 'Retests': '', 'current_pct_raw': 0.05, 'max_pct_raw': 0.10, 'd3_high_pct_raw': 0.10},
+        {'Trigger': '1m ORH', '1m ORH': 'success', '5m ORH': '', 'Trigger Day': 'Success', 'Current Status': 'Failed D4', 'Retests': '', 'current_pct_raw': 0.06, 'max_pct_raw': 0.20, 'd3_high_pct_raw': 0.20},
+    ])
+
+    summary = day_summary(df)
+
+    assert summary['Median D3 High %'] == '15.0%'
 
 
 def test_sort_monitor_rows_current_status_then_current_pct():

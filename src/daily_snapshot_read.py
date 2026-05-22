@@ -4,6 +4,8 @@ from typing import Any
 
 import pandas as pd
 
+from src.d3_high_eligibility import eligible_d3_high_pct
+
 
 def _series(rows: pd.DataFrame, column: str) -> pd.Series:
     if rows is None or rows.empty or column not in rows:
@@ -82,8 +84,7 @@ def daily_snapshot_day_read_metrics(rows: pd.DataFrame) -> list[tuple[str, str]]
     if counts['close_be'] is not None:
         metrics.append(('Close < BE', _count_rate(int(counts['close_be'] or 0), total)))
     metrics.append(('Retested', _count_rate(int(counts['retested'] or 0), total)))
-    d3 = _numeric_pct(rows, 'D3 High %')
-    d3 = d3.dropna()
+    d3 = eligible_d3_high_pct(rows).dropna()
     if not d3.empty:
         metrics.append(('Median D3 High', _fmt_pct(d3.median())))
     return metrics

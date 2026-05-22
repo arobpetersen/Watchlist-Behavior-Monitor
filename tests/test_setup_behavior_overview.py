@@ -19,6 +19,8 @@ from src.setup_behavior_overview import (
     comparison_rows,
     detail_rows,
     factual_read,
+    failure_timing_by_trigger_table,
+    failure_timing_by_window_table,
     filter_detail_rows,
     generate_behavior_insights,
     main_opening_behavior_table,
@@ -199,6 +201,7 @@ def test_overview_windows_use_actual_setup_dates_not_calendar_days():
     windows = overview_windows(['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30', '2026-05-01'])
 
     assert [(w.label, [d.date().isoformat() for d in w.setup_dates]) for w in windows] == [
+        ('Last 2 Setup Dates', ['2026-04-30', '2026-05-01']),
         ('Last 5 Setup Dates', ['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30', '2026-05-01']),
         ('Previous 5 Setup Dates', []),
         ('Last 10 Setup Dates', ['2026-04-27', '2026-04-28', '2026-04-29', '2026-04-30', '2026-05-01']),
@@ -211,11 +214,13 @@ def test_overview_windows_include_previous_five_setup_dates():
     windows = overview_windows(dates)
 
     assert [window.label for window in windows] == [
+        'Last 2 Setup Dates',
         'Last 5 Setup Dates',
         'Previous 5 Setup Dates',
         'Last 10 Setup Dates',
         'Last 20 Setup Dates',
     ]
+    assert _window('Last 2 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates[-2:])
     assert _window('Last 5 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates[-5:])
     assert _window('Previous 5 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates[:5])
     assert _window('Last 10 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates)
@@ -224,6 +229,7 @@ def test_overview_windows_include_previous_five_setup_dates():
 def test_overview_windows_previous_five_handles_fewer_than_ten_setup_dates():
     dates = pd.date_range('2026-04-01', periods=7, freq='B')
 
+    assert _window('Last 2 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates[-2:])
     assert _window('Last 5 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates[-5:])
     assert _window('Previous 5 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates[:2])
     assert _window('Last 10 Setup Dates', dates).setup_dates == tuple(pd.Timestamp(date) for date in dates)
@@ -233,11 +239,12 @@ def test_overview_windows_keep_only_latest_n_setup_dates():
     dates = pd.date_range('2026-04-01', periods=25, freq='B')
     windows = overview_windows(dates)
 
-    assert len(windows[0].setup_dates) == 5
+    assert len(windows[0].setup_dates) == 2
     assert len(windows[1].setup_dates) == 5
-    assert len(windows[2].setup_dates) == 10
-    assert len(windows[3].setup_dates) == 20
-    assert windows[0].setup_dates[0] == pd.Timestamp('2026-04-29')
+    assert len(windows[2].setup_dates) == 5
+    assert len(windows[3].setup_dates) == 10
+    assert len(windows[4].setup_dates) == 20
+    assert windows[0].setup_dates[0] == pd.Timestamp('2026-05-04')
     assert windows[0].setup_dates[-1] == pd.Timestamp('2026-05-05')
 
 
@@ -264,10 +271,10 @@ def test_summarize_window_counts_percentages_and_medians():
     assert out['Retested'] == '2 (50%)'
     assert out['Wide 1m OR'] == '2 (50%)'
     assert out['Wide 5m OR'] == '2 (50%)'
-    assert out['D3 Eligible'] == '3 (75%)'
+    assert out['D3 Eligible'] == '0 (0%)'
     assert out['Median Current'] == '1.5%'
     assert out['Median Max'] == '7.0%'
-    assert out['Median D3 High'] == '7.0%'
+    assert out['Median D3 High'] == '-'
 
 
 def test_summarize_window_counts_close_below_be_later_failed_status():
@@ -287,6 +294,7 @@ def test_comparison_rows_exclude_secondary_diagnostics():
 
     assert comparison.columns.tolist() == COMPARISON_COLUMNS
     assert comparison['Window'].tolist() == [
+        'Last 2 Setup Dates',
         'Last 5 Setup Dates',
         'Previous 5 Setup Dates',
         'Last 10 Setup Dates',
@@ -479,7 +487,7 @@ def test_selected_window_metrics_group_diagnostics_separately():
     current_outcome = dict(groups[1]['metrics'])
 
     assert 'Failed 1m' not in comparison.columns
-    assert current_outcome['D3 Eligible'] == '3 (75%)'
+    assert current_outcome['D3 Eligible'] == '0 (0%)'
     assert diagnostics['Failed 1m'] == '3 (75%)'
     assert diagnostics['Failed 5m'] == '2 (50%)'
     assert diagnostics['Wide 1m OR'] == '2 (50%)'
@@ -979,6 +987,7 @@ def _trigger_comparison_history() -> dict[str, pd.DataFrame]:
         },
     ])
     return {
+        'Last 2 Setup Dates': base.iloc[:1].copy(),
         'Last 5 Setup Dates': base.iloc[:2].copy(),
         'Previous 5 Setup Dates': base.iloc[[2]].copy(),
         'Last 10 Setup Dates': base.copy(),
@@ -991,22 +1000,27 @@ def test_trigger_outcome_comparison_rows_and_denominators():
 
     assert comparison.columns.tolist() == TRIGGER_COMPARISON_COLUMNS
     assert comparison[['Trigger', 'Window']].values.tolist() == [
+        ['1m ORH', 'Last 2 Setup Dates'],
         ['1m ORH', 'Last 5 Setup Dates'],
         ['1m ORH', 'Previous 5 Setup Dates'],
         ['1m ORH', 'Last 10 Setup Dates'],
         ['1m ORH', 'Last 20 Setup Dates'],
+        ['5m ORH', 'Last 2 Setup Dates'],
         ['5m ORH', 'Last 5 Setup Dates'],
         ['5m ORH', 'Previous 5 Setup Dates'],
         ['5m ORH', 'Last 10 Setup Dates'],
         ['5m ORH', 'Last 20 Setup Dates'],
+        ['VWAP Reclaim', 'Last 2 Setup Dates'],
         ['VWAP Reclaim', 'Last 5 Setup Dates'],
         ['VWAP Reclaim', 'Previous 5 Setup Dates'],
         ['VWAP Reclaim', 'Last 10 Setup Dates'],
         ['VWAP Reclaim', 'Last 20 Setup Dates'],
+        ['PDH', 'Last 2 Setup Dates'],
         ['PDH', 'Last 5 Setup Dates'],
         ['PDH', 'Previous 5 Setup Dates'],
         ['PDH', 'Last 10 Setup Dates'],
         ['PDH', 'Last 20 Setup Dates'],
+        ['Alt Required', 'Last 2 Setup Dates'],
         ['Alt Required', 'Last 5 Setup Dates'],
         ['Alt Required', 'Previous 5 Setup Dates'],
         ['Alt Required', 'Last 10 Setup Dates'],
@@ -1029,7 +1043,7 @@ def test_trigger_outcome_by_window_tables_drop_window_column_and_group_triggers(
     comparison = trigger_outcome_comparison(_trigger_comparison_history())
     by_window = trigger_outcome_by_window_tables(comparison)
 
-    assert list(by_window) == ['Last 5 Setup Dates', 'Previous 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
+    assert list(by_window) == ['Last 2 Setup Dates', 'Last 5 Setup Dates', 'Previous 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
     last_10 = by_window['Last 10 Setup Dates']
     assert last_10.columns.tolist() == TRIGGER_COMPARISON_BY_WINDOW_COLUMNS
     assert 'Window' not in last_10.columns
@@ -1049,7 +1063,7 @@ def test_trigger_event_main_tables_use_compact_count_percent_columns():
     main = trigger_event_main_tables(comparison)
     last_10 = main['Last 10 Setup Dates']
 
-    assert list(main) == ['Last 5 Setup Dates', 'Previous 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
+    assert list(main) == ['Last 2 Setup Dates', 'Last 5 Setup Dates', 'Previous 5 Setup Dates', 'Last 10 Setup Dates', 'Last 20 Setup Dates']
     assert last_10.columns.tolist() == TRIGGER_EVENT_MAIN_COLUMNS
     assert last_10['Trigger'].tolist() == ['1m ORH', '5m ORH', 'VWAP Reclaim', 'PDH', 'Alt Required']
     assert last_10.loc[0, 'Eligible'] == 4
@@ -1087,7 +1101,8 @@ def test_trigger_failure_trend_matrix_uses_triggered_denominator_and_windows():
 
     trend = trigger_failure_trend_matrix(comparison).set_index('Trigger')
 
-    assert trend.columns.tolist() == ['Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
+    assert trend.columns.tolist() == ['Last 2', 'Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
+    assert trend.loc['PDH', 'Last 2'] == '—'
     assert trend.loc['PDH', 'Last 5'] == '67% (2/3)'
     assert trend.loc['PDH', 'Previous 5'] == '50% (3/6)'
     assert trend.loc['PDH', 'Read'] == 'Stable'
@@ -1117,6 +1132,75 @@ def test_trigger_failure_trend_matrix_reads_improved_stable_and_small_sample():
     assert trend.loc['VWAP Reclaim', 'Read'] == 'Stable'
     assert trend.loc['Alt Required', 'Read'] == 'Small sample'
     assert trend.loc['Alt Required', 'Last 5'] == '0% (0/1)'
+
+
+def test_failure_timing_by_window_table_returns_overview_windows():
+    history_by_window = {
+        'Last 2 Setup Dates': pd.DataFrame([
+            {'Trigger Day': 'Success', 'Current Status': 'Active'},
+            {'Trigger Day': 'Success', 'Current Status': 'Failed D2'},
+        ]),
+        'Last 5 Setup Dates': pd.DataFrame([
+            {'Trigger Day': 'Success', 'Current Status': 'Active'},
+            {'Trigger Day': 'Fail', 'Current Status': '-'},
+        ]),
+        'Previous 5 Setup Dates': pd.DataFrame([
+            {'Trigger Day': 'Success', 'Current Status': 'Failed D1'},
+        ]),
+        'Last 10 Setup Dates': pd.DataFrame([
+            {'Trigger Day': 'Success', 'Current Status': 'Failed D2'},
+            {'Trigger Day': 'Success', 'Current Status': 'Failed D3'},
+        ]),
+        'Last 20 Setup Dates': pd.DataFrame([
+            {'Trigger Day': 'Success', 'Current Status': 'Failed D4'},
+            {'Trigger Day': 'Unresolved', 'Current Status': '-'},
+        ]),
+    }
+
+    out = failure_timing_by_window_table(history_by_window).set_index('Window')
+
+    assert out.index.tolist() == ['Last 2', 'Last 5', 'Previous 5', 'Last 10', 'Last 20']
+    assert out.loc['Last 2', 'Triggered'] == 2
+    assert out.loc['Last 2', 'Active'] == '50% (1/2)'
+    assert out.loc['Last 2', 'D0 Fail'] == '0% (0/2)'
+    assert out.loc['Last 2', 'D2 Fail'] == '50% (1/2)'
+    assert out.loc['Last 5', 'Triggered'] == 2
+    assert out.loc['Last 5', 'Active'] == '50% (1/2)'
+    assert out.loc['Last 5', 'D0 Fail'] == '50% (1/2)'
+    assert out.loc['Previous 5', 'D1 Fail'] == '100% (1/1)'
+    assert out.loc['Last 10', 'D2 Fail'] == '50% (1/2)'
+    assert out.loc['Last 10', 'D3 Fail'] == '50% (1/2)'
+    assert out.loc['Last 20', 'Failed After D3'] == '100% (1/1)'
+
+
+def test_failure_timing_by_trigger_table_uses_selected_rows():
+    rows = pd.DataFrame([
+        {'Trigger': '1m ORH', 'Trigger Day': 'Success', 'Current Status': 'Active'},
+        {'Trigger': '1m ORH', 'Trigger Day': 'Success', 'Current Status': 'Failed D3'},
+        {'Trigger': 'VWAP Reclaim', 'Trigger Day': 'Fail', 'Current Status': '-'},
+        {'Trigger': 'No Trigger', 'Trigger Day': 'Unresolved', 'Current Status': '-'},
+    ])
+
+    out = failure_timing_by_trigger_table(rows).set_index('Trigger')
+
+    assert out.loc['1m ORH', 'Triggered'] == 2
+    assert out.loc['1m ORH', 'Active'] == '50% (1/2)'
+    assert out.loc['1m ORH', 'D3 Fail'] == '50% (1/2)'
+    assert out.loc['1m ORH', 'D0 Fail'] == '0% (0/2)'
+    assert out.loc['VWAP Reclaim', 'D0 Fail'] == '100% (1/1)'
+    assert 'No Trigger' not in out.index
+
+
+def test_failure_timing_display_formats_zero_triggered_rows_as_dash():
+    out = failure_timing_by_window_table({
+        'Last 2 Setup Dates': pd.DataFrame([
+            {'Trigger Day': 'Unresolved', 'Current Status': '-'},
+        ]),
+    }).set_index('Window')
+
+    assert out.loc['Last 2', 'Triggered'] == 0
+    assert out.loc['Last 2', 'Active'] == '—'
+    assert out.loc['Last 2', 'D0 Fail'] == '—'
 
 
 def _shift_row(
@@ -1243,22 +1327,27 @@ def test_trigger_outcome_internal_table_includes_alt_required_event_rows():
 
     assert comparison.columns.tolist() == TRIGGER_COMPARISON_COLUMNS
     assert comparison[['Trigger', 'Window']].values.tolist() == [
+        ['1m ORH', 'Last 2 Setup Dates'],
         ['1m ORH', 'Last 5 Setup Dates'],
         ['1m ORH', 'Previous 5 Setup Dates'],
         ['1m ORH', 'Last 10 Setup Dates'],
         ['1m ORH', 'Last 20 Setup Dates'],
+        ['5m ORH', 'Last 2 Setup Dates'],
         ['5m ORH', 'Last 5 Setup Dates'],
         ['5m ORH', 'Previous 5 Setup Dates'],
         ['5m ORH', 'Last 10 Setup Dates'],
         ['5m ORH', 'Last 20 Setup Dates'],
+        ['VWAP Reclaim', 'Last 2 Setup Dates'],
         ['VWAP Reclaim', 'Last 5 Setup Dates'],
         ['VWAP Reclaim', 'Previous 5 Setup Dates'],
         ['VWAP Reclaim', 'Last 10 Setup Dates'],
         ['VWAP Reclaim', 'Last 20 Setup Dates'],
+        ['PDH', 'Last 2 Setup Dates'],
         ['PDH', 'Last 5 Setup Dates'],
         ['PDH', 'Previous 5 Setup Dates'],
         ['PDH', 'Last 10 Setup Dates'],
         ['PDH', 'Last 20 Setup Dates'],
+        ['Alt Required', 'Last 2 Setup Dates'],
         ['Alt Required', 'Last 5 Setup Dates'],
         ['Alt Required', 'Previous 5 Setup Dates'],
         ['Alt Required', 'Last 10 Setup Dates'],
@@ -1585,7 +1674,7 @@ def test_trigger_event_outcomes_are_separate_from_primary_trigger_grouping():
 
 
 def test_filter_detail_rows_by_trigger_level_and_result():
-    detail = detail_rows(_history(), overview_windows(['2026-04-28', '2026-05-02', '2026-05-08'])[0])
+    detail = detail_rows(_history(), _window('Last 5 Setup Dates', ['2026-04-28', '2026-05-02', '2026-05-08']))
 
     one_success = filter_detail_rows(detail, trigger_level='1m ORH', trigger_result='success')
     five_success = filter_detail_rows(detail, trigger_level='5m ORH', trigger_result='success')
@@ -1633,7 +1722,7 @@ def test_filter_detail_rows_combines_trigger_and_current_status_filters():
 
 
 def test_filter_detail_rows_by_current_status_bucket():
-    detail = detail_rows(_history(), overview_windows(['2026-04-10', '2026-04-28', '2026-05-02', '2026-05-08'])[0])
+    detail = detail_rows(_history(), _window('Last 20 Setup Dates', ['2026-04-10', '2026-04-28', '2026-05-02', '2026-05-08']))
 
     active = filter_detail_rows(detail, current_status='Active')
     later_failed = filter_detail_rows(detail, current_status='Failed After D0')
@@ -1876,9 +1965,14 @@ def test_setup_behavior_page_uses_successful_triggers_section_title():
     assert "st.subheader('Selected Window Opening Path')" not in page
     assert "st.subheader('Selected Window Ticker Detail Preview')" in page
     assert 'Detailed trigger-event row research now lives in Trigger Event Explorer.' in page
-    assert "OVERVIEW_CACHE_VERSION = 'setup-overview-daily-report-v1'" in page
+    assert "OVERVIEW_CACHE_VERSION = 'setup-overview-last2-pulse-v1'" in page
     assert "monitor_source_token = monitor_history_source_token(db_path)" in page
     assert "overview_cache_token = f'{OVERVIEW_CACHE_VERSION}:{monitor_source_token}'" in page
+    assert "st.subheader('Failure Timing Distribution')" in page
+    assert "st.expander('Failure Timing by Trigger'" in page
+    assert 'Cells show % of triggered rows (bucket count / triggered rows).' in page
+    assert 'Immediate Pulse = Last 2 setup dates' in page
+    assert 'Last 2 is an immediate pulse; Read compares Last 5 vs Previous 5.' in page
     assert "st.button('Refresh derived views from database'" in page
     assert 'refresh_derived_watchlist_views(load_setup_behavior_overview, db_path=db_path, rebuild_materialized_history=True)' in page
     assert "PerfTimer('Window Behavior Overview')" in page
@@ -1963,6 +2057,8 @@ def test_setup_behavior_overview_handles_zero_setup_dates():
     assert out['trigger_outcome_by_window'] == {}
     assert out['trigger_event_main_by_window'] == {}
     assert out['trigger_failure_trend'].empty
+    assert out['failure_timing_by_window'].empty
+    assert out['failure_timing_by_trigger'] == {}
     assert out['trigger_event_shift_highlights'] == {}
     assert out['details'] == {}
     assert out['windows'] == []

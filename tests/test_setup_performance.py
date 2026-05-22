@@ -23,6 +23,7 @@ def _rows() -> pd.DataFrame:
             'Setup': 'MU',
             'Entry Tactic': 'Reclaim',
             'Current Status': 'Active',
+            'Trigger Day': 'Success',
             'Close < BE': 'No',
             'Retests': 'D0, D2',
             'current_pct_raw': 0.10,
@@ -102,7 +103,7 @@ def test_setup_summary_groups_blank_setup_status_counts_percentages_and_follow_t
     assert int(mu['Retested After D0']) == 2
     assert mu['Median Current %'] == '3.0%'
     assert mu['Median Max %'] == '12.0%'
-    assert mu['Median D3 High %'] == '14.5%'
+    assert mu['Median D3 High %'] == '20.0%'
     assert mu['Avg Max %'] == '15.3%'
     assert mu['Rating Avg'] == '5.00'
     assert int(mu['Rating 4-5 Count']) == 1
@@ -254,6 +255,7 @@ def test_setup_failure_trend_matrix_cells_and_reads():
     trend = build_setup_failure_trend(pd.DataFrame(rows)).set_index('Setup')
 
     assert list(build_setup_failure_trend(pd.DataFrame(rows)).columns) == SETUP_FAILURE_TREND_COLUMNS
+    assert trend.loc['Improving', 'Last 2'] == '100% (2/2)'
     assert trend.loc['Improving', 'Last 5'] == '80% (4/5)'
     assert trend.loc['Improving', 'Previous 5'] == '20% (1/5)'
     assert trend.loc['Improving', 'Read'] == 'Improved recent'
@@ -282,6 +284,7 @@ def test_setup_failure_trend_cell_format_is_success_rate_first():
     trend = build_setup_failure_trend(pd.DataFrame(rows)).set_index('Setup')
 
     assert trend.loc['Format', 'Last 20'] == '67% (8/12)'
+    assert trend.loc['Format', 'Last 2'] == '100% (2/2)'
     assert trend.loc['OneRow', 'Last 5'] == '100% (1/1)'
     assert trend.loc['AllFailed', 'Last 5'] == '0% (0/3)'
 
@@ -306,3 +309,5 @@ def test_setup_performance_page_uses_shared_monitor_history_cache_token():
     assert "history_cache_token = f'{MONITOR_HISTORY_CACHE_VERSION}:{monitor_history_source_token(db_path)}'" in source
     assert 'SETUP_PERFORMANCE_CACHE_VERSION' not in source
     assert 'refresh_derived_watchlist_views(load_cached_monitor_history)' not in source
+    assert 'Last 2 is an immediate pulse; Read compares Last 5 vs Previous 5.' in source
+    assert "['Last 2 setup dates', 'Last 5 setup dates', 'Last 10 setup dates', 'Last 20 setup dates', 'All']" in source

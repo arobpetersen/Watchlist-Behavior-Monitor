@@ -145,8 +145,8 @@ else:
     filter_cols = st.columns(4)
     setup_window = filter_cols[0].selectbox(
         'Setup date window',
-        ['Last 5 setup dates', 'Last 10 setup dates', 'Last 20 setup dates', 'All'],
-        index=1,
+        ['Last 2 setup dates', 'Last 5 setup dates', 'Last 10 setup dates', 'Last 20 setup dates', 'All'],
+        index=2,
         key='setup_performance_window',
     )
     rating_filter = filter_cols[1].selectbox(
@@ -187,7 +187,8 @@ else:
         st.markdown(
             '<div class="setup-perf-section-caption">Cells show Success % (successful setup rows / setup rows). '
             'Success = rows not counted as D0 Fail or Failed After D0. '
-            'D0 Fail includes Trigger Day Fail or Current Status Failed D0.</div>',
+            'D0 Fail includes Trigger Day Fail or Current Status Failed D0. '
+            'Last 2 is an immediate pulse; Read compares Last 5 vs Previous 5.</div>',
             unsafe_allow_html=True,
         )
         st.dataframe(
@@ -228,7 +229,8 @@ else:
 - **Failure %**: D0 Fail plus Failed After D0 divided by Count.
 - **Close < BE %**: rows where Close < BE is Yes/true.
 - **Retested D0 / Retested After D0**: parsed from Retests / Retest Days Raw.
-- **Current %, Max %, D3 High %**: existing monitor values, using raw monitor percent fields when present.
+- **Current %, Max %**: existing monitor values, using raw monitor percent fields when present.
+- **Median D3 High %**: uses only triggered rows that survived through D3; row-level D3 High remains the raw monitor value.
 - **Rating Avg**: numeric ratings only; blank ratings are ignored.
 - **Sample**: Small sample under 5, Developing from 5 to 14, Useful sample at 15 or more.
             """

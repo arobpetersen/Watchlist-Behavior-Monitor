@@ -5,6 +5,8 @@ from typing import Any
 
 import pandas as pd
 
+from src.d3_high_eligibility import d3_high_eligible_mask, eligible_d3_high_pct
+
 
 UNCLASSIFIED_SETUP = 'Unclassified'
 UNCLASSIFIED_ENTRY_TACTIC = 'Unclassified'
@@ -48,8 +50,9 @@ SETUP_ENTRY_TACTIC_COLUMNS = [
 ]
 
 SUMMARY_CARD_COLUMNS = ['Metric', 'Value', 'Detail']
-SETUP_FAILURE_TREND_COLUMNS = ['Setup', 'Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
+SETUP_FAILURE_TREND_COLUMNS = ['Setup', 'Last 2', 'Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
 SETUP_TREND_WINDOW_LABELS = {
+    'Last 2 setup dates': 'Last 2',
     'Last 5 setup dates': 'Last 5',
     'Previous 5 setup dates': 'Previous 5',
     'Last 10 setup dates': 'Last 10',
@@ -173,7 +176,8 @@ def _prepared_rows(rows: pd.DataFrame) -> pd.DataFrame:
     out['_retested_after_d0'] = retests.apply(lambda days: any(day > 0 for day in days))
     out['_current_pct'] = _numeric_series(out, 'current_pct_raw', 'Current %')
     out['_max_pct'] = _numeric_series(out, 'max_pct_raw', 'Max %')
-    out['_d3_high_pct'] = _numeric_series(out, 'd3_high_pct_raw', 'D3 High %')
+    out['_d3_high_eligible'] = d3_high_eligible_mask(out)
+    out['_d3_high_pct'] = eligible_d3_high_pct(out)
     out['_rating'] = pd.to_numeric(out['Rating'], errors='coerce') if 'Rating' in out else pd.Series(float('nan'), index=out.index)
     return out
 

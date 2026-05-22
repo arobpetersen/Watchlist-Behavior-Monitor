@@ -197,9 +197,25 @@ def test_daily_snapshot_summary_groups_include_command_center_sections():
             'Retests': '',
             'Rating': '3',
         },
+        {
+            'Ticker': 'CCC',
+            'Current Status': 'Failed D1',
+            'Trigger Day': 'Success',
+            'Trigger': '1m ORH',
+            'PDH': '-',
+            '1m ORH': 'success',
+            'VWAP Reclaim': '-',
+            '5m ORH': '-',
+            'Current %': '1.0%',
+            'Max %': '8.0%',
+            'Close < BE': 'No',
+            'D3 High %': '40.0%',
+            'Retests': '',
+            'Rating': '4',
+        },
     ])
     metrics = {
-        'setup_candidate_count': 2,
+        'setup_candidate_count': 3,
         'pct_closed_above_vwap': 0.5,
         'pct_closed_near_hod': 0.25,
         'median_close_location': 0.7,
@@ -217,10 +233,11 @@ def test_daily_snapshot_summary_groups_include_command_center_sections():
         'Follow-Through',
         'Opening / Intraday Character',
     ]
-    assert ('Active', '1 (50%)') in groups[0]['metrics']
-    assert ('1m ORH Success', '1 (50%)') in groups[1]['metrics']
-    assert ('Close < BE', '1 (50%)') in groups[2]['metrics']
-    assert ('Retested After D0', '1 (50%)') in groups[2]['metrics']
+    assert ('Active', '1 (33%)') in groups[0]['metrics']
+    assert ('1m ORH Success', '2 (67%)') in groups[1]['metrics']
+    assert ('Close < BE', '1 (33%)') in groups[2]['metrics']
+    assert ('Retested After D0', '1 (33%)') in groups[2]['metrics']
+    assert ('Median D3 High', '18.0%') in groups[2]['metrics']
     assert ('Closed Above VWAP %', '50.0%') in groups[3]['metrics']
 
 

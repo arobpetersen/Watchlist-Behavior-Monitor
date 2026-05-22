@@ -4,6 +4,8 @@ import json
 
 import pandas as pd
 
+from src.d3_high_eligibility import eligible_d3_high_pct
+
 
 DISPLAY_NULL = '—'
 
@@ -371,7 +373,7 @@ def daily_snapshot_summary_groups(metrics: dict, monitor_table: pd.DataFrame) ->
 
     current = _numeric_sort(monitor_table['Current %']) / 100 if 'Current %' in monitor_table else pd.Series(dtype=float)
     max_pct = _numeric_sort(monitor_table['Max %']) / 100 if 'Max %' in monitor_table else pd.Series(dtype=float)
-    d3_high = _numeric_sort(monitor_table['D3 High %']) / 100 if 'D3 High %' in monitor_table else pd.Series(dtype=float)
+    d3_high = eligible_d3_high_pct(monitor_table)
     rating = pd.to_numeric(monitor_table['Rating'], errors='coerce') if 'Rating' in monitor_table else pd.Series(dtype=float)
 
     overall = [
@@ -411,7 +413,7 @@ def daily_snapshot_summary_groups(metrics: dict, monitor_table: pd.DataFrame) ->
         ('Retested D0', _count_pct(retested_d0, total)),
         ('Retested After D0', _count_pct(retested_after_d0, total)),
     ]
-    d3_values = d3_high[d3_high > float('-inf')]
+    d3_values = d3_high.dropna()
     if not d3_values.empty:
         follow.append(('Median D3 High', _compact_pct(d3_values.median())))
 
