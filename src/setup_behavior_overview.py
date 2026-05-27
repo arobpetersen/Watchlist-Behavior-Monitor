@@ -1179,7 +1179,9 @@ TRIGGER_EVENT_MAIN_COLUMNS = [
     'Failed After D0',
     'Median Max',
 ]
-TRIGGER_FAILURE_TREND_COLUMNS = ['Trigger', 'Last 2', 'Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
+TRIGGER_FAILURE_TREND_BASE_COLUMNS = ['Trigger', 'Last 2', 'Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
+TRIGGER_FAILURE_TREND_COLUMNS = ['Window', 'PDH', '1m ORH', 'VWAP Reclaim', '5m ORH']
+TRIGGER_SHIFT_READ_COLUMNS = ['Trigger', 'Read']
 TRIGGER_FAILURE_TREND_WINDOW_LABELS = {
     'Last 2 Setup Dates': 'Last 2',
     'Last 5 Setup Dates': 'Last 5',
@@ -1438,9 +1440,9 @@ def _failure_trend_read(last_failed: int, last_triggered: int, previous_failed: 
     return 'Stable'
 
 
-def trigger_failure_trend_matrix(trigger_outcomes: pd.DataFrame | None) -> pd.DataFrame:
+def _trigger_failure_trend_by_trigger(trigger_outcomes: pd.DataFrame | None) -> pd.DataFrame:
     if trigger_outcomes is None or trigger_outcomes.empty:
-        return pd.DataFrame(columns=TRIGGER_FAILURE_TREND_COLUMNS)
+        return pd.DataFrame(columns=TRIGGER_FAILURE_TREND_BASE_COLUMNS)
 
     indexed = trigger_outcomes.set_index(['Window', 'Trigger'])
     rows = []
@@ -1470,7 +1472,33 @@ def trigger_failure_trend_matrix(trigger_outcomes: pd.DataFrame | None) -> pd.Da
             **cells,
             'Read': _failure_trend_read(last_failed, last_triggered, previous_failed, previous_triggered),
         })
-    return pd.DataFrame(rows, columns=TRIGGER_FAILURE_TREND_COLUMNS)
+    return pd.DataFrame(rows, columns=TRIGGER_FAILURE_TREND_BASE_COLUMNS)
+
+
+def trigger_failure_trend_matrix(trigger_outcomes: pd.DataFrame | None) -> pd.DataFrame:
+    by_trigger = _trigger_failure_trend_by_trigger(trigger_outcomes)
+    if by_trigger.empty:
+        return pd.DataFrame(columns=TRIGGER_FAILURE_TREND_COLUMNS)
+
+    trigger_columns = [trigger for trigger in by_trigger['Trigger'].tolist() if trigger != 'Alt Required']
+    if 'Alt Required' in by_trigger['Trigger'].tolist():
+        trigger_columns.append('Alt Required')
+
+    records = []
+    for window_label in TRIGGER_FAILURE_TREND_WINDOW_LABELS.values():
+        row = {'Window': window_label}
+        for trigger_name in trigger_columns:
+            match = by_trigger[by_trigger['Trigger'].eq(trigger_name)]
+            row[trigger_name] = match.iloc[0][window_label] if not match.empty else '—'
+        records.append(row)
+    return pd.DataFrame(records, columns=['Window', *trigger_columns])
+
+
+def trigger_shift_read_table(trigger_outcomes: pd.DataFrame | None) -> pd.DataFrame:
+    by_trigger = _trigger_failure_trend_by_trigger(trigger_outcomes)
+    if by_trigger.empty:
+        return pd.DataFrame(columns=TRIGGER_SHIFT_READ_COLUMNS)
+    return by_trigger[TRIGGER_SHIFT_READ_COLUMNS].reset_index(drop=True)
 
 
 def _percent_point_value(value: Any) -> float | None:
@@ -1643,6 +1671,7 @@ def setup_behavior_overview(con, history: pd.DataFrame | None = None, perf=None)
             'trigger_outcome_by_window': {},
             'trigger_event_main_by_window': {},
             'trigger_failure_trend': pd.DataFrame(columns=TRIGGER_FAILURE_TREND_COLUMNS),
+            'trigger_shift_read': pd.DataFrame(columns=TRIGGER_SHIFT_READ_COLUMNS),
             'failure_timing_by_window': pd.DataFrame(columns=FAILURE_TIMING_WINDOW_COLUMNS),
             'failure_timing_by_trigger': {},
             'trigger_event_shift_highlights': {},
@@ -1699,6 +1728,7 @@ def setup_behavior_overview(con, history: pd.DataFrame | None = None, perf=None)
         'trigger_outcome_by_window': trigger_outcome_by_window_tables(trigger_outcomes),
         'trigger_event_main_by_window': trigger_event_main_tables(trigger_outcomes),
         'trigger_failure_trend': trigger_failure_trend_matrix(trigger_outcomes),
+        'trigger_shift_read': trigger_shift_read_table(trigger_outcomes),
         'failure_timing_by_window': failure_timing_by_window_table(history_by_window),
         'failure_timing_by_trigger': {label: failure_timing_by_trigger_table(history_by_window[label]) for label in summary_by_window},
         'trigger_event_shift_highlights': trigger_event_shift_highlights(trigger_outcomes),

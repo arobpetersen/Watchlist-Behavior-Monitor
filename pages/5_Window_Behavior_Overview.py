@@ -152,8 +152,11 @@ else:
     )
 
     st.subheader('Trigger Success Trend')
-    st.caption('Cells show Success % (successful trigger attempts / triggered attempts). Last 2 is an immediate pulse; Read compares Last 5 vs Previous 5.')
+    st.caption('Cells show Success % (successful trigger attempts / triggered attempts). Last 2 is an immediate pulse.')
     st.dataframe(overview['trigger_failure_trend'], width='stretch', hide_index=True)
+    st.markdown('**Trigger Shift Read**')
+    st.caption('Trigger Shift Read compares Last 5 vs Previous 5.')
+    st.dataframe(overview['trigger_shift_read'], width='stretch', hide_index=True)
 
     st.subheader('Failure Timing Distribution')
     st.caption('Immediate Pulse = Last 2 setup dates. Cells show % of triggered rows (bucket count / triggered rows). D0 Fail includes Trigger Day Fail or Current Status Failed D0.')

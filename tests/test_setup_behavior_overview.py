@@ -35,6 +35,7 @@ from src.setup_behavior_overview import (
     setup_behavior_overview,
     trigger_event_highlight_styles,
     trigger_failure_trend_matrix,
+    trigger_shift_read_table,
     summarize_window,
     trigger_event_shift_highlights,
     trigger_outcome_by_window_tables,
@@ -1099,19 +1100,22 @@ def test_trigger_failure_trend_matrix_uses_triggered_denominator_and_windows():
         {'Trigger': '5m ORH', 'Window': 'Last 20 Setup Dates', 'Triggered': 6, 'Failed': 2},
     ])
 
-    trend = trigger_failure_trend_matrix(comparison).set_index('Trigger')
+    trend = trigger_failure_trend_matrix(comparison).set_index('Window')
+    read = trigger_shift_read_table(comparison).set_index('Trigger')
 
-    assert trend.columns.tolist() == ['Last 2', 'Last 5', 'Previous 5', 'Last 10', 'Last 20', 'Read']
-    assert trend.loc['PDH', 'Last 2'] == '—'
-    assert trend.loc['PDH', 'Last 5'] == '67% (2/3)'
-    assert trend.loc['PDH', 'Previous 5'] == '50% (3/6)'
-    assert trend.loc['PDH', 'Read'] == 'Stable'
-    assert trend.loc['1m ORH', 'Read'] == 'Worse recent'
-    assert trend.loc['VWAP Reclaim', 'Read'] == 'Clean recent'
-    assert trend.loc['5m ORH', 'Last 5'] == '—'
-    assert trend.loc['5m ORH', 'Previous 5'] == '100% (2/2)'
-    assert trend.loc['5m ORH', 'Read'] == 'No recent sample'
-    assert 'Alt Required' not in trend.index
+    assert trend.index.tolist() == ['Last 2', 'Last 5', 'Previous 5', 'Last 10', 'Last 20']
+    assert trend.columns.tolist() == ['PDH', '1m ORH', 'VWAP Reclaim', '5m ORH']
+    assert trend.loc['Last 2', 'PDH'] == '—'
+    assert trend.loc['Last 5', 'PDH'] == '67% (2/3)'
+    assert trend.loc['Previous 5', 'PDH'] == '50% (3/6)'
+    assert read.loc['PDH', 'Read'] == 'Stable'
+    assert read.loc['1m ORH', 'Read'] == 'Worse recent'
+    assert read.loc['VWAP Reclaim', 'Read'] == 'Clean recent'
+    assert trend.loc['Last 5', '5m ORH'] == '—'
+    assert trend.loc['Previous 5', '5m ORH'] == '100% (2/2)'
+    assert read.loc['5m ORH', 'Read'] == 'No recent sample'
+    assert 'Alt Required' not in trend.columns
+    assert 'Alt Required' not in read.index
 
 
 def test_trigger_failure_trend_matrix_reads_improved_stable_and_small_sample():
@@ -1125,13 +1129,14 @@ def test_trigger_failure_trend_matrix_reads_improved_stable_and_small_sample():
         {'Trigger': 'Alt Required', 'Window': 'Last 5 Setup Dates', 'Triggered': 1, 'Failed': 1},
     ])
 
-    trend = trigger_failure_trend_matrix(comparison).set_index('Trigger')
+    trend = trigger_failure_trend_matrix(comparison).set_index('Window')
+    read = trigger_shift_read_table(comparison).set_index('Trigger')
 
-    assert trend.loc['PDH', 'Read'] == 'Improved recent'
-    assert trend.loc['1m ORH', 'Read'] == 'Small sample'
-    assert trend.loc['VWAP Reclaim', 'Read'] == 'Stable'
-    assert trend.loc['Alt Required', 'Read'] == 'Small sample'
-    assert trend.loc['Alt Required', 'Last 5'] == '0% (0/1)'
+    assert read.loc['PDH', 'Read'] == 'Improved recent'
+    assert read.loc['1m ORH', 'Read'] == 'Small sample'
+    assert read.loc['VWAP Reclaim', 'Read'] == 'Stable'
+    assert read.loc['Alt Required', 'Read'] == 'Small sample'
+    assert trend.loc['Last 5', 'Alt Required'] == '0% (0/1)'
 
 
 def test_failure_timing_by_window_table_returns_overview_windows():
@@ -1972,7 +1977,9 @@ def test_setup_behavior_page_uses_successful_triggers_section_title():
     assert "st.expander('Failure Timing by Trigger'" in page
     assert 'Cells show % of triggered rows (bucket count / triggered rows).' in page
     assert 'Immediate Pulse = Last 2 setup dates' in page
-    assert 'Last 2 is an immediate pulse; Read compares Last 5 vs Previous 5.' in page
+    assert 'Last 2 is an immediate pulse.' in page
+    assert "st.markdown('**Trigger Shift Read**')" in page
+    assert 'Trigger Shift Read compares Last 5 vs Previous 5.' in page
     assert "st.button('Refresh derived views from database'" in page
     assert 'refresh_derived_watchlist_views(load_setup_behavior_overview, db_path=db_path, rebuild_materialized_history=True)' in page
     assert "PerfTimer('Window Behavior Overview')" in page
@@ -2057,6 +2064,7 @@ def test_setup_behavior_overview_handles_zero_setup_dates():
     assert out['trigger_outcome_by_window'] == {}
     assert out['trigger_event_main_by_window'] == {}
     assert out['trigger_failure_trend'].empty
+    assert out['trigger_shift_read'].empty
     assert out['failure_timing_by_window'].empty
     assert out['failure_timing_by_trigger'] == {}
     assert out['trigger_event_shift_highlights'] == {}
